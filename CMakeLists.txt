@@ -149,6 +149,10 @@ add_dependencies(Hdr10Plus::hdr10plus ep_libhdr10plus)
 add_executable(vmavificient
     src/main.c
     src/media_info.c
+    src/media_tracks.c
+    src/media_hdr.c
+    src/media_crop.c
+    src/media_analysis.c
     src/utils.c
 )
 
