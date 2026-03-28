@@ -691,4 +691,4 @@ FodyWeavers.xsd
 *.midi
 
 .claude
-build
+.tmdb_api_key
