@@ -4,6 +4,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "media_analysis.h"
 #include "media_crop.h"
@@ -54,9 +55,24 @@ int main(int argc, char *argv[]) {
   if (tracks.error == 0) {
     printf("\nAudio tracks (%d):\n", tracks.audio_count);
     for (int i = 0; i < tracks.audio_count; i++) {
-      printf("  #%d  %-6s  %-8s  %s\n", tracks.audio[i].index,
-             tracks.audio[i].language, tracks.audio[i].codec,
+      printf("  #%d  %-6s  %-8s  %dch  %lld kbps  %s\n",
+             tracks.audio[i].index, tracks.audio[i].language,
+             tracks.audio[i].codec, tracks.audio[i].channels,
+             (long long)(tracks.audio[i].bitrate / 1000),
              tracks.audio[i].name);
+    }
+
+    /* ---- Best audio per language ---- */
+    int best_count = 0;
+    TrackInfo *best = select_best_audio_per_language(&tracks, &best_count);
+    if (best) {
+      printf("\nBest audio per language (%d):\n", best_count);
+      for (int i = 0; i < best_count; i++) {
+        printf("  #%d  %-6s  %-8s  %dch  %lld kbps  %s\n", best[i].index,
+               best[i].language, best[i].codec, best[i].channels,
+               (long long)(best[i].bitrate / 1000), best[i].name);
+      }
+      free(best);
     }
 
     printf("\nSubtitle tracks (%d):\n", tracks.subtitle_count);

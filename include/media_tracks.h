@@ -6,6 +6,8 @@
 #ifndef MEDIA_TRACKS_H
 #define MEDIA_TRACKS_H
 
+#include <stdint.h>
+
 /**
  * @brief Metadata for a single audio or subtitle track.
  */
@@ -14,6 +16,10 @@ typedef struct {
   char name[256];    /**< Track title (empty string if absent). */
   char language[64]; /**< ISO 639 language code (empty string if absent). */
   char codec[64];    /**< Short codec name (e.g. "aac", "srt"). */
+  int channels;      /**< Number of audio channels (0 for subtitles). */
+  int64_t bitrate;   /**< Bitrate in bits/s (0 if unknown). */
+  int codec_id;      /**< AVCodecID value (for internal ranking, stored as int). */
+  int profile;       /**< Codec profile (e.g. DTS-HD MA vs plain DTS). */
 } TrackInfo;
 
 /**
@@ -44,5 +50,17 @@ MediaTracks get_media_tracks(const char *path);
  *                zero-initialised or already-freed struct.
  */
 void free_media_tracks(MediaTracks *tracks);
+
+/**
+ * @brief Select the best audio track for each language present.
+ *
+ * Compares tracks by codec quality tier, then channel count, then bitrate.
+ *
+ * @param tracks     A populated MediaTracks (from @ref get_media_tracks).
+ * @param out_count  Receives the number of selected tracks.
+ * @return Heap-allocated array of TrackInfo (caller must @c free), or NULL.
+ */
+TrackInfo *select_best_audio_per_language(const MediaTracks *tracks,
+                                          int *out_count);
 
 #endif /* MEDIA_TRACKS_H */
