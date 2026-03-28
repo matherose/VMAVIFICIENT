@@ -26,7 +26,7 @@ typedef struct {
  *
  * The composite grain score is:
  * @code
- *   grain_score = 0.7 * (avg_tout / 100) + 0.3 * (1 - avg_yrange / 255)
+ *   grain_score = 0.7 * (avg_tout / 100) + 0.3 * (1 - avg_yrange / max_y)
  * @endcode
  *
  * Higher values indicate more visible grain / noise.

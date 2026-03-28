@@ -20,6 +20,7 @@
 #include <libavutil/error.h>
 #include <libavutil/frame.h>
 #include <libavutil/opt.h>
+#include <libavutil/pixdesc.h>
 #include <libavutil/rational.h>
 
 /** Number of sample points spread across the video. */
@@ -212,10 +213,18 @@ GrainScore get_grain_score(const char *path) {
 
     /*
      * Normalise Y-Range: a narrow range (low contrast / flat image) can
-     * indicate noise dominates the signal.  Full range = 255.
-     * Invert so that narrow range → higher grain score.
+     * indicate noise dominates the signal.  Invert so that narrow range
+     * → higher grain score.
+     *
+     * The maximum Y value depends on the pixel format's bit depth
+     * (255 for 8-bit, 1023 for 10-bit, etc.).
      */
-    double yrange_norm = 1.0 - (result.avg_yrange / 255.0);
+    const AVPixFmtDescriptor *pix_desc =
+        av_pix_fmt_desc_get(dec_ctx->pix_fmt);
+    int bits = pix_desc ? pix_desc->comp[0].depth : 8;
+    double yrange_max = (1 << bits) - 1;
+
+    double yrange_norm = 1.0 - (result.avg_yrange / yrange_max);
     if (yrange_norm < 0.0)
       yrange_norm = 0.0;
 
