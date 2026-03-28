@@ -24,7 +24,7 @@
 /** Number of sample points for crop detection. */
 #define CROP_SAMPLES 6
 /** Frames to feed per sample so cropdetect stabilises. */
-#define WARMUP_FRAMES 5
+#define WARMUP_FRAMES 24
 
 static int cmp_int(const void *a, const void *b) {
   return *(const int *)a - *(const int *)b;
@@ -61,6 +61,70 @@ static int read_crop_metadata(AVFrame *filt_frame, int frame_w, int frame_h,
   *left = cx;
   *right = frame_w - (cx + cw);
   return 1;
+}
+
+/**
+ * @brief Build a buffersrc -> cropdetect -> buffersink filter graph.
+ *
+ * Uses avfilter_graph_parse_ptr so FFmpeg automatically inserts pixel
+ * format conversion when the source format (e.g. yuv420p10le) is not
+ * natively supported by cropdetect.
+ */
+static int build_cropdetect_graph(AVFilterGraph **graph,
+                                  AVFilterContext **src_ctx,
+                                  AVFilterContext **sink_ctx,
+                                  AVCodecContext *dec_ctx) {
+  *graph = avfilter_graph_alloc();
+  if (!*graph)
+    return AVERROR(ENOMEM);
+
+  const AVFilter *buffersrc = avfilter_get_by_name("buffer");
+  const AVFilter *buffersink = avfilter_get_by_name("buffersink");
+
+  char args[512];
+  snprintf(args, sizeof(args),
+           "video_size=%dx%d:pix_fmt=%d:time_base=1/25:pixel_aspect=1/1"
+           ":colorspace=%d:range=%d",
+           dec_ctx->width, dec_ctx->height, dec_ctx->pix_fmt,
+           dec_ctx->colorspace, dec_ctx->color_range);
+
+  int ret;
+  ret = avfilter_graph_create_filter(src_ctx, buffersrc, "in", args, NULL,
+                                     *graph);
+  if (ret < 0)
+    return ret;
+
+  ret = avfilter_graph_create_filter(sink_ctx, buffersink, "out", NULL, NULL,
+                                     *graph);
+  if (ret < 0)
+    return ret;
+
+  AVFilterInOut *inputs = avfilter_inout_alloc();
+  AVFilterInOut *outputs = avfilter_inout_alloc();
+  if (!inputs || !outputs) {
+    avfilter_inout_free(&inputs);
+    avfilter_inout_free(&outputs);
+    return AVERROR(ENOMEM);
+  }
+
+  outputs->name = av_strdup("in");
+  outputs->filter_ctx = *src_ctx;
+  outputs->pad_idx = 0;
+  outputs->next = NULL;
+
+  inputs->name = av_strdup("out");
+  inputs->filter_ctx = *sink_ctx;
+  inputs->pad_idx = 0;
+  inputs->next = NULL;
+
+  ret = avfilter_graph_parse_ptr(*graph, "cropdetect=round=2", &inputs,
+                                 &outputs, NULL);
+  avfilter_inout_free(&inputs);
+  avfilter_inout_free(&outputs);
+  if (ret < 0)
+    return ret;
+
+  return avfilter_graph_config(*graph, NULL);
 }
 
 CropInfo get_crop_info(const char *path) {
@@ -140,40 +204,10 @@ CropInfo get_crop_info(const char *path) {
 
     /* Build a fresh filter graph for each sample point so cropdetect
      * state is clean. */
-    AVFilterGraph *graph = avfilter_graph_alloc();
-    if (!graph)
-      continue;
+    AVFilterGraph *graph = NULL;
+    AVFilterContext *src_ctx = NULL, *sink_ctx = NULL;
 
-    const AVFilter *buffersrc = avfilter_get_by_name("buffer");
-    const AVFilter *buffersink = avfilter_get_by_name("buffersink");
-    const AVFilter *cropdetect = avfilter_get_by_name("cropdetect");
-
-    char args[512];
-    snprintf(args, sizeof(args),
-             "video_size=%dx%d:pix_fmt=%d:time_base=1/25:pixel_aspect=1/1"
-             ":colorspace=%d:range=%d",
-             dec_ctx->width, dec_ctx->height, dec_ctx->pix_fmt,
-             dec_ctx->colorspace, dec_ctx->color_range);
-
-    AVFilterContext *src_ctx = NULL, *sink_ctx = NULL, *crop_ctx = NULL;
-    int ok = 1;
-    if (avfilter_graph_create_filter(&src_ctx, buffersrc, "in", args, NULL,
-                                     graph) < 0)
-      ok = 0;
-    if (ok && avfilter_graph_create_filter(&crop_ctx, cropdetect, "cropdetect",
-                                           "round=2", NULL, graph) < 0)
-      ok = 0;
-    if (ok && avfilter_graph_create_filter(&sink_ctx, buffersink, "out", NULL,
-                                           NULL, graph) < 0)
-      ok = 0;
-    if (ok && avfilter_link(src_ctx, 0, crop_ctx, 0) < 0)
-      ok = 0;
-    if (ok && avfilter_link(crop_ctx, 0, sink_ctx, 0) < 0)
-      ok = 0;
-    if (ok && avfilter_graph_config(graph, NULL) < 0)
-      ok = 0;
-
-    if (!ok) {
+    if (build_cropdetect_graph(&graph, &src_ctx, &sink_ctx, dec_ctx) < 0) {
       avfilter_graph_free(&graph);
       continue;
     }

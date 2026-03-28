@@ -64,6 +64,9 @@ ExternalProject_Add(ep_ffmpeg
             --disable-programs
             --disable-doc
             --disable-autodetect
+            --enable-gpl
+            --disable-postproc
+            --enable-filter=cropdetect
     BUILD_COMMAND   make -j${NPROC}
     INSTALL_COMMAND make install
     BUILD_IN_SOURCE TRUE
