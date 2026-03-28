@@ -6,6 +6,8 @@
 #ifndef UTILS_H
 #define UTILS_H
 
+#include <stdbool.h>
+
 /** @brief Default test media file used when no argument is provided. */
 #define DEFAULT_TEST_FILE "bbb_sunflower_1080p_30fps_normal.mp4"
 
@@ -23,5 +25,10 @@ void init_logging(void);
  * @return 0 on success, -1 if any check fails.
  */
 int check_dependencies(void);
+
+/**
+ * @brief Case-insensitive substring search (ASCII-safe).
+ */
+bool str_contains_ci(const char *haystack, const char *needle);
 
 #endif /* UTILS_H */

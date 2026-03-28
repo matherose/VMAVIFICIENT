@@ -101,6 +101,7 @@ HdrInfo get_hdr_info(const char *path) {
                   .has_dolby_vision = 0,
                   .dv_profile = -1,
                   .dv_level = -1,
+                  .has_hdr10 = 0,
                   .has_hdr10plus = 0};
   AVFormatContext *fmt_ctx = NULL;
   char errbuf[AV_ERROR_MAX_STRING_SIZE];
@@ -139,9 +140,12 @@ HdrInfo get_hdr_info(const char *path) {
   /* Dolby Vision: codec-level side data, no decoding required. */
   detect_dovi(codecpar, &info);
 
-  /* HDR10+: only probe if the stream uses PQ transfer characteristics. */
-  if (codecpar->color_trc == AVCOL_TRC_SMPTE2084)
+  /* HDR10 base: PQ transfer characteristics indicate HDR10 or higher. */
+  if (codecpar->color_trc == AVCOL_TRC_SMPTE2084) {
+    info.has_hdr10 = 1;
+    /* HDR10+: probe decoded frames for dynamic metadata. */
     detect_hdr10plus(fmt_ctx, video_idx, &info);
+  }
 
   avformat_close_input(&fmt_ctx);
   return info;

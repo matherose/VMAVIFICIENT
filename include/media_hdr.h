@@ -15,6 +15,7 @@ typedef struct {
                          */
   int dv_profile;       /**< DV profile number (-1 if not present). */
   int dv_level;         /**< DV level number (-1 if not present). */
+  int has_hdr10;        /**< Non-zero if PQ transfer (SMPTE ST 2084) is used. */
   int has_hdr10plus;    /**< Non-zero if HDR10+ dynamic metadata is detected. */
 } HdrInfo;
 

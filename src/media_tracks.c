@@ -4,6 +4,7 @@
  */
 
 #include "media_tracks.h"
+#include "utils.h"
 
 #include <ctype.h>
 #include <stdbool.h>
@@ -16,28 +17,6 @@
 #include <libavformat/avformat.h>
 #include <libavutil/dict.h>
 #include <libavutil/error.h>
-
-/**
- * @brief Case-insensitive substring search (ASCII-safe).
- */
-static bool str_contains_ci(const char *haystack, const char *needle) {
-  size_t hlen = strlen(haystack), nlen = strlen(needle);
-  if (nlen > hlen)
-    return false;
-  for (size_t i = 0; i <= hlen - nlen; i++) {
-    bool match = true;
-    for (size_t j = 0; j < nlen; j++) {
-      if (tolower((unsigned char)haystack[i + j]) !=
-          tolower((unsigned char)needle[j])) {
-        match = false;
-        break;
-      }
-    }
-    if (match)
-      return true;
-  }
-  return false;
-}
 
 /**
  * @brief Language name to ISO 639-2/B code mapping.

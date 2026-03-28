@@ -6,6 +6,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 include(ExternalProject)
+include(FetchContent)
 include(ProcessorCount)
 
 ProcessorCount(NPROC)
@@ -24,6 +25,7 @@ if(NOT CARGO_CINSTALL)
         "Install it with:  cargo install cargo-c")
 endif()
 find_package(Threads REQUIRED)
+find_package(CURL REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Dependency install prefixes
@@ -47,6 +49,20 @@ set(LIBDOVI_GIT_TAG         "libdovi-3.3.2")
 set(LIBDOVI_VERSION         "3.3.2")
 set(LIBHDR10PLUS_GIT_TAG    "libhdr10plus-2.1.5")
 set(LIBHDR10PLUS_VERSION    "2.1.5")
+set(CJSON_GIT_TAG           "v1.7.18")
+
+# ===========================================================================
+# cJSON  (lightweight JSON parser – fetched via FetchContent)
+# ===========================================================================
+FetchContent_Declare(cjson
+    GIT_REPOSITORY  https://github.com/DaveGamble/cJSON.git
+    GIT_TAG         ${CJSON_GIT_TAG}
+    GIT_SHALLOW     TRUE
+)
+set(ENABLE_CJSON_TEST OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_AND_STATIC_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(cjson)
 
 # ===========================================================================
 # FFmpeg  (configure / make)
@@ -156,11 +172,14 @@ add_executable(vmavificient
     src/media_hdr.c
     src/media_crop.c
     src/media_analysis.c
+    src/media_naming.c
+    src/tmdb.c
     src/utils.c
 )
 
 target_include_directories(vmavificient PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
+    "${cjson_SOURCE_DIR}"
 )
 
 # Link order matters for static archives: dependents before dependencies.
@@ -174,6 +193,8 @@ target_link_libraries(vmavificient PRIVATE
     Dovi::dovi
     Hdr10Plus::hdr10plus
     Threads::Threads
+    CURL::libcurl
+    cjson
     m
 )
 
