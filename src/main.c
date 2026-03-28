@@ -13,6 +13,8 @@
 #include "utils.h"
 
 int main(int argc, char *argv[]) {
+  init_logging();
+
   if (check_dependencies() != 0) {
     fprintf(stderr, "Fatal: dependency sanity check failed.\n");
     return 1;

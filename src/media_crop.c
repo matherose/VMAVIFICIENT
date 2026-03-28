@@ -150,8 +150,10 @@ CropInfo get_crop_info(const char *path) {
 
     char args[512];
     snprintf(args, sizeof(args),
-             "video_size=%dx%d:pix_fmt=%d:time_base=1/25:pixel_aspect=1/1",
-             dec_ctx->width, dec_ctx->height, dec_ctx->pix_fmt);
+             "video_size=%dx%d:pix_fmt=%d:time_base=1/25:pixel_aspect=1/1"
+             ":colorspace=%d:range=%d",
+             dec_ctx->width, dec_ctx->height, dec_ctx->pix_fmt,
+             dec_ctx->colorspace, dec_ctx->color_range);
 
     AVFilterContext *src_ctx = NULL, *sink_ctx = NULL, *crop_ctx = NULL;
     int ok = 1;

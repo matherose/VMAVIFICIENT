@@ -10,6 +10,11 @@
 #define DEFAULT_TEST_FILE "bbb_sunflower_1080p_30fps_normal.mp4"
 
 /**
+ * @brief Set FFmpeg log level to errors-only (suppress verbose warnings).
+ */
+void init_logging(void);
+
+/**
  * @brief Verify that all linked libraries report valid versions.
  *
  * Checks FFmpeg, libdovi and libhdr10plus. On failure an error message

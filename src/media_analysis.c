@@ -45,8 +45,10 @@ static int build_signalstats_graph(AVFilterGraph **graph,
 
   char args[512];
   snprintf(args, sizeof(args),
-           "video_size=%dx%d:pix_fmt=%d:time_base=1/25:pixel_aspect=1/1",
-           dec_ctx->width, dec_ctx->height, dec_ctx->pix_fmt);
+           "video_size=%dx%d:pix_fmt=%d:time_base=1/25:pixel_aspect=1/1"
+           ":colorspace=%d:range=%d",
+           dec_ctx->width, dec_ctx->height, dec_ctx->pix_fmt,
+           dec_ctx->colorspace, dec_ctx->color_range);
 
   int ret;
   ret = avfilter_graph_create_filter(src_ctx, buffersrc, "in", args, NULL,
