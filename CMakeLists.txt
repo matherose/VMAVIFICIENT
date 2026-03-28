@@ -146,11 +146,14 @@ add_dependencies(Hdr10Plus::hdr10plus ep_libhdr10plus)
 # ===========================================================================
 # Executable
 # ===========================================================================
-add_executable(vmavificient main.c)
+add_executable(vmavificient
+    src/main.c
+    src/media_info.c
+    src/utils.c
+)
 
-target_compile_definitions(vmavificient PRIVATE
-    LIBDOVI_VERSION="${LIBDOVI_VERSION}"
-    LIBHDR10PLUS_VERSION="${LIBHDR10PLUS_VERSION}"
+target_include_directories(vmavificient PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"
 )
 
 # Link order matters for static archives: dependents before dependencies.
@@ -173,5 +176,22 @@ if(APPLE)
         iconv
         "-framework CoreFoundation"
         "-framework Security"
+    )
+endif()
+
+# ===========================================================================
+# Doxygen documentation (optional)
+# ===========================================================================
+find_package(Doxygen QUIET)
+if(DOXYGEN_FOUND)
+    set(DOXYGEN_PROJECT_NAME        "${PROJECT_NAME}")
+    set(DOXYGEN_PROJECT_NUMBER      "${PROJECT_VERSION}")
+    set(DOXYGEN_OUTPUT_DIRECTORY     "${CMAKE_BINARY_DIR}/docs")
+    set(DOXYGEN_EXTRACT_ALL          YES)
+    set(DOXYGEN_OPTIMIZE_OUTPUT_FOR_C YES)
+    doxygen_add_docs(docs
+        "${CMAKE_SOURCE_DIR}/include"
+        "${CMAKE_SOURCE_DIR}/src"
+        COMMENT "Generating API documentation with Doxygen"
     )
 endif()
