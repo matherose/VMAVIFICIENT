@@ -644,4 +644,4 @@ FodyWeavers.xsd
 # End of https://www.toptal.com/developers/gitignore/api/c,c++,visualstudiocode,visualstudio,vim,emacs,windows,macos,linux,cmake
 
 .claude
-.
+build
