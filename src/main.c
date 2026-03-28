@@ -77,9 +77,15 @@ int main(int argc, char *argv[]) {
 
     printf("\nSubtitle tracks (%d):\n", tracks.subtitle_count);
     for (int i = 0; i < tracks.subtitle_count; i++) {
-      printf("  #%d  %-6s  %-8s  %s\n", tracks.subtitles[i].index,
-             tracks.subtitles[i].language, tracks.subtitles[i].codec,
-             tracks.subtitles[i].name);
+      const char *type = "full";
+      if (tracks.subtitles[i].is_forced)
+        type = "forced";
+      else if (tracks.subtitles[i].is_sdh)
+        type = "sdh";
+      printf("  #%d  %-6s  %-18s  [%-6s]  %s\n", tracks.subtitles[i].index,
+             tracks.subtitles[i].language[0] ? tracks.subtitles[i].language
+                                             : "und",
+             tracks.subtitles[i].codec, type, tracks.subtitles[i].name);
     }
     free_media_tracks(&tracks);
   }

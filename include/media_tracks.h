@@ -20,6 +20,8 @@ typedef struct {
   int64_t bitrate;   /**< Bitrate in bits/s (0 if unknown). */
   int codec_id;      /**< AVCodecID value (for internal ranking, stored as int). */
   int profile;       /**< Codec profile (e.g. DTS-HD MA vs plain DTS). */
+  int is_forced;     /**< 1 if track is forced (disposition or title hint). */
+  int is_sdh;        /**< 1 if track is SDH / closed captions. */
 } TrackInfo;
 
 /**

@@ -5,6 +5,7 @@
 
 #include "media_tracks.h"
 
+#include <ctype.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +16,137 @@
 #include <libavformat/avformat.h>
 #include <libavutil/dict.h>
 #include <libavutil/error.h>
+
+/**
+ * @brief Case-insensitive substring search (ASCII-safe).
+ */
+static bool str_contains_ci(const char *haystack, const char *needle) {
+  size_t hlen = strlen(haystack), nlen = strlen(needle);
+  if (nlen > hlen)
+    return false;
+  for (size_t i = 0; i <= hlen - nlen; i++) {
+    bool match = true;
+    for (size_t j = 0; j < nlen; j++) {
+      if (tolower((unsigned char)haystack[i + j]) !=
+          tolower((unsigned char)needle[j])) {
+        match = false;
+        break;
+      }
+    }
+    if (match)
+      return true;
+  }
+  return false;
+}
+
+/**
+ * @brief Language name to ISO 639-2/B code mapping.
+ *
+ * Maps common title strings (in multiple languages) to 3-letter codes.
+ * Checked with case-insensitive substring match against the track title.
+ * Entries are ordered longest-first within each language to avoid
+ * partial matches (e.g. "fran" matching before "francais").
+ */
+static const struct {
+  const char *pattern;
+  const char *code;
+} lang_map[] = {
+    /* French */
+    {"fran\xc3\xa7""ais", "fre"},  /* français (UTF-8) */
+    {"francais", "fre"},
+    {"french", "fre"},
+    /* English */
+    {"english", "eng"},
+    {"anglais", "eng"},
+    /* German */
+    {"deutsch", "ger"},
+    {"german", "ger"},
+    {"allemand", "ger"},
+    /* Spanish */
+    {"espa\xc3\xb1""ol", "spa"},   /* español (UTF-8) */
+    {"espanol", "spa"},
+    {"spanish", "spa"},
+    {"castillan", "spa"},
+    /* Italian */
+    {"italiano", "ita"},
+    {"italian", "ita"},
+    {"italien", "ita"},
+    /* Portuguese */
+    {"portugu\xc3\xaa""s", "por"}, /* português (UTF-8) */
+    {"portugues", "por"},
+    {"portuguese", "por"},
+    /* Dutch */
+    {"nederlands", "dut"},
+    {"dutch", "dut"},
+    /* Russian */
+    {"russian", "rus"},
+    {"russe", "rus"},
+    /* Japanese */
+    {"japanese", "jpn"},
+    {"japonais", "jpn"},
+    /* Chinese */
+    {"chinese", "chi"},
+    {"chinois", "chi"},
+    /* Korean */
+    {"korean", "kor"},
+    /* Arabic */
+    {"arabic", "ara"},
+    {"arabe", "ara"},
+    /* Polish */
+    {"polish", "pol"},
+    {"polonais", "pol"},
+    /* Swedish */
+    {"swedish", "swe"},
+    /* Norwegian */
+    {"norwegian", "nor"},
+    /* Danish */
+    {"danish", "dan"},
+    /* Finnish */
+    {"finnish", "fin"},
+    /* Turkish */
+    {"turkish", "tur"},
+    /* Hindi */
+    {"hindi", "hin"},
+    {NULL, NULL},
+};
+
+/**
+ * @brief Guess ISO 639-2/B language code from a track title string.
+ *
+ * @return Language code (static string) or NULL if no match.
+ */
+static const char *guess_language_from_title(const char *title) {
+  if (!title || !title[0])
+    return NULL;
+  for (int i = 0; lang_map[i].pattern; i++) {
+    if (str_contains_ci(title, lang_map[i].pattern))
+      return lang_map[i].code;
+  }
+  return NULL;
+}
+
+/**
+ * @brief Detect if a track title indicates forced subtitles.
+ */
+static bool title_indicates_forced(const char *title) {
+  if (!title || !title[0])
+    return false;
+  return str_contains_ci(title, "forced") ||
+         str_contains_ci(title, "forc\xc3\xa9") || /* forcé */
+         str_contains_ci(title, "force");
+}
+
+/**
+ * @brief Detect if a track title indicates SDH / closed captions.
+ */
+static bool title_indicates_sdh(const char *title) {
+  if (!title || !title[0])
+    return false;
+  return str_contains_ci(title, "sdh") ||
+         str_contains_ci(title, "closed caption") ||
+         str_contains_ci(title, "hearing impaired") ||
+         str_contains_ci(title, "malentendant");
+}
 
 /**
  * @brief Fill a TrackInfo from an AVStream.
@@ -31,10 +163,17 @@ static void fill_track(TrackInfo *t, AVStream *stream) {
     t->name[0] = '\0';
 
   tag = av_dict_get(stream->metadata, "language", NULL, 0);
-  if (tag)
+  if (tag && strcmp(tag->value, "und") != 0)
     snprintf(t->language, sizeof(t->language), "%s", tag->value);
   else
     t->language[0] = '\0';
+
+  /* If no language tag, try to guess from title. */
+  if (!t->language[0]) {
+    const char *guessed = guess_language_from_title(t->name);
+    if (guessed)
+      snprintf(t->language, sizeof(t->language), "%s", guessed);
+  }
 
   snprintf(t->codec, sizeof(t->codec), "%s",
            avcodec_get_name(stream->codecpar->codec_id));
@@ -43,6 +182,16 @@ static void fill_track(TrackInfo *t, AVStream *stream) {
   t->bitrate = stream->codecpar->bit_rate;
   t->codec_id = stream->codecpar->codec_id;
   t->profile = stream->codecpar->profile;
+
+  /* Forced: check disposition flag first, then title keywords. */
+  t->is_forced = (stream->disposition & AV_DISPOSITION_FORCED) ? 1 : 0;
+  if (!t->is_forced && stream->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE)
+    t->is_forced = title_indicates_forced(t->name) ? 1 : 0;
+
+  /* SDH: check disposition and title keywords. */
+  t->is_sdh = (stream->disposition & AV_DISPOSITION_HEARING_IMPAIRED) ? 1 : 0;
+  if (!t->is_sdh && stream->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE)
+    t->is_sdh = title_indicates_sdh(t->name) ? 1 : 0;
 }
 
 MediaTracks get_media_tracks(const char *path) {
