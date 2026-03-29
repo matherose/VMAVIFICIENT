@@ -15,6 +15,7 @@
 #include "media_info.h"
 #include "media_naming.h"
 #include "media_tracks.h"
+#include "rpu_extract.h"
 #include "tmdb.h"
 #include "utils.h"
 
@@ -237,27 +238,27 @@ int main(int argc, char *argv[]) {
 
       printf("\nOutput filename:\n  %s\n", output_name);
 
+      /* Strip .mkv to get base name. */
+      char base_name[1024];
+      snprintf(base_name, sizeof(base_name), "%s", output_name);
+      char *ext = strrchr(base_name, '.');
+      if (ext && strcmp(ext, ".mkv") == 0)
+        *ext = '\0';
+
+      /* Output dir: same directory as input file. */
+      char output_dir[2048];
+      snprintf(output_dir, sizeof(output_dir), "%s", filepath);
+      char *last_slash = strrchr(output_dir, '/');
+      if (last_slash)
+        *(last_slash + 1) = '\0';
+      else
+        snprintf(output_dir, sizeof(output_dir), "./");
+
       /* ---- OPUS audio encoding ---- */
       int enc_best_count = 0;
       TrackInfo *enc_best =
           select_best_audio_per_language(&tracks, &enc_best_count);
       if (enc_best && enc_best_count > 0) {
-        /* Strip .mkv to get base name. */
-        char base_name[1024];
-        snprintf(base_name, sizeof(base_name), "%s", output_name);
-        char *ext = strrchr(base_name, '.');
-        if (ext && strcmp(ext, ".mkv") == 0)
-          *ext = '\0';
-
-        /* Output dir: same directory as input file. */
-        char output_dir[2048];
-        snprintf(output_dir, sizeof(output_dir), "%s", filepath);
-        char *last_slash = strrchr(output_dir, '/');
-        if (last_slash)
-          *(last_slash + 1) = '\0';
-        else
-          snprintf(output_dir, sizeof(output_dir), "./");
-
         printf("\nEncoding %d audio track(s) to OPUS...\n", enc_best_count);
         for (int i = 0; i < enc_best_count; i++) {
           char opus_name[2048];
@@ -284,6 +285,25 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "  [FAIL] %s (error %d)\n", opus_name, r.error);
         }
         free(enc_best);
+      }
+
+      /* ---- RPU extraction (Dolby Vision) ---- */
+      if (hdr.error == 0 && hdr.has_dolby_vision) {
+        char rpu_name[2048];
+        build_rpu_filename(rpu_name, sizeof(rpu_name), base_name);
+
+        char rpu_path[4096];
+        snprintf(rpu_path, sizeof(rpu_path), "%s%s", output_dir, rpu_name);
+
+        printf("\nExtracting Dolby Vision RPU...\n");
+        RpuExtractResult rpu_res = extract_rpu(filepath, rpu_path);
+
+        if (rpu_res.skipped)
+          printf("  [SKIP] %s (already exists)\n", rpu_name);
+        else if (rpu_res.error == 0)
+          printf("  [OK]   %s (%d RPUs)\n", rpu_name, rpu_res.rpu_count);
+        else
+          fprintf(stderr, "  [FAIL] %s (error %d)\n", rpu_name, rpu_res.error);
       }
     }
   }
