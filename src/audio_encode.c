@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -163,6 +164,60 @@ static int encode_from_fifo(AVAudioFifo *fifo, AVCodecContext *enc_ctx,
   }
 
   return 0;
+}
+
+/**
+ * @brief Print a progress bar with speed and ETA to stderr.
+ *
+ * Format: "  [=========>          ] 45%  12.5x  ETA 02:15"
+ * Speed is a realtime multiplier (seconds of audio per wall-clock second).
+ */
+static void print_progress(int64_t current_pts, int64_t total_samples,
+                           time_t start_time) {
+  if (total_samples <= 0)
+    return;
+
+  double pct = (double)current_pts / total_samples;
+  if (pct > 1.0)
+    pct = 1.0;
+
+  int bar_width = 30;
+  int filled = (int)(pct * bar_width);
+
+  char bar[64];
+  for (int i = 0; i < bar_width; i++) {
+    if (i < filled)
+      bar[i] = '=';
+    else if (i == filled)
+      bar[i] = '>';
+    else
+      bar[i] = ' ';
+  }
+  bar[bar_width] = '\0';
+
+  time_t now = time(NULL);
+  double elapsed = difftime(now, start_time);
+
+  /* Speed: audio seconds encoded per wall-clock second. */
+  char speed_str[32] = "";
+  if (elapsed > 1.0) {
+    double audio_secs = (double)current_pts / 48000.0;
+    double speed = audio_secs / elapsed;
+    snprintf(speed_str, sizeof(speed_str), "%.1fx", speed);
+  }
+
+  /* ETA. */
+  char eta_str[32] = "";
+  if (pct > 0.01 && elapsed > 1.0) {
+    double remaining = elapsed * (1.0 - pct) / pct;
+    int eta_min = (int)(remaining / 60);
+    int eta_sec = (int)remaining % 60;
+    snprintf(eta_str, sizeof(eta_str), "ETA %02d:%02d", eta_min, eta_sec);
+  }
+
+  fprintf(stderr, "\r  [%s] %3d%%  %6s  %s   ", bar, (int)(pct * 100),
+          speed_str, eta_str);
+  fflush(stderr);
 }
 
 OpusEncodeResult encode_track_to_opus(const char *input_path,
@@ -350,6 +405,16 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
     goto cleanup;
   }
 
+  /* Total samples at output rate for progress tracking. */
+  int64_t total_samples = 0;
+  if (ifmt_ctx->duration > 0)
+    total_samples = (int64_t)((double)ifmt_ctx->duration / AV_TIME_BASE * 48000);
+  else if (in_stream->duration > 0)
+    total_samples = av_rescale_q(in_stream->duration, in_stream->time_base,
+                                 (AVRational){1, 48000});
+
+  time_t start_time = time(NULL);
+  time_t last_progress = 0;
   int64_t next_pts = 0;
 
   while (av_read_frame(ifmt_ctx, pkt) >= 0) {
@@ -399,6 +464,13 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
       if (ret < 0) {
         result.error = ret;
         goto cleanup;
+      }
+
+      /* Update progress at most once per second. */
+      time_t now = time(NULL);
+      if (now != last_progress) {
+        print_progress(next_pts, total_samples, start_time);
+        last_progress = now;
       }
     }
   }
@@ -456,6 +528,16 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
   }
 
   av_write_trailer(ofmt_ctx);
+
+  /* Final progress: 100%. */
+  print_progress(total_samples, total_samples, start_time);
+  time_t end_time = time(NULL);
+  int elapsed = (int)difftime(end_time, start_time);
+  fprintf(stderr, "\r  [");
+  for (int i = 0; i < 30; i++)
+    fprintf(stderr, "=");
+  fprintf(stderr, "] 100%%  Done in %02d:%02d          \n", elapsed / 60,
+          elapsed % 60);
 
   /* ── Verify output ── */
   ret = verify_opus_file(output_path);
