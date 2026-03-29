@@ -32,12 +32,14 @@ find_package(CURL REQUIRED)
 # ---------------------------------------------------------------------------
 set(DEPS_PREFIX    "${CMAKE_BINARY_DIR}/deps")
 set(FF_INSTALL     "${DEPS_PREFIX}/ffmpeg")
+set(OPUS_INSTALL   "${DEPS_PREFIX}/opus")
 set(DOVI_INSTALL   "${DEPS_PREFIX}/libdovi")
 set(HDR10_INSTALL  "${DEPS_PREFIX}/libhdr10plus")
 
 # CMake validates INTERFACE_INCLUDE_DIRECTORIES at configure time,
 # so the directories must already exist even though headers arrive later.
 file(MAKE_DIRECTORY "${FF_INSTALL}/include")
+file(MAKE_DIRECTORY "${OPUS_INSTALL}/include")
 file(MAKE_DIRECTORY "${DOVI_INSTALL}/include")
 file(MAKE_DIRECTORY "${HDR10_INSTALL}/include")
 
@@ -45,6 +47,7 @@ file(MAKE_DIRECTORY "${HDR10_INSTALL}/include")
 # Version pins  (update these to pull newer releases)
 # ---------------------------------------------------------------------------
 set(FFMPEG_GIT_TAG          "n7.1")
+set(OPUS_GIT_TAG            "v1.5.2")
 set(LIBDOVI_GIT_TAG         "libdovi-3.3.2")
 set(LIBDOVI_VERSION         "3.3.2")
 set(LIBHDR10PLUS_GIT_TAG    "libhdr10plus-2.1.5")
@@ -65,13 +68,34 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(cjson)
 
 # ===========================================================================
-# FFmpeg  (configure / make)
+# libopus  (reference OPUS codec – built via CMake)
+# ===========================================================================
+ExternalProject_Add(ep_opus
+    GIT_REPOSITORY  https://github.com/xiph/opus.git
+    GIT_TAG         ${OPUS_GIT_TAG}
+    GIT_SHALLOW     TRUE
+    PREFIX          "${DEPS_PREFIX}/build/opus"
+    CMAKE_ARGS
+        -DCMAKE_INSTALL_PREFIX=${OPUS_INSTALL}
+        -DCMAKE_BUILD_TYPE=Release
+        -DBUILD_SHARED_LIBS=OFF
+        -DOPUS_BUILD_TESTING=OFF
+        -DOPUS_BUILD_PROGRAMS=OFF
+    BUILD_COMMAND   cmake --build . --parallel ${NPROC}
+    LOG_CONFIGURE   TRUE
+    LOG_BUILD       TRUE
+    LOG_INSTALL     TRUE
+)
+
+# ===========================================================================
+# FFmpeg  (configure / make – depends on libopus)
 # ===========================================================================
 ExternalProject_Add(ep_ffmpeg
     GIT_REPOSITORY  https://github.com/FFmpeg/FFmpeg.git
     GIT_TAG         ${FFMPEG_GIT_TAG}
     GIT_SHALLOW     TRUE
     PREFIX          "${DEPS_PREFIX}/build/ffmpeg"
+    DEPENDS         ep_opus
     CONFIGURE_COMMAND
         <SOURCE_DIR>/configure
             --prefix=${FF_INSTALL}
@@ -83,6 +107,11 @@ ExternalProject_Add(ep_ffmpeg
             --enable-gpl
             --disable-postproc
             --enable-filter=cropdetect
+            --enable-libopus
+            --enable-encoder=libopus
+            --enable-decoder=libopus
+            --extra-cflags=-I${OPUS_INSTALL}/include
+            --extra-ldflags=-L${OPUS_INSTALL}/lib
     BUILD_COMMAND   make -j${NPROC}
     INSTALL_COMMAND make install
     BUILD_IN_SOURCE TRUE
@@ -173,6 +202,7 @@ add_executable(vmavificient
     src/media_crop.c
     src/media_analysis.c
     src/media_naming.c
+    src/audio_encode.c
     src/tmdb.c
     src/utils.c
 )
@@ -192,6 +222,7 @@ target_link_libraries(vmavificient PRIVATE
     FFmpeg::avutil
     Dovi::dovi
     Hdr10Plus::hdr10plus
+    "${OPUS_INSTALL}/lib/libopus.a"
     Threads::Threads
     CURL::libcurl
     cjson

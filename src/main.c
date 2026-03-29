@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "audio_encode.h"
 #include "media_analysis.h"
 #include "media_crop.h"
 #include "media_hdr.h"
@@ -235,6 +236,55 @@ int main(int argc, char *argv[]) {
                             &info, &hdr, source);
 
       printf("\nOutput filename:\n  %s\n", output_name);
+
+      /* ---- OPUS audio encoding ---- */
+      int enc_best_count = 0;
+      TrackInfo *enc_best =
+          select_best_audio_per_language(&tracks, &enc_best_count);
+      if (enc_best && enc_best_count > 0) {
+        /* Strip .mkv to get base name. */
+        char base_name[1024];
+        snprintf(base_name, sizeof(base_name), "%s", output_name);
+        char *ext = strrchr(base_name, '.');
+        if (ext && strcmp(ext, ".mkv") == 0)
+          *ext = '\0';
+
+        /* Output dir: same directory as input file. */
+        char output_dir[2048];
+        snprintf(output_dir, sizeof(output_dir), "%s", filepath);
+        char *last_slash = strrchr(output_dir, '/');
+        if (last_slash)
+          *(last_slash + 1) = '\0';
+        else
+          snprintf(output_dir, sizeof(output_dir), "./");
+
+        printf("\nEncoding %d audio track(s) to OPUS...\n", enc_best_count);
+        for (int i = 0; i < enc_best_count; i++) {
+          char opus_name[2048];
+          build_opus_filename(opus_name, sizeof(opus_name), base_name,
+                              enc_best[i].language, fv);
+
+          char opus_path[4096];
+          snprintf(opus_path, sizeof(opus_path), "%s%s", output_dir,
+                   opus_name);
+
+          printf("  [%d/%d] %s (%s, %dch, %lld kbps)...\n", i + 1,
+                 enc_best_count, enc_best[i].language, enc_best[i].codec,
+                 enc_best[i].channels,
+                 (long long)(enc_best[i].bitrate / 1000));
+
+          OpusEncodeResult r =
+              encode_track_to_opus(filepath, &enc_best[i], opus_path);
+
+          if (r.skipped)
+            printf("  [SKIP] %s (already exists)\n", opus_name);
+          else if (r.error == 0)
+            printf("  [OK]   %s\n", opus_name);
+          else
+            fprintf(stderr, "  [FAIL] %s (error %d)\n", opus_name, r.error);
+        }
+        free(enc_best);
+      }
     }
   }
 
