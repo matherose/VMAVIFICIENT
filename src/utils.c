@@ -18,6 +18,8 @@
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
 
+#include <EbSvtAv1Enc.h>
+
 void init_logging(void) { av_log_set_level(AV_LOG_FATAL); }
 
 int check_dependencies(void) {
@@ -43,6 +45,8 @@ int check_dependencies(void) {
 
   dovi_rpu_free(NULL);
   hdr10plus_rs_data_free(NULL);
+
+  printf("SVT-AV1:          %s\n", svt_av1_get_version());
 
   return 0;
 }

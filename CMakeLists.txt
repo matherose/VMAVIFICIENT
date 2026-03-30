@@ -35,6 +35,7 @@ set(FF_INSTALL     "${DEPS_PREFIX}/ffmpeg")
 set(OPUS_INSTALL   "${DEPS_PREFIX}/opus")
 set(DOVI_INSTALL   "${DEPS_PREFIX}/libdovi")
 set(HDR10_INSTALL  "${DEPS_PREFIX}/libhdr10plus")
+set(SVTAV1_INSTALL "${DEPS_PREFIX}/svtav1")
 
 # CMake validates INTERFACE_INCLUDE_DIRECTORIES at configure time,
 # so the directories must already exist even though headers arrive later.
@@ -42,6 +43,8 @@ file(MAKE_DIRECTORY "${FF_INSTALL}/include")
 file(MAKE_DIRECTORY "${OPUS_INSTALL}/include")
 file(MAKE_DIRECTORY "${DOVI_INSTALL}/include")
 file(MAKE_DIRECTORY "${HDR10_INSTALL}/include")
+file(MAKE_DIRECTORY "${SVTAV1_INSTALL}/include")
+file(MAKE_DIRECTORY "${SVTAV1_INSTALL}/include/svt-av1")
 
 # ---------------------------------------------------------------------------
 # Version pins  (update these to pull newer releases)
@@ -52,6 +55,7 @@ set(LIBDOVI_GIT_TAG         "libdovi-3.3.2")
 set(LIBDOVI_VERSION         "3.3.2")
 set(LIBHDR10PLUS_GIT_TAG    "libhdr10plus-2.1.5")
 set(LIBHDR10PLUS_VERSION    "2.1.5")
+set(SVTAV1_GIT_TAG          "v4.0.1")
 set(CJSON_GIT_TAG           "v1.7.18")
 
 # ===========================================================================
@@ -163,6 +167,26 @@ ExternalProject_Add(ep_libhdr10plus
 )
 
 # ===========================================================================
+# SVT-AV1-HDR  (AV1 encoder with Dolby Vision / HDR10+ passthrough)
+# ===========================================================================
+ExternalProject_Add(ep_svtav1
+    GIT_REPOSITORY  https://github.com/juliobbv-p/svt-av1-hdr.git
+    GIT_TAG         ${SVTAV1_GIT_TAG}
+    GIT_SHALLOW     TRUE
+    PREFIX          "${DEPS_PREFIX}/build/svtav1"
+    CMAKE_ARGS
+        -DCMAKE_INSTALL_PREFIX=${SVTAV1_INSTALL}
+        -DCMAKE_BUILD_TYPE=Release
+        -DBUILD_SHARED_LIBS=OFF
+        -DBUILD_TESTING=OFF
+        -DBUILD_APPS=OFF
+    BUILD_COMMAND   cmake --build <BINARY_DIR> --parallel ${NPROC}
+    LOG_CONFIGURE   TRUE
+    LOG_BUILD       TRUE
+    LOG_INSTALL     TRUE
+)
+
+# ===========================================================================
 # IMPORTED targets – FFmpeg libraries
 # ===========================================================================
 set(_ff_libs avutil avcodec avformat avfilter swscale swresample)
@@ -191,6 +215,14 @@ set_target_properties(Hdr10Plus::hdr10plus PROPERTIES
 )
 add_dependencies(Hdr10Plus::hdr10plus ep_libhdr10plus)
 
+# IMPORTED target – SvtAv1Enc
+add_library(SvtAv1::Enc STATIC IMPORTED GLOBAL)
+set_target_properties(SvtAv1::Enc PROPERTIES
+    IMPORTED_LOCATION             "${SVTAV1_INSTALL}/lib/libSvtAv1Enc.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${SVTAV1_INSTALL}/include/svt-av1"
+)
+add_dependencies(SvtAv1::Enc ep_svtav1)
+
 # ===========================================================================
 # Executable
 # ===========================================================================
@@ -211,6 +243,7 @@ add_executable(vmavificient
 target_include_directories(vmavificient PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
     "${cjson_SOURCE_DIR}"
+    "${SVTAV1_INSTALL}/include"
 )
 
 # Link order matters for static archives: dependents before dependencies.
@@ -221,6 +254,7 @@ target_link_libraries(vmavificient PRIVATE
     FFmpeg::swresample
     FFmpeg::swscale
     FFmpeg::avutil
+    SvtAv1::Enc
     Dovi::dovi
     Hdr10Plus::hdr10plus
     "${OPUS_INSTALL}/lib/libopus.a"
