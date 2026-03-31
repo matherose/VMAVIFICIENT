@@ -1,0 +1,95 @@
+/**
+ * @file encode_preset.h
+ * @brief SVT-AV1-HDR v4.0.1 encoding quality presets.
+ */
+
+#ifndef ENCODE_PRESET_H
+#define ENCODE_PRESET_H
+
+/**
+ * @brief Content quality type, selected via CLI flags.
+ *
+ * Determines the SVT-AV1 parameter set used for encoding.
+ * Live-action is the default when no flag is specified.
+ */
+typedef enum {
+  QUALITY_LIVEACTION,
+  QUALITY_ANIMATION,
+  QUALITY_SUPER35_ANALOG,
+  QUALITY_SUPER35_DIGITAL,
+  QUALITY_IMAX_ANALOG,
+  QUALITY_IMAX_DIGITAL,
+} QualityType;
+
+/**
+ * @brief SVT-AV1-HDR v4.0.1 encoding parameters.
+ *
+ * Film grain is NOT included here — it is computed dynamically from the
+ * grain score via @ref get_film_grain_from_score().
+ *
+ * Fields set to -1 mean "use encoder default" (sentinel value).
+ */
+typedef struct {
+  int preset;                     /**< Encoder speed preset (always 4). */
+  int keyint;                     /**< Keyframe interval (300=4K, 240=HD). */
+  int tune;                       /**< Tune mode: 0=VQ, 1=PSNR, 5=Film Grain. */
+  double ac_bias;                 /**< AC bias / PsyRD (0.0–8.0). */
+  int variance_boost;             /**< Variance boost strength (1–4). */
+  int variance_octile;            /**< Variance boost octile (1–8). */
+  int variance_curve;             /**< Variance boost curve (0–3, 3=PQ). */
+  int sharpness;                  /**< Sharpness (-7 to 7). */
+  int luminance_bias;             /**< Luminance QP bias (0–100). */
+  int enable_tf;                  /**< Temporal filter: 0=off, 1=on, 2=adaptive. */
+  int tf_strength;                /**< TF strength (0–4). */
+  int kf_tf_strength;             /**< Keyframe TF strength (0–4). */
+  int tx_bias;                    /**< Transform bias (0–3). */
+  int sharp_tx;                   /**< Sharp transform opts (0–1). */
+  int complex_hvs;                /**< Complex HVS model (0–1). */
+  int noise_norm_strength;        /**< Noise normalization (0–4, -1=default). */
+  int noise_adaptive_filtering;   /**< Noise-adaptive filtering (0–4). */
+  int enable_dlf;                 /**< Deblocking filter (0–2, 2=accurate). */
+  int cdef_scaling;               /**< CDEF strength scaling (1–30). */
+  int chroma_qm_min;              /**< Chroma QM min (0–15, -1=default). */
+  int chroma_qm_max;              /**< Chroma QM max (0–15, -1=default). */
+  double qp_scale_compress_strength; /**< QP scale compression (0.0–8.0). */
+  int max_tx_size;                /**< Max transform size: 32 or 64. */
+  int hbd_mds;                    /**< High bit-depth mode decisions (0–2). */
+  int enable_overlays;            /**< Overlays (0–1, -1=default). */
+  int adaptive_film_grain;        /**< Resolution-adaptive grain (0–1). */
+  int alt_lambda_factors;         /**< Alternative RDO lambdas (0–1). */
+} EncodePreset;
+
+/**
+ * @brief Get the encoding preset for a given quality type and resolution.
+ *
+ * Returns a pointer to static data — no allocation, no cleanup needed.
+ * Resolution is determined by @p video_height: >= 2160 selects the 4K
+ * preset, otherwise HD.
+ *
+ * @param quality       Content quality type.
+ * @param video_height  Video height in pixels.
+ * @return Pointer to the matching preset (never NULL).
+ */
+const EncodePreset *get_encode_preset(QualityType quality, int video_height);
+
+/**
+ * @brief Compute film grain synthesis level from a grain analysis score.
+ *
+ * Mapping (benchmarked):
+ *   - Score 0.00–0.05 → 0  (clean digital)
+ *   - Score 0.05–0.15 → 4–8
+ *   - Score 0.15–0.30 → 10–18
+ *   - Score 0.30–0.50 → 20–28
+ *   - Score > 0.50    → 30–35 (heavy analog grain)
+ *
+ * @param grain_score  Composite grain score in [0, 1].
+ * @return Film grain synthesis level (0–50).
+ */
+int get_film_grain_from_score(double grain_score);
+
+/**
+ * @brief Convert a quality type enum to its display string.
+ */
+const char *quality_type_to_string(QualityType quality);
+
+#endif /* ENCODE_PRESET_H */

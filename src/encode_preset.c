@@ -1,0 +1,432 @@
+/**
+ * @file encode_preset.c
+ * @brief SVT-AV1-HDR v4.0.1 encoding quality presets.
+ */
+
+#include "encode_preset.h"
+
+/** Sentinel: parameter should use encoder default. */
+#define UNSET (-1)
+
+/* ====================================================================== */
+/*  Preset tables — index 0 = 4K (height >= 2160), index 1 = HD          */
+/* ====================================================================== */
+
+static const EncodePreset presets_liveaction[2] = {
+    /* 4K */
+    {.preset = 4,
+     .keyint = 300,
+     .tune = 0,
+     .ac_bias = 2.5,
+     .variance_boost = 3,
+     .variance_octile = 6,
+     .variance_curve = 2,
+     .sharpness = 0,
+     .luminance_bias = 7,
+     .enable_tf = 1,
+     .tf_strength = 2,
+     .kf_tf_strength = 3,
+     .tx_bias = 1,
+     .sharp_tx = 1,
+     .complex_hvs = 0,
+     .noise_norm_strength = UNSET,
+     .noise_adaptive_filtering = 2,
+     .enable_dlf = 1,
+     .cdef_scaling = 15,
+     .chroma_qm_min = UNSET,
+     .chroma_qm_max = UNSET,
+     .qp_scale_compress_strength = 2.0,
+     .max_tx_size = 32,
+     .hbd_mds = 1,
+     .enable_overlays = 0,
+     .adaptive_film_grain = 1,
+     .alt_lambda_factors = 1},
+    /* HD */
+    {.preset = 4,
+     .keyint = 240,
+     .tune = 0,
+     .ac_bias = 2.0,
+     .variance_boost = 3,
+     .variance_octile = 6,
+     .variance_curve = 2,
+     .sharpness = 0,
+     .luminance_bias = 7,
+     .enable_tf = 1,
+     .tf_strength = 2,
+     .kf_tf_strength = 3,
+     .tx_bias = 1,
+     .sharp_tx = 1,
+     .complex_hvs = 0,
+     .noise_norm_strength = UNSET,
+     .noise_adaptive_filtering = 2,
+     .enable_dlf = 1,
+     .cdef_scaling = 15,
+     .chroma_qm_min = UNSET,
+     .chroma_qm_max = UNSET,
+     .qp_scale_compress_strength = 2.0,
+     .max_tx_size = 32,
+     .hbd_mds = 1,
+     .enable_overlays = 0,
+     .adaptive_film_grain = 1,
+     .alt_lambda_factors = 1},
+};
+
+static const EncodePreset presets_animation[2] = {
+    /* 4K */
+    {.preset = 4,
+     .keyint = 300,
+     .tune = 0,
+     .ac_bias = 3.0,
+     .variance_boost = 1,
+     .variance_octile = 4,
+     .variance_curve = 1,
+     .sharpness = 1,
+     .luminance_bias = 0,
+     .enable_tf = 0,
+     .tf_strength = 0,
+     .kf_tf_strength = 0,
+     .tx_bias = 1,
+     .sharp_tx = 1,
+     .complex_hvs = 0,
+     .noise_norm_strength = 1,
+     .noise_adaptive_filtering = 0,
+     .enable_dlf = 2,
+     .cdef_scaling = 12,
+     .chroma_qm_min = 2,
+     .chroma_qm_max = 8,
+     .qp_scale_compress_strength = 3.0,
+     .max_tx_size = 32,
+     .hbd_mds = 2,
+     .enable_overlays = UNSET,
+     .adaptive_film_grain = 1,
+     .alt_lambda_factors = 1},
+    /* HD */
+    {.preset = 4,
+     .keyint = 240,
+     .tune = 0,
+     .ac_bias = 2.6,
+     .variance_boost = 1,
+     .variance_octile = 4,
+     .variance_curve = 1,
+     .sharpness = 1,
+     .luminance_bias = 0,
+     .enable_tf = 0,
+     .tf_strength = 0,
+     .kf_tf_strength = 0,
+     .tx_bias = 0,
+     .sharp_tx = 1,
+     .complex_hvs = 0,
+     .noise_norm_strength = UNSET,
+     .noise_adaptive_filtering = 0,
+     .enable_dlf = 2,
+     .cdef_scaling = 12,
+     .chroma_qm_min = UNSET,
+     .chroma_qm_max = UNSET,
+     .qp_scale_compress_strength = 2.0,
+     .max_tx_size = 32,
+     .hbd_mds = 1,
+     .enable_overlays = UNSET,
+     .adaptive_film_grain = 1,
+     .alt_lambda_factors = 1},
+};
+
+static const EncodePreset presets_super35_analog[2] = {
+    /* 4K */
+    {.preset = 4,
+     .keyint = 300,
+     .tune = 5,
+     .ac_bias = 4.0,
+     .variance_boost = 1,
+     .variance_octile = 3,
+     .variance_curve = 1,
+     .sharpness = UNSET,
+     .luminance_bias = 5,
+     .enable_tf = 1,
+     .tf_strength = 1,
+     .kf_tf_strength = 2,
+     .tx_bias = 1,
+     .sharp_tx = 1,
+     .complex_hvs = 1,
+     .noise_norm_strength = UNSET,
+     .noise_adaptive_filtering = 3,
+     .enable_dlf = 1,
+     .cdef_scaling = 10,
+     .chroma_qm_min = UNSET,
+     .chroma_qm_max = UNSET,
+     .qp_scale_compress_strength = 1.5,
+     .max_tx_size = 32,
+     .hbd_mds = 1,
+     .enable_overlays = 0,
+     .adaptive_film_grain = 1,
+     .alt_lambda_factors = 1},
+    /* HD */
+    {.preset = 4,
+     .keyint = 240,
+     .tune = 5,
+     .ac_bias = 3.0,
+     .variance_boost = 1,
+     .variance_octile = 3,
+     .variance_curve = 1,
+     .sharpness = 0,
+     .luminance_bias = 5,
+     .enable_tf = 1,
+     .tf_strength = 2,
+     .kf_tf_strength = 3,
+     .tx_bias = 1,
+     .sharp_tx = 1,
+     .complex_hvs = 1,
+     .noise_norm_strength = UNSET,
+     .noise_adaptive_filtering = 3,
+     .enable_dlf = 1,
+     .cdef_scaling = 10,
+     .chroma_qm_min = UNSET,
+     .chroma_qm_max = UNSET,
+     .qp_scale_compress_strength = 1.5,
+     .max_tx_size = 32,
+     .hbd_mds = 1,
+     .enable_overlays = 0,
+     .adaptive_film_grain = 1,
+     .alt_lambda_factors = 1},
+};
+
+static const EncodePreset presets_super35_digital[2] = {
+    /* 4K */
+    {.preset = 4,
+     .keyint = 300,
+     .tune = 0,
+     .ac_bias = 3.5,
+     .variance_boost = 2,
+     .variance_octile = 4,
+     .variance_curve = 2,
+     .sharpness = 1,
+     .luminance_bias = 8,
+     .enable_tf = 1,
+     .tf_strength = 2,
+     .kf_tf_strength = 3,
+     .tx_bias = 1,
+     .sharp_tx = 1,
+     .complex_hvs = 0,
+     .noise_norm_strength = UNSET,
+     .noise_adaptive_filtering = 2,
+     .enable_dlf = 1,
+     .cdef_scaling = 15,
+     .chroma_qm_min = UNSET,
+     .chroma_qm_max = UNSET,
+     .qp_scale_compress_strength = 2.0,
+     .max_tx_size = 32,
+     .hbd_mds = 1,
+     .enable_overlays = 0,
+     .adaptive_film_grain = 1,
+     .alt_lambda_factors = 1},
+    /* HD */
+    {.preset = 4,
+     .keyint = 240,
+     .tune = 0,
+     .ac_bias = 2.5,
+     .variance_boost = 2,
+     .variance_octile = 4,
+     .variance_curve = 2,
+     .sharpness = 1,
+     .luminance_bias = 8,
+     .enable_tf = 1,
+     .tf_strength = 2,
+     .kf_tf_strength = 3,
+     .tx_bias = 1,
+     .sharp_tx = 1,
+     .complex_hvs = 0,
+     .noise_norm_strength = UNSET,
+     .noise_adaptive_filtering = 2,
+     .enable_dlf = 1,
+     .cdef_scaling = 15,
+     .chroma_qm_min = UNSET,
+     .chroma_qm_max = UNSET,
+     .qp_scale_compress_strength = 2.0,
+     .max_tx_size = 32,
+     .hbd_mds = 1,
+     .enable_overlays = 0,
+     .adaptive_film_grain = 1,
+     .alt_lambda_factors = 1},
+};
+
+static const EncodePreset presets_imax_analog[2] = {
+    /* 4K */
+    {.preset = 4,
+     .keyint = 300,
+     .tune = 5,
+     .ac_bias = 2.0,
+     .variance_boost = 1,
+     .variance_octile = 2,
+     .variance_curve = 1,
+     .sharpness = 0,
+     .luminance_bias = 3,
+     .enable_tf = 1,
+     .tf_strength = 0,
+     .kf_tf_strength = 1,
+     .tx_bias = 1,
+     .sharp_tx = 1,
+     .complex_hvs = 1,
+     .noise_norm_strength = UNSET,
+     .noise_adaptive_filtering = 3,
+     .enable_dlf = 1,
+     .cdef_scaling = 8,
+     .chroma_qm_min = UNSET,
+     .chroma_qm_max = UNSET,
+     .qp_scale_compress_strength = 1.5,
+     .max_tx_size = 32,
+     .hbd_mds = 1,
+     .enable_overlays = 0,
+     .adaptive_film_grain = 1,
+     .alt_lambda_factors = 1},
+    /* HD */
+    {.preset = 4,
+     .keyint = 240,
+     .tune = 5,
+     .ac_bias = 1.8,
+     .variance_boost = 1,
+     .variance_octile = 2,
+     .variance_curve = 1,
+     .sharpness = 0,
+     .luminance_bias = 3,
+     .enable_tf = 1,
+     .tf_strength = 0,
+     .kf_tf_strength = 1,
+     .tx_bias = 1,
+     .sharp_tx = 1,
+     .complex_hvs = 1,
+     .noise_norm_strength = UNSET,
+     .noise_adaptive_filtering = 3,
+     .enable_dlf = 1,
+     .cdef_scaling = 8,
+     .chroma_qm_min = UNSET,
+     .chroma_qm_max = UNSET,
+     .qp_scale_compress_strength = 1.5,
+     .max_tx_size = 32,
+     .hbd_mds = 1,
+     .enable_overlays = 0,
+     .adaptive_film_grain = 1,
+     .alt_lambda_factors = 1},
+};
+
+static const EncodePreset presets_imax_digital[2] = {
+    /* 4K */
+    {.preset = 4,
+     .keyint = 300,
+     .tune = 0,
+     .ac_bias = 2.8,
+     .variance_boost = 3,
+     .variance_octile = 4,
+     .variance_curve = 1,
+     .sharpness = 2,
+     .luminance_bias = 0,
+     .enable_tf = 1,
+     .tf_strength = 1,
+     .kf_tf_strength = 2,
+     .tx_bias = 1,
+     .sharp_tx = 1,
+     .complex_hvs = 0,
+     .noise_norm_strength = UNSET,
+     .noise_adaptive_filtering = 2,
+     .enable_dlf = 2,
+     .cdef_scaling = 15,
+     .chroma_qm_min = UNSET,
+     .chroma_qm_max = UNSET,
+     .qp_scale_compress_strength = 2.0,
+     .max_tx_size = 64,
+     .hbd_mds = 1,
+     .enable_overlays = 0,
+     .adaptive_film_grain = 1,
+     .alt_lambda_factors = 1},
+    /* HD */
+    {.preset = 4,
+     .keyint = 240,
+     .tune = 0,
+     .ac_bias = 2.3,
+     .variance_boost = 3,
+     .variance_octile = 4,
+     .variance_curve = 1,
+     .sharpness = 2,
+     .luminance_bias = 0,
+     .enable_tf = 1,
+     .tf_strength = 1,
+     .kf_tf_strength = 2,
+     .tx_bias = 1,
+     .sharp_tx = 1,
+     .complex_hvs = 0,
+     .noise_norm_strength = UNSET,
+     .noise_adaptive_filtering = 2,
+     .enable_dlf = 2,
+     .cdef_scaling = 15,
+     .chroma_qm_min = UNSET,
+     .chroma_qm_max = UNSET,
+     .qp_scale_compress_strength = 2.0,
+     .max_tx_size = 64,
+     .hbd_mds = 1,
+     .enable_overlays = 0,
+     .adaptive_film_grain = 1,
+     .alt_lambda_factors = 1},
+};
+
+/* ====================================================================== */
+/*  Lookup table                                                          */
+/* ====================================================================== */
+
+static const EncodePreset *const preset_tables[] = {
+    [QUALITY_LIVEACTION] = presets_liveaction,
+    [QUALITY_ANIMATION] = presets_animation,
+    [QUALITY_SUPER35_ANALOG] = presets_super35_analog,
+    [QUALITY_SUPER35_DIGITAL] = presets_super35_digital,
+    [QUALITY_IMAX_ANALOG] = presets_imax_analog,
+    [QUALITY_IMAX_DIGITAL] = presets_imax_digital,
+};
+
+const EncodePreset *get_encode_preset(QualityType quality, int video_height) {
+  if (quality < 0 || quality > QUALITY_IMAX_DIGITAL)
+    return &presets_liveaction[0];
+  int idx = (video_height >= 2160) ? 0 : 1;
+  return &preset_tables[quality][idx];
+}
+
+/* ====================================================================== */
+/*  Dynamic film grain from grain score                                   */
+/* ====================================================================== */
+
+/**
+ * Linear interpolation helper.
+ */
+static int lerp_grain(double score, double lo_score, double hi_score, int lo_val,
+                      int hi_val) {
+  double t = (score - lo_score) / (hi_score - lo_score);
+  return lo_val + (int)(t * (hi_val - lo_val) + 0.5);
+}
+
+int get_film_grain_from_score(double grain_score) {
+  if (grain_score <= 0.05)
+    return 0;
+  if (grain_score <= 0.15)
+    return lerp_grain(grain_score, 0.05, 0.15, 4, 8);
+  if (grain_score <= 0.30)
+    return lerp_grain(grain_score, 0.15, 0.30, 10, 18);
+  if (grain_score <= 0.50)
+    return lerp_grain(grain_score, 0.30, 0.50, 20, 28);
+  if (grain_score <= 1.0)
+    return lerp_grain(grain_score, 0.50, 1.0, 30, 35);
+  return 35;
+}
+
+/* ====================================================================== */
+/*  Display name                                                          */
+/* ====================================================================== */
+
+const char *quality_type_to_string(QualityType quality) {
+  static const char *names[] = {
+      [QUALITY_LIVEACTION] = "Live-Action",
+      [QUALITY_ANIMATION] = "Animation",
+      [QUALITY_SUPER35_ANALOG] = "Super 35 Analog",
+      [QUALITY_SUPER35_DIGITAL] = "Super 35 Digital",
+      [QUALITY_IMAX_ANALOG] = "IMAX Analog",
+      [QUALITY_IMAX_DIGITAL] = "IMAX Digital",
+  };
+  if (quality < 0 || quality > QUALITY_IMAX_DIGITAL)
+    return "Unknown";
+  return names[quality];
+}

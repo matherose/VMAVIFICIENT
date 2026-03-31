@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "audio_encode.h"
+#include "encode_preset.h"
 #include "media_analysis.h"
 #include "media_crop.h"
 #include "media_hdr.h"
@@ -58,7 +59,14 @@ static void print_usage(const char *prog) {
           "  --hdtv           HDTV\n"
           "  --hdrip          HDRip\n"
           "  --tvrip          TVRip\n"
-          "  --vhsrip         VHSRip\n",
+          "  --vhsrip         VHSRip\n"
+          "\n"
+          "Quality presets (default: live-action):\n"
+          "  --animation       Animation content\n"
+          "  --super35_analog  Super 35mm analog film\n"
+          "  --super35_digital Super 35mm digital\n"
+          "  --imax_analog     IMAX analog film\n"
+          "  --imax_digital    IMAX digital\n",
           prog);
 }
 
@@ -201,6 +209,7 @@ int main(int argc, char *argv[]) {
   int tmdb_id = 0;
   LanguageTag cli_lang_tag = LANG_TAG_NONE;
   SourceType cli_source = SOURCE_UNKNOWN;
+  QualityType cli_quality = QUALITY_LIVEACTION;
 
   enum {
     OPT_TMDB = 't',
@@ -235,6 +244,12 @@ int main(int argc, char *argv[]) {
     OPT_HDRIP,
     OPT_TVRIP,
     OPT_VHSRIP,
+    /* Quality preset flags. */
+    OPT_ANIMATION,
+    OPT_SUPER35_ANALOG,
+    OPT_SUPER35_DIGITAL,
+    OPT_IMAX_ANALOG,
+    OPT_IMAX_DIGITAL,
   };
 
   static struct option long_options[] = {
@@ -270,6 +285,12 @@ int main(int argc, char *argv[]) {
       {"hdrip", no_argument, 0, OPT_HDRIP},
       {"tvrip", no_argument, 0, OPT_TVRIP},
       {"vhsrip", no_argument, 0, OPT_VHSRIP},
+      /* Quality preset flags. */
+      {"animation", no_argument, 0, OPT_ANIMATION},
+      {"super35_analog", no_argument, 0, OPT_SUPER35_ANALOG},
+      {"super35_digital", no_argument, 0, OPT_SUPER35_DIGITAL},
+      {"imax_analog", no_argument, 0, OPT_IMAX_ANALOG},
+      {"imax_digital", no_argument, 0, OPT_IMAX_DIGITAL},
       {0, 0, 0, 0},
   };
 
@@ -368,6 +389,22 @@ int main(int argc, char *argv[]) {
     case OPT_VHSRIP:
       cli_source = SOURCE_VHSRIP;
       break;
+    /* Quality preset flags. */
+    case OPT_ANIMATION:
+      cli_quality = QUALITY_ANIMATION;
+      break;
+    case OPT_SUPER35_ANALOG:
+      cli_quality = QUALITY_SUPER35_ANALOG;
+      break;
+    case OPT_SUPER35_DIGITAL:
+      cli_quality = QUALITY_SUPER35_DIGITAL;
+      break;
+    case OPT_IMAX_ANALOG:
+      cli_quality = QUALITY_IMAX_ANALOG;
+      break;
+    case OPT_IMAX_DIGITAL:
+      cli_quality = QUALITY_IMAX_DIGITAL;
+      break;
     default:
       print_usage(argv[0]);
       return 1;
@@ -391,6 +428,20 @@ int main(int argc, char *argv[]) {
   printf("Video dimensions: %dx%d\n", info.width, info.height);
   printf("Duration:         %.2f s\n", info.duration);
   printf("Framerate:        %.3f fps\n", info.framerate);
+
+  /* ---- Encode preset ---- */
+  const EncodePreset *enc_preset = get_encode_preset(cli_quality, info.height);
+  printf("\nQuality preset:   %s (%s)\n", quality_type_to_string(cli_quality),
+         info.height >= 2160 ? "4K" : "HD");
+  printf("  SVT-AV1: preset=%d keyint=%d tune=%d ac-bias=%.1f\n",
+         enc_preset->preset, enc_preset->keyint, enc_preset->tune,
+         enc_preset->ac_bias);
+  printf("  variance-boost=%d variance-octile=%d variance-curve=%d\n",
+         enc_preset->variance_boost, enc_preset->variance_octile,
+         enc_preset->variance_curve);
+  printf("  sharpness=%d luminance-bias=%d tf=%d kf-tf=%d\n",
+         enc_preset->sharpness, enc_preset->luminance_bias,
+         enc_preset->tf_strength, enc_preset->kf_tf_strength);
 
   /* ---- Crop detection ---- */
   CropInfo crop = get_crop_info(filepath);
@@ -456,6 +507,8 @@ int main(int argc, char *argv[]) {
     printf("  Avg TOUT:        %.4f%%\n", grain.avg_tout);
     printf("  Avg Y-Range:     %.1f\n", grain.avg_yrange);
     printf("  Grain score:     %.4f\n", grain.grain_score);
+    int film_grain = get_film_grain_from_score(grain.grain_score);
+    printf("  Film grain:      %d\n", film_grain);
   }
 
   /* ---- TMDB naming ---- */

@@ -235,6 +235,7 @@ add_executable(vmavificient
     src/media_analysis.c
     src/media_naming.c
     src/audio_encode.c
+    src/encode_preset.c
     src/rpu_extract.c
     src/tmdb.c
     src/utils.c
