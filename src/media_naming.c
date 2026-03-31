@@ -167,11 +167,28 @@ SourceType detect_source_from_filename(const char *filename) {
   if (!filename)
     return SOURCE_UNKNOWN;
 
+  /* Order matters: more specific patterns before generic ones. */
+  if (str_contains_ci(filename, "BDREMUX") ||
+      str_contains_ci(filename, "BD-REMUX"))
+    return SOURCE_REMUX;
+
+  if (str_contains_ci(filename, "BDRIP") || str_contains_ci(filename, "BD-RIP"))
+    return SOURCE_BDRIP;
+
   if (str_contains_ci(filename, "BLURAY") ||
-      str_contains_ci(filename, "BLU-RAY") ||
-      str_contains_ci(filename, "BDREMUX") ||
-      str_contains_ci(filename, "REMUX"))
+      str_contains_ci(filename, "BLU-RAY"))
     return SOURCE_BLURAY;
+
+  if (str_contains_ci(filename, "REMUX"))
+    return SOURCE_REMUX;
+
+  if (str_contains_ci(filename, "DVDREMUX") ||
+      str_contains_ci(filename, "DVD-REMUX"))
+    return SOURCE_DVDREMUX;
+
+  if (str_contains_ci(filename, "DVDRIP") ||
+      str_contains_ci(filename, "DVD-RIP"))
+    return SOURCE_DVDRIP;
 
   if (str_contains_ci(filename, "WEBDL") ||
       str_contains_ci(filename, "WEB-DL") ||
@@ -182,6 +199,22 @@ SourceType detect_source_from_filename(const char *filename) {
       str_contains_ci(filename, "WEB-RIP") ||
       str_contains_ci(filename, "WEB RIP"))
     return SOURCE_WEBRIP;
+
+  if (str_contains_ci(filename, "WEB"))
+    return SOURCE_WEB;
+
+  if (str_contains_ci(filename, "HDTV"))
+    return SOURCE_HDTV;
+
+  if (str_contains_ci(filename, "HDRIP") || str_contains_ci(filename, "HD-RIP"))
+    return SOURCE_HDRIP;
+
+  if (str_contains_ci(filename, "TVRIP") || str_contains_ci(filename, "TV-RIP"))
+    return SOURCE_TVRIP;
+
+  if (str_contains_ci(filename, "VHSRIP") ||
+      str_contains_ci(filename, "VHS-RIP"))
+    return SOURCE_VHSRIP;
 
   return SOURCE_UNKNOWN;
 }
@@ -200,26 +233,64 @@ const char *language_tag_to_string(LanguageTag tag) {
     return "VFQ";
   case LANG_TAG_VFI:
     return "VFI";
-  case LANG_TAG_MULTI_VFF:
-    return "MULTI.VFF";
-  case LANG_TAG_MULTI_VFQ:
-    return "MULTI.VFQ";
-  case LANG_TAG_MULTI_VFI:
-    return "MULTI.VFI";
   case LANG_TAG_MULTI:
-    return "MULTI";
+    return "MULTi";
+  case LANG_TAG_MULTI_VFF:
+    return "MULTi.VFF";
+  case LANG_TAG_MULTI_VFQ:
+    return "MULTi.VFQ";
+  case LANG_TAG_MULTI_VFI:
+    return "MULTi.VFI";
+  case LANG_TAG_MULTI_VF2:
+    return "MULTi.VF2";
+  case LANG_TAG_MULTI_VOF:
+    return "MULTi.VOF";
+  case LANG_TAG_DUAL_VFF:
+    return "DUAL.VFF";
+  case LANG_TAG_DUAL_VFQ:
+    return "DUAL.VFQ";
+  case LANG_TAG_DUAL_VFI:
+    return "DUAL.VFI";
+  case LANG_TAG_FRENCH:
+    return "FRENCH";
+  case LANG_TAG_TRUEFRENCH:
+    return "TRUEFRENCH";
+  case LANG_TAG_VOST:
+    return "VOST";
+  case LANG_TAG_FANSUB:
+    return "FANSUB";
+  case LANG_TAG_NONE:
+    return "VO";
   }
   return "VO";
 }
 
 static const char *source_to_string(SourceType source) {
   switch (source) {
+  case SOURCE_BDRIP:
+    return "BDRip";
   case SOURCE_BLURAY:
     return "BluRay";
-  case SOURCE_WEBDL:
-    return "WEBDL";
+  case SOURCE_REMUX:
+    return "REMUX";
+  case SOURCE_DVDRIP:
+    return "DVDRip";
+  case SOURCE_DVDREMUX:
+    return "DVDRemux";
   case SOURCE_WEBRIP:
     return "WEBRip";
+  case SOURCE_WEBDL:
+    return "WEB-DL";
+  case SOURCE_WEB:
+    return "WEB";
+  case SOURCE_HDTV:
+    return "HDTV";
+  case SOURCE_HDRIP:
+    return "HDRip";
+  case SOURCE_TVRIP:
+    return "TVRip";
+  case SOURCE_VHSRIP:
+    return "VHSRip";
   case SOURCE_UNKNOWN:
     return "Unknown";
   }

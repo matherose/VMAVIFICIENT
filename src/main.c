@@ -4,6 +4,7 @@
  */
 
 #include <getopt.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,33 +25,121 @@ static void print_usage(const char *prog) {
           "Usage: %s [options] <input_file>\n"
           "\n"
           "Options:\n"
-          "  --tmdb <id>   TMDB movie ID for naming (requires TMDB_API_KEY)\n"
-          "  --help        Show this help\n",
+          "  --tmdb <id>      TMDB movie ID for naming (requires TMDB_API_KEY)\n"
+          "  --help           Show this help\n"
+          "\n"
+          "Language flags (override auto-detection):\n"
+          "  --multi          MULTi\n"
+          "  --multivfi       MULTi.VFI\n"
+          "  --multivff       MULTi.VFF\n"
+          "  --multivfq       MULTi.VFQ\n"
+          "  --multivf2       MULTi.VF2\n"
+          "  --multivof       MULTi.VOF\n"
+          "  --dual_vfi       DUAL.VFI\n"
+          "  --dual_vff       DUAL.VFF\n"
+          "  --dual_vfq       DUAL.VFQ\n"
+          "  --french         FRENCH\n"
+          "  --vff            VFF\n"
+          "  --vof            VOF\n"
+          "  --truefrench     TRUEFRENCH\n"
+          "  --vo             VO\n"
+          "  --vost           VOST\n"
+          "  --fansub         FANSUB\n"
+          "\n"
+          "Source flags (override auto-detection):\n"
+          "  --bdrip          BDRip\n"
+          "  --bluray         BluRay\n"
+          "  --remux          REMUX\n"
+          "  --dvdrip         DVDRip\n"
+          "  --dvdremux       DVDRemux\n"
+          "  --webrip         WEBRip\n"
+          "  --webdl          WEB-DL\n"
+          "  --web            WEB\n"
+          "  --hdtv           HDTV\n"
+          "  --hdrip          HDRip\n"
+          "  --tvrip          TVRip\n"
+          "  --vhsrip         VHSRip\n",
           prog);
 }
 
 /**
- * @brief Prompt user to choose a French audio variant interactively.
+ * @brief Prompt user to choose a language tag interactively.
+ *
+ * Lists available audio languages from the source file, then presents
+ * all language tag options.
  */
-static FrenchVariant ask_french_variant(void) {
-  printf("\nFrench audio detected. Select variant:\n"
-         "  1) VFF (France)\n"
-         "  2) VFQ (Quebec)\n"
-         "  3) VFI (International)\n"
-         "Choice [1-3]: ");
+static LanguageTag ask_language_tag(const MediaTracks *tracks) {
+  if (tracks && tracks->error == 0 && tracks->audio_count > 0) {
+    printf("\nAudio languages found in source:\n");
+    char seen[32][8];
+    int seen_count = 0;
+    for (int i = 0; i < tracks->audio_count; i++) {
+      const char *lang =
+          tracks->audio[i].language[0] ? tracks->audio[i].language : "und";
+      bool dup = false;
+      for (int j = 0; j < seen_count; j++) {
+        if (strcmp(seen[j], lang) == 0) {
+          dup = true;
+          break;
+        }
+      }
+      if (!dup && seen_count < 32) {
+        snprintf(seen[seen_count], sizeof(seen[0]), "%s", lang);
+        seen_count++;
+        printf("  - %s\n", lang);
+      }
+    }
+  }
+
+  printf("\nSelect language tag:\n"
+         "   1) MULTi          2) MULTi.VFI       3) MULTi.VFF\n"
+         "   4) MULTi.VFQ      5) MULTi.VF2       6) MULTi.VOF\n"
+         "   7) DUAL.VFI       8) DUAL.VFF        9) DUAL.VFQ\n"
+         "  10) FRENCH        11) VFF            12) VOF\n"
+         "  13) TRUEFRENCH    14) VO             15) VOST\n"
+         "  16) FANSUB\n"
+         "Choice [1-16]: ");
   fflush(stdout);
 
   char line[16];
   if (!fgets(line, sizeof(line), stdin))
-    return FRENCH_VARIANT_VFF;
+    return LANG_TAG_MULTI;
 
   switch (atoi(line)) {
+  case 1:
+    return LANG_TAG_MULTI;
   case 2:
-    return FRENCH_VARIANT_VFQ;
+    return LANG_TAG_MULTI_VFI;
   case 3:
-    return FRENCH_VARIANT_VFI;
+    return LANG_TAG_MULTI_VFF;
+  case 4:
+    return LANG_TAG_MULTI_VFQ;
+  case 5:
+    return LANG_TAG_MULTI_VF2;
+  case 6:
+    return LANG_TAG_MULTI_VOF;
+  case 7:
+    return LANG_TAG_DUAL_VFI;
+  case 8:
+    return LANG_TAG_DUAL_VFF;
+  case 9:
+    return LANG_TAG_DUAL_VFQ;
+  case 10:
+    return LANG_TAG_FRENCH;
+  case 11:
+    return LANG_TAG_VFF;
+  case 12:
+    return LANG_TAG_VOF;
+  case 13:
+    return LANG_TAG_TRUEFRENCH;
+  case 14:
+    return LANG_TAG_VO;
+  case 15:
+    return LANG_TAG_VOST;
+  case 16:
+    return LANG_TAG_FANSUB;
   default:
-    return FRENCH_VARIANT_VFF;
+    return LANG_TAG_MULTI;
   }
 }
 
@@ -59,10 +148,11 @@ static FrenchVariant ask_french_variant(void) {
  */
 static SourceType ask_source(void) {
   printf("\nSource not detected from filename. Select source:\n"
-         "  1) BluRay\n"
-         "  2) WEB-DL\n"
-         "  3) WEBRip\n"
-         "Choice [1-3]: ");
+         "   1) BDRip          2) BluRay          3) REMUX\n"
+         "   4) DVDRip         5) DVDRemux        6) WEBRip\n"
+         "   7) WEB-DL        8) WEB             9) HDTV\n"
+         "  10) HDRip         11) TVRip          12) VHSRip\n"
+         "Choice [1-12]: ");
   fflush(stdout);
 
   char line[16];
@@ -70,10 +160,30 @@ static SourceType ask_source(void) {
     return SOURCE_BLURAY;
 
   switch (atoi(line)) {
+  case 1:
+    return SOURCE_BDRIP;
   case 2:
-    return SOURCE_WEBDL;
+    return SOURCE_BLURAY;
   case 3:
+    return SOURCE_REMUX;
+  case 4:
+    return SOURCE_DVDRIP;
+  case 5:
+    return SOURCE_DVDREMUX;
+  case 6:
     return SOURCE_WEBRIP;
+  case 7:
+    return SOURCE_WEBDL;
+  case 8:
+    return SOURCE_WEB;
+  case 9:
+    return SOURCE_HDTV;
+  case 10:
+    return SOURCE_HDRIP;
+  case 11:
+    return SOURCE_TVRIP;
+  case 12:
+    return SOURCE_VHSRIP;
   default:
     return SOURCE_BLURAY;
   }
@@ -89,21 +199,175 @@ int main(int argc, char *argv[]) {
 
   /* ---- CLI parsing ---- */
   int tmdb_id = 0;
+  LanguageTag cli_lang_tag = LANG_TAG_NONE;
+  SourceType cli_source = SOURCE_UNKNOWN;
+
+  enum {
+    OPT_TMDB = 't',
+    OPT_HELP = 'h',
+    /* Language flags (start at 256 to avoid ASCII collision). */
+    OPT_MULTI = 256,
+    OPT_MULTIVFI,
+    OPT_MULTIVFF,
+    OPT_MULTIVFQ,
+    OPT_MULTIVF2,
+    OPT_MULTIVOF,
+    OPT_DUAL_VFI,
+    OPT_DUAL_VFF,
+    OPT_DUAL_VFQ,
+    OPT_FRENCH,
+    OPT_VFF,
+    OPT_VOF,
+    OPT_TRUEFRENCH,
+    OPT_VO,
+    OPT_VOST,
+    OPT_FANSUB,
+    /* Source flags. */
+    OPT_BDRIP,
+    OPT_BLURAY,
+    OPT_REMUX,
+    OPT_DVDRIP,
+    OPT_DVDREMUX,
+    OPT_WEBRIP,
+    OPT_WEBDL,
+    OPT_WEB,
+    OPT_HDTV,
+    OPT_HDRIP,
+    OPT_TVRIP,
+    OPT_VHSRIP,
+  };
+
   static struct option long_options[] = {
-      {"tmdb", required_argument, 0, 't'},
-      {"help", no_argument, 0, 'h'},
+      {"tmdb", required_argument, 0, OPT_TMDB},
+      {"help", no_argument, 0, OPT_HELP},
+      /* Language flags. */
+      {"multi", no_argument, 0, OPT_MULTI},
+      {"multivfi", no_argument, 0, OPT_MULTIVFI},
+      {"multivff", no_argument, 0, OPT_MULTIVFF},
+      {"multivfq", no_argument, 0, OPT_MULTIVFQ},
+      {"multivf2", no_argument, 0, OPT_MULTIVF2},
+      {"multivof", no_argument, 0, OPT_MULTIVOF},
+      {"dual_vfi", no_argument, 0, OPT_DUAL_VFI},
+      {"dual_vff", no_argument, 0, OPT_DUAL_VFF},
+      {"dual_vfq", no_argument, 0, OPT_DUAL_VFQ},
+      {"french", no_argument, 0, OPT_FRENCH},
+      {"vff", no_argument, 0, OPT_VFF},
+      {"vof", no_argument, 0, OPT_VOF},
+      {"truefrench", no_argument, 0, OPT_TRUEFRENCH},
+      {"vo", no_argument, 0, OPT_VO},
+      {"vost", no_argument, 0, OPT_VOST},
+      {"fansub", no_argument, 0, OPT_FANSUB},
+      /* Source flags. */
+      {"bdrip", no_argument, 0, OPT_BDRIP},
+      {"bluray", no_argument, 0, OPT_BLURAY},
+      {"remux", no_argument, 0, OPT_REMUX},
+      {"dvdrip", no_argument, 0, OPT_DVDRIP},
+      {"dvdremux", no_argument, 0, OPT_DVDREMUX},
+      {"webrip", no_argument, 0, OPT_WEBRIP},
+      {"webdl", no_argument, 0, OPT_WEBDL},
+      {"web", no_argument, 0, OPT_WEB},
+      {"hdtv", no_argument, 0, OPT_HDTV},
+      {"hdrip", no_argument, 0, OPT_HDRIP},
+      {"tvrip", no_argument, 0, OPT_TVRIP},
+      {"vhsrip", no_argument, 0, OPT_VHSRIP},
       {0, 0, 0, 0},
   };
 
   int opt;
   while ((opt = getopt_long(argc, argv, "h", long_options, NULL)) != -1) {
     switch (opt) {
-    case 't':
+    case OPT_TMDB:
       tmdb_id = atoi(optarg);
       break;
-    case 'h':
+    case OPT_HELP:
       print_usage(argv[0]);
       return 0;
+    /* Language flags. */
+    case OPT_MULTI:
+      cli_lang_tag = LANG_TAG_MULTI;
+      break;
+    case OPT_MULTIVFI:
+      cli_lang_tag = LANG_TAG_MULTI_VFI;
+      break;
+    case OPT_MULTIVFF:
+      cli_lang_tag = LANG_TAG_MULTI_VFF;
+      break;
+    case OPT_MULTIVFQ:
+      cli_lang_tag = LANG_TAG_MULTI_VFQ;
+      break;
+    case OPT_MULTIVF2:
+      cli_lang_tag = LANG_TAG_MULTI_VF2;
+      break;
+    case OPT_MULTIVOF:
+      cli_lang_tag = LANG_TAG_MULTI_VOF;
+      break;
+    case OPT_DUAL_VFI:
+      cli_lang_tag = LANG_TAG_DUAL_VFI;
+      break;
+    case OPT_DUAL_VFF:
+      cli_lang_tag = LANG_TAG_DUAL_VFF;
+      break;
+    case OPT_DUAL_VFQ:
+      cli_lang_tag = LANG_TAG_DUAL_VFQ;
+      break;
+    case OPT_FRENCH:
+      cli_lang_tag = LANG_TAG_FRENCH;
+      break;
+    case OPT_VFF:
+      cli_lang_tag = LANG_TAG_VFF;
+      break;
+    case OPT_VOF:
+      cli_lang_tag = LANG_TAG_VOF;
+      break;
+    case OPT_TRUEFRENCH:
+      cli_lang_tag = LANG_TAG_TRUEFRENCH;
+      break;
+    case OPT_VO:
+      cli_lang_tag = LANG_TAG_VO;
+      break;
+    case OPT_VOST:
+      cli_lang_tag = LANG_TAG_VOST;
+      break;
+    case OPT_FANSUB:
+      cli_lang_tag = LANG_TAG_FANSUB;
+      break;
+    /* Source flags. */
+    case OPT_BDRIP:
+      cli_source = SOURCE_BDRIP;
+      break;
+    case OPT_BLURAY:
+      cli_source = SOURCE_BLURAY;
+      break;
+    case OPT_REMUX:
+      cli_source = SOURCE_REMUX;
+      break;
+    case OPT_DVDRIP:
+      cli_source = SOURCE_DVDRIP;
+      break;
+    case OPT_DVDREMUX:
+      cli_source = SOURCE_DVDREMUX;
+      break;
+    case OPT_WEBRIP:
+      cli_source = SOURCE_WEBRIP;
+      break;
+    case OPT_WEBDL:
+      cli_source = SOURCE_WEBDL;
+      break;
+    case OPT_WEB:
+      cli_source = SOURCE_WEB;
+      break;
+    case OPT_HDTV:
+      cli_source = SOURCE_HDTV;
+      break;
+    case OPT_HDRIP:
+      cli_source = SOURCE_HDRIP;
+      break;
+    case OPT_TVRIP:
+      cli_source = SOURCE_TVRIP;
+      break;
+    case OPT_VHSRIP:
+      cli_source = SOURCE_VHSRIP;
+      break;
     default:
       print_usage(argv[0]);
       return 1;
@@ -205,11 +469,14 @@ int main(int argc, char *argv[]) {
       printf("  Year:     %d\n", tmdb.release_year);
       printf("  Language: %s\n", tmdb.original_language);
 
-      SourceType source = detect_source_from_filename(filepath);
+      /* Source: CLI flag > filename detection > interactive prompt. */
+      SourceType source = cli_source;
+      if (source == SOURCE_UNKNOWN)
+        source = detect_source_from_filename(filepath);
       if (source == SOURCE_UNKNOWN)
         source = ask_source();
 
-      /* Determine French variant if French audio is present. */
+      /* Determine French variant for OPUS naming. */
       FrenchVariant fv = FRENCH_VARIANT_UNKNOWN;
       bool has_french = false;
       if (tracks.error == 0) {
@@ -221,15 +488,25 @@ int main(int argc, char *argv[]) {
           }
         }
       }
-
-      if (has_french) {
+      if (has_french)
         fv = detect_french_variant_from_filename(filepath);
-        if (fv == FRENCH_VARIANT_UNKNOWN)
-          fv = ask_french_variant();
-      }
 
-      LanguageTag lang_tag =
-          determine_language_tag(&tracks, tmdb.original_language, fv);
+      /* Language: CLI flag > auto-detection > interactive prompt. */
+      LanguageTag lang_tag;
+      if (cli_lang_tag != LANG_TAG_NONE) {
+        lang_tag = cli_lang_tag;
+      } else {
+        LanguageTag auto_tag =
+            determine_language_tag(&tracks, tmdb.original_language, fv);
+
+        /* If auto-detection produced a definitive result, use it.
+           Otherwise ask the user interactively. */
+        if (auto_tag != LANG_TAG_VO || tracks.audio_count <= 1) {
+          lang_tag = auto_tag;
+        } else {
+          lang_tag = ask_language_tag(&tracks);
+        }
+      }
 
       char output_name[1024];
       build_output_filename(output_name, sizeof(output_name),
