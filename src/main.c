@@ -20,6 +20,7 @@
 #include "rpu_extract.h"
 #include "tmdb.h"
 #include "utils.h"
+#include "video_encode.h"
 
 static void print_usage(const char *prog) {
   fprintf(stderr,
@@ -502,12 +503,13 @@ int main(int argc, char *argv[]) {
   /* ---- Grain analysis ---- */
   printf("\nAnalyzing grain (this may take a moment)...\n");
   GrainScore grain = get_grain_score(filepath);
+  int film_grain = 0;
   if (grain.error == 0) {
     printf("  Frames analyzed: %d\n", grain.frames_analyzed);
     printf("  Avg TOUT:        %.4f%%\n", grain.avg_tout);
     printf("  Avg Y-Range:     %.1f\n", grain.avg_yrange);
     printf("  Grain score:     %.4f\n", grain.grain_score);
-    int film_grain = get_film_grain_from_score(grain.grain_score);
+    film_grain = get_film_grain_from_score(grain.grain_score);
     printf("  Film grain:      %d\n", film_grain);
   }
 
@@ -618,11 +620,11 @@ int main(int argc, char *argv[]) {
       }
 
       /* ---- RPU extraction (Dolby Vision) ---- */
+      char rpu_path[4096] = "";
       if (hdr.error == 0 && hdr.has_dolby_vision) {
         char rpu_name[2048];
         build_rpu_filename(rpu_name, sizeof(rpu_name), base_name);
 
-        char rpu_path[4096];
         snprintf(rpu_path, sizeof(rpu_path), "%s%s", output_dir, rpu_name);
 
         printf("\nExtracting Dolby Vision RPU...\n");
@@ -632,8 +634,44 @@ int main(int argc, char *argv[]) {
           printf("  [SKIP] %s (already exists)\n", rpu_name);
         else if (rpu_res.error == 0)
           printf("  [OK]   %s (%d RPUs)\n", rpu_name, rpu_res.rpu_count);
-        else
+        else {
           fprintf(stderr, "  [FAIL] %s (error %d)\n", rpu_name, rpu_res.error);
+          rpu_path[0] = '\0'; /* Don't use RPU on failure */
+        }
+      }
+
+      /* ---- AV1 video encoding ---- */
+      {
+        char av1_path[4096];
+        snprintf(av1_path, sizeof(av1_path), "%s%s", output_dir, output_name);
+
+        int bitrate = get_target_bitrate(info.height,
+                                          grain.error == 0 ? grain.grain_score : 0.0);
+        printf("\nEncoding video to AV1 (%d kbps, %s, %s)...\n",
+               bitrate, quality_type_to_string(cli_quality),
+               info.height >= 2160 ? "4K" : "HD");
+
+        VideoEncodeConfig vcfg = {
+            .input_path = filepath,
+            .output_path = av1_path,
+            .rpu_path = rpu_path[0] ? rpu_path : NULL,
+            .preset = enc_preset,
+            .film_grain = film_grain,
+            .target_bitrate = bitrate,
+            .info = &info,
+            .crop = (crop.error == 0) ? &crop : NULL,
+            .hdr = &hdr,
+        };
+
+        VideoEncodeResult vr = encode_video(&vcfg);
+
+        if (vr.skipped)
+          printf("  [SKIP] %s (already exists)\n", output_name);
+        else if (vr.error == 0)
+          printf("  [OK]   %s (%lld frames, %lld bytes)\n", output_name,
+                 (long long)vr.frames_encoded, (long long)vr.bytes_written);
+        else
+          fprintf(stderr, "  [FAIL] %s (error %d)\n", output_name, vr.error);
       }
     }
   }

@@ -387,6 +387,32 @@ const EncodePreset *get_encode_preset(QualityType quality, int video_height) {
 }
 
 /* ====================================================================== */
+/*  Target bitrate from resolution and grain score                        */
+/* ====================================================================== */
+
+int get_target_bitrate(int video_height, double grain_score) {
+  int is_4k = (video_height >= 2160);
+  int base_lo = is_4k ? 3000 : 1500;
+  int base_hi = is_4k ? 3500 : 2000;
+
+  /* Interpolate between lo and hi based on grain score (0..0.5 range) */
+  double t = grain_score;
+  if (t < 0.0)
+    t = 0.0;
+  if (t > 0.5)
+    t = 0.5;
+  t = t / 0.5; /* normalize to 0..1 */
+
+  int bitrate = base_lo + (int)(t * (base_hi - base_lo) + 0.5);
+
+  /* Heavy grain bonus */
+  if (grain_score > 0.5)
+    bitrate += 500;
+
+  return bitrate;
+}
+
+/* ====================================================================== */
 /*  Dynamic film grain from grain score                                   */
 /* ====================================================================== */
 

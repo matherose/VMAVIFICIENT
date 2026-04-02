@@ -73,6 +73,19 @@ typedef struct {
 const EncodePreset *get_encode_preset(QualityType quality, int video_height);
 
 /**
+ * @brief Compute target bitrate (kbps) from resolution and grain score.
+ *
+ * HD:  1500 kbps (low grain) to 2000 kbps (high grain).
+ * 4K:  3000 kbps (low grain) to 3500 kbps (high grain).
+ * Heavy grain (score > 0.5) adds 500 kbps.
+ *
+ * @param video_height  Video height in pixels.
+ * @param grain_score   Composite grain score in [0, 1].
+ * @return Target bitrate in kbps.
+ */
+int get_target_bitrate(int video_height, double grain_score);
+
+/**
  * @brief Compute film grain synthesis level from a grain analysis score.
  *
  * Mapping (benchmarked):

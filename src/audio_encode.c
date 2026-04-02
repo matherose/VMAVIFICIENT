@@ -39,7 +39,8 @@ void build_opus_filename(char *buf, size_t bufsize, const char *base_name,
     }
     snprintf(buf, bufsize, "%s.%s.opus", base_name, suffix);
   } else {
-    snprintf(buf, bufsize, "%s.%s.opus", base_name, language);
+    const char *lang = (language && language[0]) ? language : "und";
+    snprintf(buf, bufsize, "%s.%s.opus", base_name, lang);
   }
 }
 
@@ -320,7 +321,11 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
   enc_ctx->sample_rate = 48000;
   enc_ctx->sample_fmt = AV_SAMPLE_FMT_FLT;
   enc_ctx->time_base = (AVRational){1, 48000};
-  av_channel_layout_copy(&enc_ctx->ch_layout, &dec_ctx->ch_layout);
+
+  /* libopus only supports standard channel layouts. Map the decoder's
+     layout to a default one with the same channel count so that
+     variants like 5.1(side) are accepted. */
+  av_channel_layout_default(&enc_ctx->ch_layout, dec_ctx->ch_layout.nb_channels);
 
   av_opt_set(enc_ctx->priv_data, "application", "audio", 0);
   av_opt_set(enc_ctx->priv_data, "vbr", "constrained", 0);
