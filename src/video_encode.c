@@ -377,16 +377,11 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
     goto cleanup;
   }
 
-  /* Determine if we need pixel format conversion.
-     SVT-AV1 expects YUV420P (8-bit) or YUV420P10LE (10-bit). */
-  int is_10bit = (dec_ctx->pix_fmt == AV_PIX_FMT_YUV420P10LE ||
-                  dec_ctx->pix_fmt == AV_PIX_FMT_YUV420P10BE ||
-                  dec_ctx->pix_fmt == AV_PIX_FMT_P010LE ||
-                  dec_ctx->pix_fmt == AV_PIX_FMT_P010BE);
-  enum AVPixelFormat target_pix_fmt =
-      is_10bit ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
-  int bit_depth = is_10bit ? 10 : 8;
-  int bytes_per_sample = is_10bit ? 2 : 1;
+  /* Always encode in 10-bit for best quality and SVT-AV1 compatibility.
+     swscale handles the conversion from any source format. */
+  enum AVPixelFormat target_pix_fmt = AV_PIX_FMT_YUV420P10LE;
+  int bit_depth = 10;
+  int bytes_per_sample = 2;
 
   /* Always use swscale to copy frames into our padded buffer.
      This guarantees the buffer is large enough for SVT-AV1's internal
