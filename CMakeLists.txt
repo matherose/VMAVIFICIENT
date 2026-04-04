@@ -298,54 +298,6 @@ if(APPLE)
 endif()
 
 # ===========================================================================
-# Test binary for PGS-to-SRT conversion
-# ===========================================================================
-add_executable(test_pgs
-    test_pgs.c
-    src/media_tracks.c
-    src/subtitle_convert.c
-    src/utils.c
-)
-
-target_include_directories(test_pgs PRIVATE
-    "${CMAKE_SOURCE_DIR}/include"
-    "${SVTAV1_INSTALL}/include"
-    ${TESSERACT_INCLUDE_DIRS}
-    ${LEPTONICA_INCLUDE_DIRS}
-)
-
-target_link_directories(test_pgs PRIVATE
-    ${TESSERACT_LIBRARY_DIRS}
-    ${LEPTONICA_LIBRARY_DIRS}
-)
-
-target_link_libraries(test_pgs PRIVATE
-    FFmpeg::avformat
-    FFmpeg::avfilter
-    FFmpeg::avcodec
-    FFmpeg::swresample
-    FFmpeg::swscale
-    FFmpeg::avutil
-    SvtAv1::Enc
-    Dovi::dovi
-    Hdr10Plus::hdr10plus
-    "${OPUS_INSTALL}/lib/libopus.a"
-    Threads::Threads
-    ${TESSERACT_LIBRARIES}
-    ${LEPTONICA_LIBRARIES}
-    z
-    m
-)
-
-if(APPLE)
-    target_link_libraries(test_pgs PRIVATE
-        iconv
-        "-framework CoreFoundation"
-        "-framework Security"
-    )
-endif()
-
-# ===========================================================================
 # Doxygen documentation (optional)
 # ===========================================================================
 find_package(Doxygen QUIET)

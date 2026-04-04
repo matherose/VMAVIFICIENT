@@ -435,6 +435,62 @@ static PIX *pgs_bitmap_to_pix(const uint8_t *bitmap, int w, int h,
   return pix;
 }
 
+/**
+ * Prepare a PGS bitmap PIX for OCR:
+ *  1. Add white padding around all edges (characters at the border confuse
+ *     Tesseract — especially "Il" misread as "|" or "[").
+ *  2. Scale so the text height is in the 40–80 px sweet spot for Tesseract.
+ */
+static PIX *prepare_pix_for_ocr(PIX *src) {
+  int w = pixGetWidth(src);
+  int h = pixGetHeight(src);
+
+  /* Padding: 20 px on each side (or proportional for very small images) */
+  int pad = (h < 30) ? 30 : 20;
+
+  int new_w = w + 2 * pad;
+  int new_h = h + 2 * pad;
+
+  /* Create padded image filled with white */
+  PIX *padded = pixCreate(new_w, new_h, 8);
+  if (!padded)
+    return src;
+  pixSetAll(padded); /* fill white (255 for 8-bit) */
+
+  /* Copy source into center of padded image */
+  pixRasterop(padded, pad, pad, w, h, PIX_SRC, src, 0, 0);
+  pixDestroy(&src);
+
+  /* Scale: target ~3x for subtitle-sized bitmaps (typically 20-50px tall),
+     or 2x for larger ones.  Tesseract is most accurate at ~40-80px x-height. */
+  float scale = 1.0f;
+  int ph = pixGetHeight(padded);
+  if (ph < 60)
+    scale = 3.0f;
+  else if (ph < 120)
+    scale = 2.0f;
+
+  if (scale > 1.0f) {
+    PIX *scaled = pixScale(padded, scale, scale);
+    if (scaled) {
+      pixDestroy(&padded);
+      padded = scaled;
+    }
+  }
+
+  /* Otsu binarization: produces a clean 1bpp image that Tesseract
+     handles much better than raw grayscale for glyph discrimination */
+  PIX *binary = pixOtsuThreshOnBackgroundNorm(padded, NULL, 10, 15, 100,
+                                               50, 255, 2, 2, 0.1, NULL);
+  if (binary) {
+    pixDestroy(&padded);
+
+    return binary;
+  }
+
+  return padded;
+}
+
 /* ====================================================================== */
 /*  Progress display                                                      */
 /* ====================================================================== */
@@ -515,9 +571,27 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
   if (!tess_lang || !tess_lang[0])
     tess_lang = iso639_to_tesseract_lang(track->language);
 
-  /* Initialize Tesseract */
+  /* Initialize Tesseract — prefer tessdata_best for higher accuracy.
+     Try TESSDATA_PREFIX env first, then common paths. */
+  const char *tessdata_path = getenv("TESSDATA_PREFIX");
+  if (!tessdata_path || !tessdata_path[0]) {
+    /* Common tessdata_best locations */
+    static const char *paths[] = {
+        "/usr/local/share/tessdata",
+        "/opt/homebrew/share/tessdata",
+        NULL,
+    };
+    for (int i = 0; paths[i]; i++) {
+      struct stat tst;
+      if (stat(paths[i], &tst) == 0) {
+        tessdata_path = paths[i];
+        break;
+      }
+    }
+  }
+
   TessBaseAPI *tess = TessBaseAPICreate();
-  if (TessBaseAPIInit3(tess, NULL, tess_lang) != 0) {
+  if (TessBaseAPIInit3(tess, tessdata_path, tess_lang) != 0) {
     fprintf(stderr, "  OCR Error: Tesseract init failed for lang '%s'\n",
             tess_lang);
     fprintf(stderr, "  Make sure tessdata is installed for this language.\n");
@@ -527,6 +601,8 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
   }
 
   TessBaseAPISetPageSegMode(tess, PSM_SINGLE_BLOCK);
+
+  TessBaseAPISetVariable(tess, "preserve_interword_spaces", "1");
 
   /* Open input with FFmpeg (for demuxing only, no subtitle decoding) */
   AVFormatContext *ifmt_ctx = NULL;
@@ -642,15 +718,7 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
         free(bitmap);
 
         if (pix) {
-          /* Scale up small images for better OCR accuracy */
-          if (pixGetWidth(pix) < 400 || pixGetHeight(pix) < 40) {
-            PIX *scaled = pixScale(pix, 2.0, 2.0);
-            if (scaled) {
-              pixDestroy(&pix);
-              pix = scaled;
-            }
-          }
-
+          pix = prepare_pix_for_ocr(pix);
           prev_pix = pix;
           prev_pts_ms = pts_ms;
         }
