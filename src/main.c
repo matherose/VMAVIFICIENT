@@ -8,9 +8,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "audio_encode.h"
 #include "encode_preset.h"
+#include "final_mux.h"
 #include "media_analysis.h"
 #include "media_crop.h"
 #include "media_hdr.h"
@@ -18,6 +20,7 @@
 #include "media_naming.h"
 #include "media_tracks.h"
 #include "rpu_extract.h"
+#include "subtitle_convert.h"
 #include "tmdb.h"
 #include "utils.h"
 #include "video_encode.h"
@@ -28,6 +31,8 @@ static void print_usage(const char *prog) {
           "\n"
           "Options:\n"
           "  --tmdb <id>      TMDB movie ID for naming (requires TMDB_API_KEY)\n"
+          "  --bitrate <kbps> Override target video bitrate (e.g. 3500)\n"
+          "  --srt <path>     Additional SRT subtitle file (can be repeated)\n"
           "  --help           Show this help\n"
           "\n"
           "Language flags (override auto-detection):\n"
@@ -208,13 +213,18 @@ int main(int argc, char *argv[]) {
 
   /* ---- CLI parsing ---- */
   int tmdb_id = 0;
+  int cli_bitrate = 0; /* 0 = auto-compute from resolution/grain */
   LanguageTag cli_lang_tag = LANG_TAG_NONE;
   SourceType cli_source = SOURCE_UNKNOWN;
   QualityType cli_quality = QUALITY_LIVEACTION;
+  const char *extra_srt_paths[16] = {NULL};
+  int extra_srt_count = 0;
 
   enum {
     OPT_TMDB = 't',
     OPT_HELP = 'h',
+    OPT_BITRATE = 'b',
+    OPT_SRT = 's',
     /* Language flags (start at 256 to avoid ASCII collision). */
     OPT_MULTI = 256,
     OPT_MULTIVFI,
@@ -255,6 +265,8 @@ int main(int argc, char *argv[]) {
 
   static struct option long_options[] = {
       {"tmdb", required_argument, 0, OPT_TMDB},
+      {"bitrate", required_argument, 0, OPT_BITRATE},
+      {"srt", required_argument, 0, OPT_SRT},
       {"help", no_argument, 0, OPT_HELP},
       /* Language flags. */
       {"multi", no_argument, 0, OPT_MULTI},
@@ -296,10 +308,23 @@ int main(int argc, char *argv[]) {
   };
 
   int opt;
-  while ((opt = getopt_long(argc, argv, "h", long_options, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "hb:s:", long_options, NULL)) != -1) {
     switch (opt) {
     case OPT_TMDB:
       tmdb_id = atoi(optarg);
+      break;
+    case OPT_BITRATE:
+      cli_bitrate = atoi(optarg);
+      if (cli_bitrate <= 0) {
+        fprintf(stderr, "Error: --bitrate must be a positive integer (kbps)\n");
+        return 1;
+      }
+      break;
+    case OPT_SRT:
+      if (extra_srt_count < 16)
+        extra_srt_paths[extra_srt_count++] = optarg;
+      else
+        fprintf(stderr, "Warning: too many --srt files, ignoring '%s'\n", optarg);
       break;
     case OPT_HELP:
       print_usage(argv[0]);
@@ -586,28 +611,52 @@ int main(int argc, char *argv[]) {
       else
         snprintf(output_dir, sizeof(output_dir), "./");
 
+      /* ---- Map FrenchVariant to FrenchAudioOrigin ---- */
+      FrenchAudioOrigin fr_audio_origin = FRENCH_AUDIO_VFF;
+      switch (fv) {
+      case FRENCH_VARIANT_VFQ:
+        fr_audio_origin = FRENCH_AUDIO_VFQ;
+        break;
+      case FRENCH_VARIANT_VFI:
+        fr_audio_origin = FRENCH_AUDIO_VFI;
+        break;
+      default:
+        fr_audio_origin = FRENCH_AUDIO_VFF;
+        break;
+      }
+
       /* ---- OPUS audio encoding ---- */
       int enc_best_count = 0;
       TrackInfo *enc_best =
           select_best_audio_per_language(&tracks, &enc_best_count);
+
+      /* Store OPUS paths and track names for final mux */
+      char opus_paths[32][4096];
+      char audio_names[32][256];
+      int opus_count = 0;
+
       if (enc_best && enc_best_count > 0) {
         printf("\nEncoding %d audio track(s) to OPUS...\n", enc_best_count);
-        for (int i = 0; i < enc_best_count; i++) {
+        for (int i = 0; i < enc_best_count && i < 32; i++) {
           char opus_name[2048];
           build_opus_filename(opus_name, sizeof(opus_name), base_name,
                               enc_best[i].language, fv);
 
-          char opus_path[4096];
-          snprintf(opus_path, sizeof(opus_path), "%s%s", output_dir,
+          snprintf(opus_paths[i], sizeof(opus_paths[i]), "%s%s", output_dir,
                    opus_name);
 
-          printf("  [%d/%d] %s (%s, %dch, %lld kbps)...\n", i + 1,
+          /* Build display name for MKV track */
+          build_audio_track_name(audio_names[i], sizeof(audio_names[i]),
+                                 enc_best[i].language, enc_best[i].channels,
+                                 fr_audio_origin);
+
+          printf("  [%d/%d] %s (%s, %dch, %lld kbps) → \"%s\"...\n", i + 1,
                  enc_best_count, enc_best[i].language, enc_best[i].codec,
                  enc_best[i].channels,
-                 (long long)(enc_best[i].bitrate / 1000));
+                 (long long)(enc_best[i].bitrate / 1000), audio_names[i]);
 
           OpusEncodeResult r =
-              encode_track_to_opus(filepath, &enc_best[i], opus_path);
+              encode_track_to_opus(filepath, &enc_best[i], opus_paths[i]);
 
           if (r.skipped)
             printf("  [SKIP] %s (already exists)\n", opus_name);
@@ -615,8 +664,157 @@ int main(int argc, char *argv[]) {
             printf("  [OK]   %s\n", opus_name);
           else
             fprintf(stderr, "  [FAIL] %s (error %d)\n", opus_name, r.error);
+
+          opus_count++;
         }
-        free(enc_best);
+      }
+
+      /* ---- Subtitle processing ---- */
+      char srt_paths[64][4096];
+      char srt_names[64][256];
+      char srt_langs[64][64];
+      int srt_is_forced[64];
+      int srt_count = 0;
+
+      if (tracks.error == 0 && tracks.subtitle_count > 0) {
+        printf("\nProcessing %d subtitle track(s)...\n",
+               tracks.subtitle_count);
+
+        for (int i = 0; i < tracks.subtitle_count && srt_count < 48; i++) {
+          TrackInfo *sub = &tracks.subtitles[i];
+          const char *lang = sub->language[0] ? sub->language : "und";
+
+          if (is_text_subtitle(sub)) {
+            /* Text subtitle: extract directly to SRT via FFmpeg CLI */
+            char srt_tag[64];
+            snprintf(srt_tag, sizeof(srt_tag), "%s%s%s", lang,
+                     sub->is_forced ? ".forced" : "",
+                     sub->is_sdh ? ".sdh" : "");
+
+            snprintf(srt_paths[srt_count], sizeof(srt_paths[0]),
+                     "%s%s.%s.srt", output_dir, base_name, srt_tag);
+
+            /* Build display name */
+            build_subtitle_track_name(srt_names[srt_count],
+                                      sizeof(srt_names[0]), lang, 1,
+                                      sub->is_forced, sub->is_sdh);
+            snprintf(srt_langs[srt_count], sizeof(srt_langs[0]), "%s", lang);
+            srt_is_forced[srt_count] = sub->is_forced;
+
+            /* Check if SRT already exists */
+            struct stat srt_st;
+            if (stat(srt_paths[srt_count], &srt_st) == 0 &&
+                srt_st.st_size > 0) {
+              printf("  [SKIP] %s.%s.srt (already exists) → \"%s\"\n",
+                     base_name, srt_tag, srt_names[srt_count]);
+              srt_count++;
+            } else {
+              /* Extract text subtitle using ffmpeg command */
+              char cmd[8192];
+              snprintf(cmd, sizeof(cmd),
+                       "ffmpeg -y -loglevel error -i \"%s\" -map 0:%d "
+                       "-c:s srt \"%s\"",
+                       filepath, sub->index, srt_paths[srt_count]);
+
+              printf("  Extracting #%d %s (%s) → \"%s\"...\n", sub->index,
+                     lang, sub->codec, srt_names[srt_count]);
+
+              int rc = system(cmd);
+              if (rc == 0) {
+                printf("  [OK]   %s.%s.srt\n", base_name, srt_tag);
+                srt_count++;
+              } else {
+                fprintf(stderr, "  [FAIL] extraction failed (rc=%d)\n", rc);
+              }
+            }
+          } else if (is_pgs_subtitle(sub)) {
+            /* PGS bitmap subtitle: OCR with Tesseract */
+
+            /* Check if a text SRT already exists for this language */
+            bool srt_exists_for_lang = false;
+            for (int j = 0; j < srt_count; j++) {
+              if (strcmp(srt_langs[j], lang) == 0 &&
+                  srt_is_forced[j] == sub->is_forced) {
+                srt_exists_for_lang = true;
+                break;
+              }
+            }
+
+            if (srt_exists_for_lang) {
+              printf("  [SKIP] PGS #%d %s (SRT already available)\n",
+                     sub->index, lang);
+              continue;
+            }
+
+            char srt_tag[64];
+            snprintf(srt_tag, sizeof(srt_tag), "%s%s%s.ocr", lang,
+                     sub->is_forced ? ".forced" : "",
+                     sub->is_sdh ? ".sdh" : "");
+
+            snprintf(srt_paths[srt_count], sizeof(srt_paths[0]),
+                     "%s%s.%s.srt", output_dir, base_name, srt_tag);
+
+            build_subtitle_track_name(srt_names[srt_count],
+                                      sizeof(srt_names[0]), lang, 1,
+                                      sub->is_forced, sub->is_sdh);
+            snprintf(srt_langs[srt_count], sizeof(srt_langs[0]), "%s", lang);
+            srt_is_forced[srt_count] = sub->is_forced;
+
+            printf("  OCR PGS #%d %s → \"%s\"...\n", sub->index, lang,
+                   srt_names[srt_count]);
+
+            SubtitleConvertResult scr =
+                convert_pgs_to_srt(filepath, sub, srt_paths[srt_count], NULL);
+
+            if (scr.skipped) {
+              printf("  [SKIP] %s.%s.srt (already exists)\n", base_name,
+                     srt_tag);
+              srt_count++;
+            } else if (scr.error == 0 && scr.subtitle_count > 0) {
+              printf("  [OK]   %s.%s.srt (%d subtitles)\n", base_name,
+                     srt_tag, scr.subtitle_count);
+              srt_count++;
+            } else if (scr.error == 0) {
+              printf("  [WARN] %s.%s.srt (no subtitles extracted)\n",
+                     base_name, srt_tag);
+            } else {
+              fprintf(stderr, "  [FAIL] OCR failed (error %d)\n", scr.error);
+            }
+          }
+        }
+      }
+
+      /* ---- Add user-supplied SRT files ---- */
+      for (int i = 0; i < extra_srt_count && srt_count < 64; i++) {
+        snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s",
+                 extra_srt_paths[i]);
+
+        /* Try to guess language from filename */
+        const char *srt_lang = "und";
+        if (strstr(extra_srt_paths[i], ".fre.") ||
+            strstr(extra_srt_paths[i], ".fra."))
+          srt_lang = "fre";
+        else if (strstr(extra_srt_paths[i], ".eng."))
+          srt_lang = "eng";
+        else if (strstr(extra_srt_paths[i], ".ger.") ||
+                 strstr(extra_srt_paths[i], ".deu."))
+          srt_lang = "ger";
+        else if (strstr(extra_srt_paths[i], ".spa."))
+          srt_lang = "spa";
+        else if (strstr(extra_srt_paths[i], ".ita."))
+          srt_lang = "ita";
+
+        int forced = (strstr(extra_srt_paths[i], "forced") != NULL) ? 1 : 0;
+
+        build_subtitle_track_name(srt_names[srt_count],
+                                  sizeof(srt_names[0]), srt_lang, 1,
+                                  forced, 0);
+        snprintf(srt_langs[srt_count], sizeof(srt_langs[0]), "%s", srt_lang);
+        srt_is_forced[srt_count] = forced;
+
+        printf("  [SRT]  %s → \"%s\"\n", extra_srt_paths[i],
+               srt_names[srt_count]);
+        srt_count++;
       }
 
       /* ---- RPU extraction (Dolby Vision) ---- */
@@ -641,19 +839,22 @@ int main(int argc, char *argv[]) {
       }
 
       /* ---- AV1 video encoding ---- */
-      {
-        char av1_path[4096];
-        snprintf(av1_path, sizeof(av1_path), "%s%s", output_dir, output_name);
+      char av1_video_path[4096];
+      snprintf(av1_video_path, sizeof(av1_video_path), "%s%s.video.mkv",
+               output_dir, base_name);
 
-        int bitrate = get_target_bitrate(info.height,
-                                          grain.error == 0 ? grain.grain_score : 0.0);
+      {
+        int bitrate = cli_bitrate > 0
+                          ? cli_bitrate
+                          : get_target_bitrate(info.height,
+                                               grain.error == 0 ? grain.grain_score : 0.0);
         printf("\nEncoding video to AV1 (%d kbps, %s, %s)...\n",
                bitrate, quality_type_to_string(cli_quality),
                info.height >= 2160 ? "4K" : "HD");
 
         VideoEncodeConfig vcfg = {
             .input_path = filepath,
-            .output_path = av1_path,
+            .output_path = av1_video_path,
             .rpu_path = rpu_path[0] ? rpu_path : NULL,
             .preset = enc_preset,
             .film_grain = film_grain,
@@ -666,13 +867,64 @@ int main(int argc, char *argv[]) {
         VideoEncodeResult vr = encode_video(&vcfg);
 
         if (vr.skipped)
-          printf("  [SKIP] %s (already exists)\n", output_name);
+          printf("  [SKIP] video (already exists)\n");
         else if (vr.error == 0)
-          printf("  [OK]   %s (%lld frames, %lld bytes)\n", output_name,
+          printf("  [OK]   video (%lld frames, %lld bytes)\n",
                  (long long)vr.frames_encoded, (long long)vr.bytes_written);
         else
-          fprintf(stderr, "  [FAIL] %s (error %d)\n", output_name, vr.error);
+          fprintf(stderr, "  [FAIL] video (error %d)\n", vr.error);
       }
+
+      /* ---- Final MKV muxing ---- */
+      {
+        char final_path[4096];
+        snprintf(final_path, sizeof(final_path), "%s%s", output_dir,
+                 output_name);
+
+        /* Build mux audio descriptors */
+        MuxAudioTrack mux_audio[32];
+        for (int i = 0; i < opus_count && i < 32; i++) {
+          mux_audio[i].path = opus_paths[i];
+          mux_audio[i].language =
+              enc_best ? enc_best[i].language : "und";
+          mux_audio[i].track_name = audio_names[i];
+          mux_audio[i].is_default = (i == 0) ? 1 : 0;
+        }
+
+        /* Build mux subtitle descriptors */
+        MuxSubtitleTrack mux_subs[64];
+        for (int i = 0; i < srt_count && i < 64; i++) {
+          mux_subs[i].path = srt_paths[i];
+          mux_subs[i].language = srt_langs[i];
+          mux_subs[i].track_name = srt_names[i];
+          mux_subs[i].is_default = 0;
+          mux_subs[i].is_forced = srt_is_forced[i];
+        }
+
+        FinalMuxConfig mux_cfg = {
+            .video_path = av1_video_path,
+            .output_path = final_path,
+            .audio = mux_audio,
+            .audio_count = opus_count,
+            .subs = mux_subs,
+            .sub_count = srt_count,
+        };
+
+        printf("\nMuxing final MKV (%d audio, %d subtitle tracks)...\n",
+               opus_count, srt_count);
+
+        FinalMuxResult mr = final_mux(&mux_cfg);
+
+        if (mr.skipped)
+          printf("  [SKIP] %s (already exists)\n", output_name);
+        else if (mr.error == 0)
+          printf("  [OK]   %s\n", output_name);
+        else
+          fprintf(stderr, "  [FAIL] %s (error %d)\n", output_name, mr.error);
+      }
+
+      if (enc_best)
+        free(enc_best);
     }
   }
 

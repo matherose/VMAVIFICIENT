@@ -6,6 +6,7 @@
 #ifndef MEDIA_TRACKS_H
 #define MEDIA_TRACKS_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 /**
@@ -64,5 +65,45 @@ void free_media_tracks(MediaTracks *tracks);
  */
 TrackInfo *select_best_audio_per_language(const MediaTracks *tracks,
                                           int *out_count);
+
+/**
+ * @brief French audio origin for track naming.
+ */
+typedef enum {
+  FRENCH_AUDIO_VFF,  /**< France */
+  FRENCH_AUDIO_VFQ,  /**< Quebec */
+  FRENCH_AUDIO_VFI,  /**< International */
+} FrenchAudioOrigin;
+
+/**
+ * @brief Build a display name for an audio track in MKV.
+ *
+ * Format: "Language [Channels]"
+ * French exception: "Français (VFF) [Channels]", etc.
+ *
+ * @param buf         Output buffer.
+ * @param bufsize     Size of output buffer.
+ * @param language    ISO 639-2/B 3-letter language code.
+ * @param channels    Number of audio channels.
+ * @param fr_origin   French origin variant (only used if language is French).
+ */
+void build_audio_track_name(char *buf, size_t bufsize, const char *language,
+                            int channels, FrenchAudioOrigin fr_origin);
+
+/**
+ * @brief Build a display name for a subtitle track in MKV.
+ *
+ * Format: "Language | Text/SRT (type)"
+ * type is "forced", "sdh", or "full".
+ *
+ * @param buf         Output buffer.
+ * @param bufsize     Size of output buffer.
+ * @param language    ISO 639-2/B 3-letter language code.
+ * @param is_srt      1 if the subtitle is SRT/text, 0 if PGS/bitmap.
+ * @param is_forced   1 if the subtitle is forced.
+ * @param is_sdh      1 if the subtitle is SDH.
+ */
+void build_subtitle_track_name(char *buf, size_t bufsize, const char *language,
+                               int is_srt, int is_forced, int is_sdh);
 
 #endif /* MEDIA_TRACKS_H */

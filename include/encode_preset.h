@@ -57,6 +57,23 @@ typedef struct {
   int enable_overlays;            /**< Overlays (0–1, -1=default). */
   int adaptive_film_grain;        /**< Resolution-adaptive grain (0–1). */
   int alt_lambda_factors;         /**< Alternative RDO lambdas (0–1). */
+  int enable_qm;                  /**< Quantization matrices (0–1). */
+  int qm_min;                     /**< QM min level (0–15, -1=default). */
+  int qm_max;                     /**< QM max level (0–15, -1=default). */
+  int spy_rd;                     /**< Perceptual RDO mode (0–4, -1=default). */
+  int undershoot_pct;             /**< VBR undershoot limit (0–100, -1=default). */
+  int overshoot_pct;              /**< VBR overshoot limit (0–100, -1=default). */
+  int min_qp;                     /**< Minimum QP allowed (0–63, -1=default). */
+  int max_qp;                     /**< Maximum QP allowed (0–63, -1=default). */
+  int enable_mfmv;                /**< Motion field motion vectors (0–1, -1=default). */
+  int unrestricted_mv;            /**< Unrestricted motion vectors (0–1, -1=default). */
+  int irefresh_type;              /**< Intra refresh type (1=open GOP, 2=closed, -1=default). */
+  int aq_mode;                    /**< Adaptive quantization mode (0–2, -1=default). */
+  int enable_restoration;         /**< Restoration filter (0–1, -1=default). */
+  int recode_loop;                /**< Recode loop level (0–4, -1=default). */
+  int look_ahead_distance;        /**< VBR look-ahead frames (0–120, -1=default). */
+  int enable_dg;                  /**< Dynamic GOP (0–1, -1=default). */
+  int fast_decode;                /**< Decoder-speed optimization level (0–2, -1=default). */
 } EncodePreset;
 
 /**

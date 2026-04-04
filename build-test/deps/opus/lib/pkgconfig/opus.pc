@@ -1,0 +1,16 @@
+# Opus codec reference implementation pkg-config file
+
+prefix=/Volumes/Data/MEDIAS/MOVIE/VMAVIFICIENT/build-test/deps/opus
+exec_prefix=/Volumes/Data/MEDIAS/MOVIE/VMAVIFICIENT/build-test/deps/opus
+libdir=/Volumes/Data/MEDIAS/MOVIE/VMAVIFICIENT/build-test/deps/opus/lib
+includedir=/Volumes/Data/MEDIAS/MOVIE/VMAVIFICIENT/build-test/deps/opus/include
+
+Name: Opus
+Description: Opus IETF audio codec ( build)
+URL: https://opus-codec.org/
+Version: 1.5.2
+Requires:
+Conflicts:
+Libs: -L/Volumes/Data/MEDIAS/MOVIE/VMAVIFICIENT/build-test/deps/opus/lib -lopus
+Libs.private: -lm
+Cflags: -I/Volumes/Data/MEDIAS/MOVIE/VMAVIFICIENT/build-test/deps/opus/include/opus

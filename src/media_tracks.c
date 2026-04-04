@@ -286,6 +286,116 @@ static int codec_quality_rank(int codec_id, int profile) {
   }
 }
 
+/* ====================================================================== */
+/*  Track naming                                                          */
+/* ====================================================================== */
+
+/**
+ * @brief Map ISO 639-2/B code to human-readable language name.
+ */
+static const char *language_display_name(const char *code) {
+  if (!code || !code[0])
+    return "Unknown";
+
+  static const struct {
+    const char *code;
+    const char *name;
+  } names[] = {
+      {"eng", "English"},       {"fre", "Fran\xc3\xa7""ais"},
+      {"fra", "Fran\xc3\xa7""ais"}, {"ger", "German"},
+      {"deu", "German"},        {"spa", "Spanish"},
+      {"ita", "Italian"},       {"por", "Portuguese"},
+      {"dut", "Dutch"},         {"nld", "Dutch"},
+      {"rus", "Russian"},       {"jpn", "Japanese"},
+      {"chi", "Chinese"},       {"zho", "Chinese"},
+      {"kor", "Korean"},        {"ara", "Arabic"},
+      {"pol", "Polish"},        {"swe", "Swedish"},
+      {"nor", "Norwegian"},     {"dan", "Danish"},
+      {"fin", "Finnish"},       {"tur", "Turkish"},
+      {"hin", "Hindi"},         {"cze", "Czech"},
+      {"ces", "Czech"},         {"hun", "Hungarian"},
+      {"rum", "Romanian"},      {"ron", "Romanian"},
+      {"tha", "Thai"},          {"vie", "Vietnamese"},
+      {"gre", "Greek"},         {"ell", "Greek"},
+      {"heb", "Hebrew"},        {"ind", "Indonesian"},
+      {"may", "Malay"},         {"msa", "Malay"},
+      {"ukr", "Ukrainian"},     {"bul", "Bulgarian"},
+      {"hrv", "Croatian"},      {"slo", "Slovak"},
+      {"slk", "Slovak"},
+      {NULL, NULL},
+  };
+
+  for (int i = 0; names[i].code; i++) {
+    if (strcmp(code, names[i].code) == 0)
+      return names[i].name;
+  }
+  return code; /* fallback: return the raw code */
+}
+
+/**
+ * @brief Convert channel count to layout string.
+ */
+static const char *channels_to_layout(int channels) {
+  switch (channels) {
+  case 1:
+    return "1.0";
+  case 2:
+    return "2.0";
+  case 3:
+    return "2.1";
+  case 6:
+    return "5.1";
+  case 8:
+    return "7.1";
+  default: {
+    static char buf[16];
+    snprintf(buf, sizeof(buf), "%dch", channels);
+    return buf;
+  }
+  }
+}
+
+void build_audio_track_name(char *buf, size_t bufsize, const char *language,
+                            int channels, FrenchAudioOrigin fr_origin) {
+  const char *layout = channels_to_layout(channels);
+
+  if (language &&
+      (strcmp(language, "fre") == 0 || strcmp(language, "fra") == 0)) {
+    const char *variant;
+    switch (fr_origin) {
+    case FRENCH_AUDIO_VFQ:
+      variant = "VFQ";
+      break;
+    case FRENCH_AUDIO_VFI:
+      variant = "VFI";
+      break;
+    default:
+      variant = "VFF";
+      break;
+    }
+    snprintf(buf, bufsize, "Fran\xc3\xa7""ais (%s) [%s]", variant, layout);
+  } else {
+    const char *name = language_display_name(language);
+    snprintf(buf, bufsize, "%s [%s]", name, layout);
+  }
+}
+
+void build_subtitle_track_name(char *buf, size_t bufsize, const char *language,
+                               int is_srt, int is_forced, int is_sdh) {
+  const char *name = language_display_name(language);
+  const char *format = is_srt ? "SRT" : "Text";
+  const char *type = "full";
+  if (is_forced)
+    type = "forced";
+  else if (is_sdh)
+    type = "sdh";
+  snprintf(buf, bufsize, "%s | %s (%s)", name, format, type);
+}
+
+/* ====================================================================== */
+/*  Track selection                                                       */
+/* ====================================================================== */
+
 static bool track_is_better(const TrackInfo *a, const TrackInfo *b) {
   int ra = codec_quality_rank(a->codec_id, a->profile);
   int rb = codec_quality_rank(b->codec_id, b->profile);

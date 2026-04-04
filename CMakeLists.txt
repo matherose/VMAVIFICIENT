@@ -26,6 +26,15 @@ if(NOT CARGO_CINSTALL)
 endif()
 find_package(Threads REQUIRED)
 find_package(CURL REQUIRED)
+find_package(PkgConfig REQUIRED)
+
+# Try system pkg-config first, then Homebrew paths
+if(APPLE)
+    set(ENV{PKG_CONFIG_PATH}
+        "$ENV{PKG_CONFIG_PATH}:/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig")
+endif()
+pkg_check_modules(TESSERACT REQUIRED tesseract)
+pkg_check_modules(LEPTONICA REQUIRED lept)
 
 # ---------------------------------------------------------------------------
 # Dependency install prefixes
@@ -238,6 +247,8 @@ add_executable(vmavificient
     src/encode_preset.c
     src/rpu_extract.c
     src/video_encode.c
+    src/subtitle_convert.c
+    src/final_mux.c
     src/tmdb.c
     src/utils.c
 )
@@ -246,6 +257,14 @@ target_include_directories(vmavificient PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
     "${cjson_SOURCE_DIR}"
     "${SVTAV1_INSTALL}/include"
+    ${TESSERACT_INCLUDE_DIRS}
+    ${LEPTONICA_INCLUDE_DIRS}
+)
+
+# Link directories for Tesseract/Leptonica (from pkg-config)
+target_link_directories(vmavificient PRIVATE
+    ${TESSERACT_LIBRARY_DIRS}
+    ${LEPTONICA_LIBRARY_DIRS}
 )
 
 # Link order matters for static archives: dependents before dependencies.
@@ -262,13 +281,64 @@ target_link_libraries(vmavificient PRIVATE
     "${OPUS_INSTALL}/lib/libopus.a"
     Threads::Threads
     CURL::libcurl
+    ${TESSERACT_LIBRARIES}
+    ${LEPTONICA_LIBRARIES}
     cjson
+    z
     m
 )
 
 # macOS needs iconv (for FFmpeg) and frameworks (for Rust std)
 if(APPLE)
     target_link_libraries(vmavificient PRIVATE
+        iconv
+        "-framework CoreFoundation"
+        "-framework Security"
+    )
+endif()
+
+# ===========================================================================
+# Test binary for PGS-to-SRT conversion
+# ===========================================================================
+add_executable(test_pgs
+    test_pgs.c
+    src/media_tracks.c
+    src/subtitle_convert.c
+    src/utils.c
+)
+
+target_include_directories(test_pgs PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"
+    "${SVTAV1_INSTALL}/include"
+    ${TESSERACT_INCLUDE_DIRS}
+    ${LEPTONICA_INCLUDE_DIRS}
+)
+
+target_link_directories(test_pgs PRIVATE
+    ${TESSERACT_LIBRARY_DIRS}
+    ${LEPTONICA_LIBRARY_DIRS}
+)
+
+target_link_libraries(test_pgs PRIVATE
+    FFmpeg::avformat
+    FFmpeg::avfilter
+    FFmpeg::avcodec
+    FFmpeg::swresample
+    FFmpeg::swscale
+    FFmpeg::avutil
+    SvtAv1::Enc
+    Dovi::dovi
+    Hdr10Plus::hdr10plus
+    "${OPUS_INSTALL}/lib/libopus.a"
+    Threads::Threads
+    ${TESSERACT_LIBRARIES}
+    ${LEPTONICA_LIBRARIES}
+    z
+    m
+)
+
+if(APPLE)
+    target_link_libraries(test_pgs PRIVATE
         iconv
         "-framework CoreFoundation"
         "-framework Security"

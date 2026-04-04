@@ -193,6 +193,58 @@ static void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg,
   if (p->enable_overlays != UNSET)
     cfg->enable_overlays = (p->enable_overlays == 1);
 
+  /* Quantization matrices */
+  if (p->enable_qm >= 0)
+    cfg->enable_qm = (p->enable_qm == 1);
+  if (p->qm_min != UNSET)
+    cfg->min_qm_level = (uint8_t)p->qm_min;
+  if (p->qm_max != UNSET)
+    cfg->max_qm_level = (uint8_t)p->qm_max;
+
+  /* VBR rate control limits */
+  if (p->undershoot_pct != UNSET)
+    cfg->under_shoot_pct = (uint32_t)p->undershoot_pct;
+  if (p->overshoot_pct != UNSET)
+    cfg->over_shoot_pct = (uint32_t)p->overshoot_pct;
+
+  /* QP bounds */
+  if (p->min_qp != UNSET)
+    cfg->min_qp_allowed = (uint32_t)p->min_qp;
+  if (p->max_qp != UNSET)
+    cfg->max_qp_allowed = (uint32_t)p->max_qp;
+
+  /* Motion field motion vectors */
+  if (p->enable_mfmv != UNSET)
+    cfg->enable_mfmv = (p->enable_mfmv == 1);
+
+  /* Intra refresh type */
+  if (p->irefresh_type != UNSET)
+    cfg->intra_refresh_type = (int8_t)p->irefresh_type;
+
+  /* Adaptive quantization mode */
+  if (p->aq_mode != UNSET)
+    cfg->aq_mode = (uint8_t)p->aq_mode;
+
+  /* Restoration filter */
+  if (p->enable_restoration != UNSET)
+    cfg->enable_restoration_filtering = (p->enable_restoration == 1);
+
+  /* Recode loop level */
+  if (p->recode_loop != UNSET)
+    cfg->recode_loop = (uint32_t)p->recode_loop;
+
+  /* VBR look-ahead distance */
+  if (p->look_ahead_distance != UNSET)
+    cfg->look_ahead_distance = (uint32_t)p->look_ahead_distance;
+
+  /* Dynamic GOP */
+  if (p->enable_dg != UNSET)
+    cfg->enable_dg = (p->enable_dg == 1);
+
+  /* Decoder speed optimization (0 = favor quality) */
+  if (p->fast_decode != UNSET)
+    cfg->fast_decode = (uint8_t)p->fast_decode;
+
   /* Film grain from grain score analysis */
   cfg->film_grain_denoise_strength = (uint32_t)film_grain;
 }
