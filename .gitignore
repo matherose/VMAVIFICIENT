@@ -694,3 +694,4 @@ FodyWeavers.xsd
 .tmdb_api_key
 build
 *.bin
+*.srt
