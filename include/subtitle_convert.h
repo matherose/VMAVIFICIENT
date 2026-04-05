@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 
+#include "media_naming.h"
 #include "media_tracks.h"
 
 /** @brief Result of a PGS-to-SRT conversion. */
@@ -64,5 +65,23 @@ int is_text_subtitle(const TrackInfo *track);
  * @return Tesseract language string (static, never NULL).
  */
 const char *iso639_to_tesseract_lang(const char *iso639);
+
+/**
+ * @brief Build an SRT output filename following the same naming rules as audio.
+ *
+ * Pattern: base_name.lang[.variant][.forced|.sdh].srt
+ * French variants: fre.fr (VFF), fre.ca (VFQ), fre.vfi (VFI).
+ *
+ * @param buf       Output buffer.
+ * @param bufsize   Buffer size.
+ * @param base_name File base name (without extension).
+ * @param language  ISO 639-2/B language code.
+ * @param fv        French variant (only used for French tracks).
+ * @param is_forced 1 if forced subtitle track.
+ * @param is_sdh    1 if SDH subtitle track.
+ */
+void build_srt_filename(char *buf, size_t bufsize, const char *base_name,
+                        const char *language, FrenchVariant fv, int is_forced,
+                        int is_sdh);
 
 #endif /* SUBTITLE_CONVERT_H */

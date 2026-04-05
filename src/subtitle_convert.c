@@ -64,6 +64,36 @@ const char *iso639_to_tesseract_lang(const char *iso639) {
   return iso639;
 }
 
+void build_srt_filename(char *buf, size_t bufsize, const char *base_name,
+                        const char *language, FrenchVariant fv, int is_forced,
+                        int is_sdh) {
+  const char *lang = (language && language[0]) ? language : "und";
+  const char *lang_suffix = lang;
+
+  /* French variants — same convention as audio */
+  if (strcmp(lang, "fre") == 0 || strcmp(lang, "fra") == 0) {
+    switch (fv) {
+    case FRENCH_VARIANT_VFQ:
+      lang_suffix = "fre.ca";
+      break;
+    case FRENCH_VARIANT_VFI:
+      lang_suffix = "fre.vfi";
+      break;
+    default:
+      lang_suffix = "fre.fr";
+      break;
+    }
+  }
+
+  const char *type_suffix = "";
+  if (is_forced)
+    type_suffix = ".forced";
+  else if (is_sdh)
+    type_suffix = ".sdh";
+
+  snprintf(buf, bufsize, "%s.%s%s.srt", base_name, lang_suffix, type_suffix);
+}
+
 int is_pgs_subtitle(const TrackInfo *track) {
   if (!track)
     return 0;

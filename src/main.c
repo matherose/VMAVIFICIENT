@@ -686,13 +686,12 @@ int main(int argc, char *argv[]) {
 
           if (is_text_subtitle(sub)) {
             /* Text subtitle: extract directly to SRT via FFmpeg CLI */
-            char srt_tag[64];
-            snprintf(srt_tag, sizeof(srt_tag), "%s%s%s", lang,
-                     sub->is_forced ? ".forced" : "",
-                     sub->is_sdh ? ".sdh" : "");
+            char srt_fname[2048];
+            build_srt_filename(srt_fname, sizeof(srt_fname), base_name,
+                               lang, fv, sub->is_forced, sub->is_sdh);
 
             snprintf(srt_paths[srt_count], sizeof(srt_paths[0]),
-                     "%s%s.%s.srt", output_dir, base_name, srt_tag);
+                     "%s%s", output_dir, srt_fname);
 
             /* Build display name */
             build_subtitle_track_name(srt_names[srt_count],
@@ -705,8 +704,8 @@ int main(int argc, char *argv[]) {
             struct stat srt_st;
             if (stat(srt_paths[srt_count], &srt_st) == 0 &&
                 srt_st.st_size > 0) {
-              printf("  [SKIP] %s.%s.srt (already exists) → \"%s\"\n",
-                     base_name, srt_tag, srt_names[srt_count]);
+              printf("  [SKIP] %s (already exists) → \"%s\"\n",
+                     srt_fname, srt_names[srt_count]);
               srt_count++;
             } else {
               /* Extract text subtitle using ffmpeg command */
@@ -721,7 +720,7 @@ int main(int argc, char *argv[]) {
 
               int rc = system(cmd);
               if (rc == 0) {
-                printf("  [OK]   %s.%s.srt\n", base_name, srt_tag);
+                printf("  [OK]   %s\n", srt_fname);
                 srt_count++;
               } else {
                 fprintf(stderr, "  [FAIL] extraction failed (rc=%d)\n", rc);
@@ -746,13 +745,12 @@ int main(int argc, char *argv[]) {
               continue;
             }
 
-            char srt_tag[64];
-            snprintf(srt_tag, sizeof(srt_tag), "%s%s%s.ocr", lang,
-                     sub->is_forced ? ".forced" : "",
-                     sub->is_sdh ? ".sdh" : "");
+            char srt_fname[2048];
+            build_srt_filename(srt_fname, sizeof(srt_fname), base_name,
+                               lang, fv, sub->is_forced, sub->is_sdh);
 
             snprintf(srt_paths[srt_count], sizeof(srt_paths[0]),
-                     "%s%s.%s.srt", output_dir, base_name, srt_tag);
+                     "%s%s", output_dir, srt_fname);
 
             build_subtitle_track_name(srt_names[srt_count],
                                       sizeof(srt_names[0]), lang, 1,
@@ -767,16 +765,14 @@ int main(int argc, char *argv[]) {
                 convert_pgs_to_srt(filepath, sub, srt_paths[srt_count], NULL);
 
             if (scr.skipped) {
-              printf("  [SKIP] %s.%s.srt (already exists)\n", base_name,
-                     srt_tag);
+              printf("  [SKIP] %s (already exists)\n", srt_fname);
               srt_count++;
             } else if (scr.error == 0 && scr.subtitle_count > 0) {
-              printf("  [OK]   %s.%s.srt (%d subtitles)\n", base_name,
-                     srt_tag, scr.subtitle_count);
+              printf("  [OK]   %s (%d subtitles)\n", srt_fname,
+                     scr.subtitle_count);
               srt_count++;
             } else if (scr.error == 0) {
-              printf("  [WARN] %s.%s.srt (no subtitles extracted)\n",
-                     base_name, srt_tag);
+              printf("  [WARN] %s (no subtitles extracted)\n", srt_fname);
             } else {
               fprintf(stderr, "  [FAIL] OCR failed (error %d)\n", scr.error);
             }
