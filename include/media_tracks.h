@@ -73,6 +73,7 @@ typedef enum {
   FRENCH_AUDIO_VFF,  /**< France */
   FRENCH_AUDIO_VFQ,  /**< Quebec */
   FRENCH_AUDIO_VFI,  /**< International */
+  FRENCH_AUDIO_VO,   /**< Original (movie is French) */
 } FrenchAudioOrigin;
 
 /**

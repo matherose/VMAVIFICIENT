@@ -1,6 +1,6 @@
 /**
  * @file media_analysis.c
- * @brief Video grain / noise analysis via signalstats TOUT and Y-Range.
+ * @brief Video grain / noise analysis via denoise-then-subtract method.
  */
 
 #include "media_analysis.h"
@@ -29,19 +29,23 @@
 #define FRAMES_PER_SAMPLE 30
 
 /**
- * @brief Build a buffersrc -> signalstats -> buffersink filter graph.
+ * @brief Build a noise-estimation filter graph.
+ *
+ * Graph: buffer -> split -> hqdn3d(spatial) -> blend(difference) ->
+ *        signalstats -> buffersink
+ *
+ * The difference between original and denoised frames isolates noise/grain.
+ * signalstats YAVG on the difference measures the average noise level.
  */
-static int build_signalstats_graph(AVFilterGraph **graph,
-                                   AVFilterContext **src_ctx,
-                                   AVFilterContext **sink_ctx,
-                                   AVCodecContext *dec_ctx) {
+static int build_noise_graph(AVFilterGraph **graph, AVFilterContext **src_ctx,
+                             AVFilterContext **sink_ctx,
+                             AVCodecContext *dec_ctx) {
   *graph = avfilter_graph_alloc();
   if (!*graph)
     return AVERROR(ENOMEM);
 
   const AVFilter *buffersrc = avfilter_get_by_name("buffer");
   const AVFilter *buffersink = avfilter_get_by_name("buffersink");
-  const AVFilter *signalstats = avfilter_get_by_name("signalstats");
 
   char args[512];
   snprintf(args, sizeof(args),
@@ -56,21 +60,36 @@ static int build_signalstats_graph(AVFilterGraph **graph,
   if (ret < 0)
     return ret;
 
-  AVFilterContext *stats_ctx;
-  ret = avfilter_graph_create_filter(&stats_ctx, signalstats, "signalstats",
-                                     "stat=tout", NULL, *graph);
-  if (ret < 0)
-    return ret;
-
   ret = avfilter_graph_create_filter(sink_ctx, buffersink, "out", NULL, NULL,
                                      *graph);
   if (ret < 0)
     return ret;
 
-  ret = avfilter_link(*src_ctx, 0, stats_ctx, 0);
-  if (ret < 0)
-    return ret;
-  ret = avfilter_link(stats_ctx, 0, *sink_ctx, 0);
+  AVFilterInOut *inputs = avfilter_inout_alloc();
+  AVFilterInOut *outputs = avfilter_inout_alloc();
+  if (!inputs || !outputs) {
+    avfilter_inout_free(&inputs);
+    avfilter_inout_free(&outputs);
+    return AVERROR(ENOMEM);
+  }
+
+  outputs->name = av_strdup("in");
+  outputs->filter_ctx = *src_ctx;
+  outputs->pad_idx = 0;
+  outputs->next = NULL;
+
+  inputs->name = av_strdup("out");
+  inputs->filter_ctx = *sink_ctx;
+  inputs->pad_idx = 0;
+  inputs->next = NULL;
+
+  ret = avfilter_graph_parse_ptr(
+      *graph,
+      "split[a][b];[b]hqdn3d=8:6:0:0[clean];"
+      "[a][clean]blend=all_mode=difference,signalstats",
+      &inputs, &outputs, NULL);
+  avfilter_inout_free(&inputs);
+  avfilter_inout_free(&outputs);
   if (ret < 0)
     return ret;
 
@@ -131,7 +150,7 @@ GrainScore get_grain_score(const char *path) {
     goto cleanup;
   }
 
-  ret = build_signalstats_graph(&graph, &src_ctx, &sink_ctx, dec_ctx);
+  ret = build_noise_graph(&graph, &src_ctx, &sink_ctx, dec_ctx);
   if (ret < 0) {
     result.error = ret;
     goto cleanup;
@@ -149,8 +168,7 @@ GrainScore get_grain_score(const char *path) {
   if (duration <= 0)
     duration = 600 * AV_TIME_BASE;
 
-  double total_tout = 0.0;
-  double total_yrange = 0.0;
+  double total_noise = 0.0;
   int total_frames = 0;
 
   for (int s = 0; s < GRAIN_SAMPLES; s++) {
@@ -178,23 +196,11 @@ GrainScore get_grain_score(const char *path) {
         while (av_buffersink_get_frame(sink_ctx, filt_frame) == 0) {
           AVDictionaryEntry *e;
 
-          e = av_dict_get(filt_frame->metadata, "lavfi.signalstats.TOUT", NULL,
+          e = av_dict_get(filt_frame->metadata, "lavfi.signalstats.YAVG", NULL,
                           0);
           if (e)
-            total_tout += atof(e->value);
+            total_noise += atof(e->value);
 
-          double ylow = 0.0, yhigh = 0.0;
-          e = av_dict_get(filt_frame->metadata, "lavfi.signalstats.YLOW", NULL,
-                          0);
-          if (e)
-            ylow = atof(e->value);
-
-          e = av_dict_get(filt_frame->metadata, "lavfi.signalstats.YHIGH", NULL,
-                          0);
-          if (e)
-            yhigh = atof(e->value);
-
-          total_yrange += (yhigh - ylow);
           frames_this_sample++;
           total_frames++;
           av_frame_unref(filt_frame);
@@ -204,33 +210,23 @@ GrainScore get_grain_score(const char *path) {
   }
 
   if (total_frames > 0) {
-    result.avg_tout = total_tout / total_frames;
-    result.avg_yrange = total_yrange / total_frames;
+    result.avg_noise = total_noise / total_frames;
     result.frames_analyzed = total_frames;
 
-    /* Normalise TOUT: typically 0-100 (percentage of outlier pixels). */
-    double tout_norm = result.avg_tout / 100.0;
-    if (tout_norm > 1.0)
-      tout_norm = 1.0;
-
     /*
-     * Normalise Y-Range: a narrow range (low contrast / flat image) can
-     * indicate noise dominates the signal.  Invert so that narrow range
-     * → higher grain score.
-     *
-     * The maximum Y value depends on the pixel format's bit depth
-     * (255 for 8-bit, 1023 for 10-bit, etc.).
+     * Normalise: avg_noise is the mean pixel value of the difference
+     * (original − denoised) frames.  Divide by the bit-depth maximum
+     * and apply a scale factor so the score spans [0, 1] for typical
+     * Blu-ray content.
      */
     const AVPixFmtDescriptor *pix_desc =
         av_pix_fmt_desc_get(dec_ctx->pix_fmt);
     int bits = pix_desc ? pix_desc->comp[0].depth : 8;
-    double yrange_max = (1 << bits) - 1;
+    double max_val = (double)((1 << bits) - 1);
 
-    double yrange_norm = 1.0 - (result.avg_yrange / yrange_max);
-    if (yrange_norm < 0.0)
-      yrange_norm = 0.0;
-
-    result.grain_score = 0.7 * tout_norm + 0.3 * yrange_norm;
+    result.grain_score = (result.avg_noise / max_val) * 20.0;
+    if (result.grain_score > 1.0)
+      result.grain_score = 1.0;
   }
 
 cleanup:

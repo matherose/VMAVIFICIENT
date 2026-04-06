@@ -203,6 +203,33 @@ static SourceType ask_source(void) {
   }
 }
 
+/* ---- Track ordering helpers ---- */
+
+static int audio_lang_priority(const char *lang) {
+  if (!lang || !lang[0])
+    return 99;
+  if (strcmp(lang, "fre") == 0 || strcmp(lang, "fra") == 0)
+    return 0;
+  if (strcmp(lang, "eng") == 0)
+    return 1;
+  return 50;
+}
+
+static int cmp_audio_order(const void *a, const void *b) {
+  const TrackInfo *ta = a;
+  const TrackInfo *tb = b;
+  return audio_lang_priority(ta->language) -
+         audio_lang_priority(tb->language);
+}
+
+static int sub_sort_key(const char *lang, int is_forced) {
+  if (strcmp(lang, "fre") == 0 || strcmp(lang, "fra") == 0)
+    return is_forced ? 0 : 10;
+  if (strcmp(lang, "eng") == 0)
+    return 20;
+  return 50;
+}
+
 int main(int argc, char *argv[]) {
   init_logging();
 
@@ -531,8 +558,7 @@ int main(int argc, char *argv[]) {
   int film_grain = 0;
   if (grain.error == 0) {
     printf("  Frames analyzed: %d\n", grain.frames_analyzed);
-    printf("  Avg TOUT:        %.4f%%\n", grain.avg_tout);
-    printf("  Avg Y-Range:     %.1f\n", grain.avg_yrange);
+    printf("  Avg noise:       %.4f\n", grain.avg_noise);
     printf("  Grain score:     %.4f\n", grain.grain_score);
     film_grain = get_film_grain_from_score(grain.grain_score);
     printf("  Film grain:      %d\n", film_grain);
@@ -613,22 +639,30 @@ int main(int argc, char *argv[]) {
 
       /* ---- Map FrenchVariant to FrenchAudioOrigin ---- */
       FrenchAudioOrigin fr_audio_origin = FRENCH_AUDIO_VFF;
-      switch (fv) {
-      case FRENCH_VARIANT_VFQ:
-        fr_audio_origin = FRENCH_AUDIO_VFQ;
-        break;
-      case FRENCH_VARIANT_VFI:
-        fr_audio_origin = FRENCH_AUDIO_VFI;
-        break;
-      default:
-        fr_audio_origin = FRENCH_AUDIO_VFF;
-        break;
+      if (strcmp(tmdb.original_language, "fr") == 0) {
+        fr_audio_origin = FRENCH_AUDIO_VO;
+      } else {
+        switch (fv) {
+        case FRENCH_VARIANT_VFQ:
+          fr_audio_origin = FRENCH_AUDIO_VFQ;
+          break;
+        case FRENCH_VARIANT_VFI:
+          fr_audio_origin = FRENCH_AUDIO_VFI;
+          break;
+        default:
+          fr_audio_origin = FRENCH_AUDIO_VFF;
+          break;
+        }
       }
 
       /* ---- OPUS audio encoding ---- */
       int enc_best_count = 0;
       TrackInfo *enc_best =
           select_best_audio_per_language(&tracks, &enc_best_count);
+
+      /* Sort: French first, then English, then others */
+      if (enc_best && enc_best_count > 1)
+        qsort(enc_best, enc_best_count, sizeof(TrackInfo), cmp_audio_order);
 
       /* Store OPUS paths and track names for final mux */
       char opus_paths[32][4096];
@@ -813,6 +847,42 @@ int main(int argc, char *argv[]) {
         srt_count++;
       }
 
+      /* ---- Sort subtitles: French Forced → French → English → Others ---- */
+      if (srt_count > 1) {
+        int order_idx[64];
+        int order_key[64];
+        for (int i = 0; i < srt_count; i++) {
+          order_idx[i] = i;
+          order_key[i] = sub_sort_key(srt_langs[i], srt_is_forced[i]);
+        }
+        /* Stable insertion sort */
+        for (int i = 1; i < srt_count; i++) {
+          int ki = order_key[i], ii = order_idx[i];
+          int j = i - 1;
+          while (j >= 0 && order_key[j] > ki) {
+            order_key[j + 1] = order_key[j];
+            order_idx[j + 1] = order_idx[j];
+            j--;
+          }
+          order_key[j + 1] = ki;
+          order_idx[j + 1] = ii;
+        }
+        /* Reorder parallel arrays */
+        char tmp_paths[64][4096], tmp_names[64][256], tmp_langs[64][64];
+        int tmp_forced[64];
+        memcpy(tmp_paths, srt_paths, sizeof(srt_paths));
+        memcpy(tmp_names, srt_names, sizeof(srt_names));
+        memcpy(tmp_langs, srt_langs, sizeof(srt_langs));
+        memcpy(tmp_forced, srt_is_forced, sizeof(tmp_forced));
+        for (int i = 0; i < srt_count; i++) {
+          int s = order_idx[i];
+          memcpy(srt_paths[i], tmp_paths[s], sizeof(srt_paths[0]));
+          memcpy(srt_names[i], tmp_names[s], sizeof(srt_names[0]));
+          memcpy(srt_langs[i], tmp_langs[s], sizeof(srt_langs[0]));
+          srt_is_forced[i] = tmp_forced[s];
+        }
+      }
+
       /* ---- RPU extraction (Dolby Vision) ---- */
       char rpu_path[4096] = "";
       if (hdr.error == 0 && hdr.has_dolby_vision) {
@@ -889,13 +959,27 @@ int main(int argc, char *argv[]) {
 
         /* Build mux subtitle descriptors */
         MuxSubtitleTrack mux_subs[64];
+        int sub_default_set = 0;
         for (int i = 0; i < srt_count && i < 64; i++) {
           mux_subs[i].path = srt_paths[i];
           mux_subs[i].language = srt_langs[i];
           mux_subs[i].track_name = srt_names[i];
-          mux_subs[i].is_default = 0;
           mux_subs[i].is_forced = srt_is_forced[i];
+          /* Only the first French forced subtitle is default */
+          if (!sub_default_set && srt_is_forced[i] &&
+              (strcmp(srt_langs[i], "fre") == 0 ||
+               strcmp(srt_langs[i], "fra") == 0)) {
+            mux_subs[i].is_default = 1;
+            sub_default_set = 1;
+          } else {
+            mux_subs[i].is_default = 0;
+          }
         }
+
+        /* Build MKV container title: "Movie (Year)" */
+        char mkv_title[1024];
+        snprintf(mkv_title, sizeof(mkv_title), "%s (%d)",
+                 tmdb.original_title, tmdb.release_year);
 
         FinalMuxConfig mux_cfg = {
             .video_path = av1_video_path,
@@ -904,6 +988,7 @@ int main(int argc, char *argv[]) {
             .audio_count = opus_count,
             .subs = mux_subs,
             .sub_count = srt_count,
+            .title = mkv_title,
         };
 
         printf("\nMuxing final MKV (%d audio, %d subtitle tracks)...\n",

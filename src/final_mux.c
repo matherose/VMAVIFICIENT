@@ -224,6 +224,10 @@ FinalMuxResult final_mux(const FinalMuxConfig *config) {
     }
   }
 
+  /* ---- Set container title ---- */
+  if (config->title)
+    av_dict_set(&ofmt_ctx->metadata, "title", config->title, 0);
+
   /* ---- Write header ---- */
   ret = avformat_write_header(ofmt_ctx, NULL);
   if (ret < 0) {

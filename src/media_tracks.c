@@ -369,11 +369,14 @@ void build_audio_track_name(char *buf, size_t bufsize, const char *language,
     case FRENCH_AUDIO_VFI:
       variant = "VFI";
       break;
+    case FRENCH_AUDIO_VO:
+      variant = "VO";
+      break;
     default:
       variant = "VFF";
       break;
     }
-    snprintf(buf, bufsize, "Fran\xc3\xa7""ais (%s) [%s]", variant, layout);
+    snprintf(buf, bufsize, "Fran\xc3\xa7""ais %s [%s]", variant, layout);
   } else {
     const char *name = language_display_name(language);
     snprintf(buf, bufsize, "%s [%s]", name, layout);

@@ -35,6 +35,7 @@ typedef struct {
   int audio_count;                 /**< Number of audio tracks. */
   const MuxSubtitleTrack *subs;    /**< Array of subtitle tracks. */
   int sub_count;                   /**< Number of subtitle tracks. */
+  const char *title;               /**< MKV container title, or NULL. */
 } FinalMuxConfig;
 
 /** @brief Result of the final mux operation. */
