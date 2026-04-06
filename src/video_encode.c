@@ -9,6 +9,7 @@
 
 #include "video_encode.h"
 
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -244,6 +245,16 @@ static void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg,
   /* Decoder speed optimization (0 = favor quality) */
   if (p->fast_decode != UNSET)
     cfg->fast_decode = (uint8_t)p->fast_decode;
+
+  /* Scene change detection */
+  if (p->scd != UNSET)
+    cfg->scene_change_detection = (uint32_t)(p->scd == 1);
+
+  /* Apply uniform chroma QIndex offset across all temporal layers */
+  if (p->temporal_layer_chroma_qindex_offset != UNSET)
+    for (int i = 0; i < EB_MAX_TEMPORAL_LAYERS; i++)
+      cfg->chroma_qindex_offsets[i] =
+          (int32_t)p->temporal_layer_chroma_qindex_offset;
 
   /* Film grain from grain score analysis */
   cfg->film_grain_denoise_strength = (uint32_t)film_grain;
@@ -483,9 +494,27 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   apply_preset_to_config(&svt_config, config->preset, config->film_grain,
                          config->target_bitrate);
 
-  /* PQ content → variance_boost_curve 3 */
-  if (in_stream->codecpar->color_trc == AVCOL_TRC_SMPTE2084)
+  /* PQ content adjustments (HDR10 / HDR10+ / Dolby Vision) */
+  if (in_stream->codecpar->color_trc == AVCOL_TRC_SMPTE2084) {
     svt_config.variance_boost_curve = 3;
+    svt_config.luminance_qp_bias = 0;
+
+    /* Boost ac_bias for HDR's wider dynamic range (tune 5 handles this
+     * internally via its own HDR ac_bias escalation). */
+    if (svt_config.tune != 5)
+      svt_config.ac_bias = fmin(svt_config.ac_bias * 1.5, 8.0);
+
+    /* Gentler temporal filtering — HDR highlight/shadow detail is more
+     * visible and more sensitive to TF smearing. */
+    if (svt_config.tf_strength > 0)
+      svt_config.tf_strength--;
+    if (svt_config.kf_tf_strength > 1)
+      svt_config.kf_tf_strength--;
+
+    /* Tighter QP compression for HDR temporal consistency */
+    if (svt_config.qp_scale_compress_strength < 2.5)
+      svt_config.qp_scale_compress_strength += 0.5;
+  }
 
   ret = svt_av1_enc_set_parameter(svt_handle, &svt_config);
   if (ret != EB_ErrorNone) {

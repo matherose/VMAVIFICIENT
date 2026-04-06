@@ -74,6 +74,8 @@ typedef struct {
   int look_ahead_distance;        /**< VBR look-ahead frames (0–120, -1=default). */
   int enable_dg;                  /**< Dynamic GOP (0–1, -1=default). */
   int fast_decode;                /**< Decoder-speed optimization level (0–2, -1=default). */
+  int scd;                        /**< Scene change detection (0–1, -1=default). */
+  int temporal_layer_chroma_qindex_offset; /**< Chroma QIndex offset applied to all temporal layers (0–6, -1=default). */
 } EncodePreset;
 
 /**
