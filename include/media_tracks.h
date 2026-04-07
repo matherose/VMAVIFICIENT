@@ -103,8 +103,10 @@ void build_audio_track_name(char *buf, size_t bufsize, const char *language,
  * @param is_srt      1 if the subtitle is SRT/text, 0 if PGS/bitmap.
  * @param is_forced   1 if the subtitle is forced.
  * @param is_sdh      1 if the subtitle is SDH.
+ * @param fr_origin   French variant (only used if language is French).
  */
 void build_subtitle_track_name(char *buf, size_t bufsize, const char *language,
-                               int is_srt, int is_forced, int is_sdh);
+                               int is_srt, int is_forced, int is_sdh,
+                               FrenchAudioOrigin fr_origin);
 
 #endif /* MEDIA_TRACKS_H */

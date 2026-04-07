@@ -1,9 +1,89 @@
 cmake_minimum_required(VERSION 3.24)
+
+# ---------------------------------------------------------------------------
+# Force LLVM/Clang toolchain (must be set before project()).
+# Prefers Homebrew LLVM if present, then /usr/local/opt/llvm, then PATH clang.
+# ---------------------------------------------------------------------------
+if(NOT DEFINED CMAKE_C_COMPILER)
+    find_program(LLVM_CLANG clang
+        HINTS
+            /opt/homebrew/opt/llvm/bin
+            /usr/local/opt/llvm/bin
+            ENV LLVM_PREFIX
+        NO_DEFAULT_PATH
+    )
+    if(NOT LLVM_CLANG)
+        find_program(LLVM_CLANG clang REQUIRED)
+    endif()
+    set(CMAKE_C_COMPILER "${LLVM_CLANG}" CACHE FILEPATH "C compiler" FORCE)
+endif()
+
 project(vmavificient VERSION 0.1.0 LANGUAGES C)
+
+if(NOT CMAKE_C_COMPILER_ID STREQUAL "Clang" AND NOT CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
+    message(FATAL_ERROR "vmavificient requires LLVM/Clang, got ${CMAKE_C_COMPILER_ID}")
+endif()
+message(STATUS "C compiler: ${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION} (${CMAKE_C_COMPILER})")
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
+
+# Default to Release if nothing was specified.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+# ---------------------------------------------------------------------------
+# Optimization flags (Clang-specific).
+#   * -O3 + LTO for release
+#   * -march=native so local builds exploit the host CPU (AVX2/NEON)
+#   * -fvisibility=hidden to shrink the symbol table
+#   * -ffp-contract=fast for cheap FMA in the grain/crop analysis loops
+# ---------------------------------------------------------------------------
+include(CheckIPOSupported)
+check_ipo_supported(RESULT _ipo_ok OUTPUT _ipo_err)
+if(_ipo_ok)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+    message(STATUS "LTO: enabled for Release")
+else()
+    message(STATUS "LTO: unavailable (${_ipo_err})")
+endif()
+
+set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG")
+
+# Project-wide optimization flags, applied only to *our* target so that
+# third-party deps built in-tree (cjson, etc.) don't choke on -Werror +
+# -Wunused-command-line-argument when an option doesn't apply.
+set(VMAV_OPT_FLAGS
+    -fvisibility=hidden
+    -ffp-contract=fast
+    -fno-math-errno
+    -pipe
+    -Wall
+    -Wextra
+    -Wno-unused-parameter
+    -Wno-unused-command-line-argument
+)
+if(NOT CMAKE_CROSSCOMPILING)
+    list(APPEND VMAV_OPT_FLAGS -march=native -mtune=native)
+endif()
+if(NOT APPLE)
+    list(APPEND VMAV_OPT_FLAGS -ffunction-sections -fdata-sections)
+endif()
+
+# Linker optimizations: dead-strip + use lld if available.
+set(VMAV_LINK_FLAGS "")
+find_program(LLVM_LLD ld.lld)
+if(LLVM_LLD)
+    list(APPEND VMAV_LINK_FLAGS -fuse-ld=lld)
+    message(STATUS "Linker: lld")
+endif()
+if(APPLE)
+    list(APPEND VMAV_LINK_FLAGS -Wl,-dead_strip)
+else()
+    list(APPEND VMAV_LINK_FLAGS -Wl,--gc-sections -Wl,-O2)
+endif()
 
 include(ExternalProject)
 include(FetchContent)
@@ -95,6 +175,7 @@ ExternalProject_Add(ep_opus
         -DOPUS_BUILD_TESTING=OFF
         -DOPUS_BUILD_PROGRAMS=OFF
     BUILD_COMMAND   cmake --build . --parallel ${NPROC}
+    BUILD_BYPRODUCTS "${OPUS_INSTALL}/lib/libopus.a"
     LOG_CONFIGURE   TRUE
     LOG_BUILD       TRUE
     LOG_INSTALL     TRUE
@@ -128,6 +209,13 @@ ExternalProject_Add(ep_ffmpeg
     BUILD_COMMAND   make -j${NPROC}
     INSTALL_COMMAND make install
     BUILD_IN_SOURCE TRUE
+    BUILD_BYPRODUCTS
+        "${FF_INSTALL}/lib/libavutil.a"
+        "${FF_INSTALL}/lib/libavcodec.a"
+        "${FF_INSTALL}/lib/libavformat.a"
+        "${FF_INSTALL}/lib/libavfilter.a"
+        "${FF_INSTALL}/lib/libswscale.a"
+        "${FF_INSTALL}/lib/libswresample.a"
     LOG_CONFIGURE   TRUE
     LOG_BUILD       TRUE
     LOG_INSTALL     TRUE
@@ -151,6 +239,7 @@ ExternalProject_Add(ep_libdovi
             --libdir=${DOVI_INSTALL}/lib
             --includedir=${DOVI_INSTALL}/include
     BUILD_IN_SOURCE TRUE
+    BUILD_BYPRODUCTS "${DOVI_INSTALL}/lib/libdovi.a"
     LOG_INSTALL     TRUE
 )
 
@@ -172,6 +261,7 @@ ExternalProject_Add(ep_libhdr10plus
             --libdir=${HDR10_INSTALL}/lib
             --includedir=${HDR10_INSTALL}/include
     BUILD_IN_SOURCE TRUE
+    BUILD_BYPRODUCTS "${HDR10_INSTALL}/lib/libhdr10plus-rs.a"
     LOG_INSTALL     TRUE
 )
 
@@ -190,6 +280,7 @@ ExternalProject_Add(ep_svtav1
         -DBUILD_TESTING=OFF
         -DBUILD_APPS=OFF
     BUILD_COMMAND   cmake --build <BINARY_DIR> --parallel ${NPROC}
+    BUILD_BYPRODUCTS "${SVTAV1_INSTALL}/lib/libSvtAv1Enc.a"
     LOG_CONFIGURE   TRUE
     LOG_BUILD       TRUE
     LOG_INSTALL     TRUE
@@ -252,6 +343,9 @@ add_executable(vmavificient
     src/tmdb.c
     src/utils.c
 )
+
+target_compile_options(vmavificient PRIVATE ${VMAV_OPT_FLAGS})
+target_link_options(vmavificient PRIVATE ${VMAV_LINK_FLAGS})
 
 target_include_directories(vmavificient PRIVATE
     "${CMAKE_SOURCE_DIR}/include"

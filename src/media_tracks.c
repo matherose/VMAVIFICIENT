@@ -376,23 +376,47 @@ void build_audio_track_name(char *buf, size_t bufsize, const char *language,
       variant = "VFF";
       break;
     }
-    snprintf(buf, bufsize, "Fran\xc3\xa7""ais %s [%s]", variant, layout);
+    snprintf(buf, bufsize, "Fran\xc3\xa7""ais [%s] %s", variant, layout);
   } else {
     const char *name = language_display_name(language);
-    snprintf(buf, bufsize, "%s [%s]", name, layout);
+    snprintf(buf, bufsize, "%s %s", name, layout);
   }
 }
 
 void build_subtitle_track_name(char *buf, size_t bufsize, const char *language,
-                               int is_srt, int is_forced, int is_sdh) {
-  const char *name = language_display_name(language);
+                               int is_srt, int is_forced, int is_sdh,
+                               FrenchAudioOrigin fr_origin) {
   const char *format = is_srt ? "SRT" : "Text";
-  const char *type = "full";
+  const char *suffix = "";
   if (is_forced)
-    type = "forced";
+    suffix = " forced";
   else if (is_sdh)
-    type = "sdh";
-  snprintf(buf, bufsize, "%s | %s (%s)", name, format, type);
+    suffix = " sdh";
+
+  int is_french = language && (strcmp(language, "fre") == 0 ||
+                               strcmp(language, "fra") == 0);
+  if (is_french) {
+    const char *variant;
+    switch (fr_origin) {
+    case FRENCH_AUDIO_VFQ:
+      variant = "VFQ";
+      break;
+    case FRENCH_AUDIO_VFI:
+      variant = "VFI";
+      break;
+    case FRENCH_AUDIO_VO:
+      variant = "VO";
+      break;
+    default:
+      variant = "VFF";
+      break;
+    }
+    snprintf(buf, bufsize, "Fran\xc3\xa7""ais [%s] | %s%s", variant, format,
+             suffix);
+  } else {
+    const char *name = language_display_name(language);
+    snprintf(buf, bufsize, "%s | %s%s", name, format, suffix);
+  }
 }
 
 /* ====================================================================== */

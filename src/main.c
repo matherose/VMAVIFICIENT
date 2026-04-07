@@ -708,6 +708,7 @@ int main(int argc, char *argv[]) {
       char srt_names[64][256];
       char srt_langs[64][64];
       int srt_is_forced[64];
+      int srt_is_sdh[64];
       int srt_count = 0;
 
       if (tracks.error == 0 && tracks.subtitle_count > 0) {
@@ -730,9 +731,11 @@ int main(int argc, char *argv[]) {
             /* Build display name */
             build_subtitle_track_name(srt_names[srt_count],
                                       sizeof(srt_names[0]), lang, 1,
-                                      sub->is_forced, sub->is_sdh);
+                                      sub->is_forced, sub->is_sdh,
+                                      fr_audio_origin);
             snprintf(srt_langs[srt_count], sizeof(srt_langs[0]), "%s", lang);
             srt_is_forced[srt_count] = sub->is_forced;
+            srt_is_sdh[srt_count] = sub->is_sdh;
 
             /* Check if SRT already exists */
             struct stat srt_st;
@@ -788,9 +791,11 @@ int main(int argc, char *argv[]) {
 
             build_subtitle_track_name(srt_names[srt_count],
                                       sizeof(srt_names[0]), lang, 1,
-                                      sub->is_forced, sub->is_sdh);
+                                      sub->is_forced, sub->is_sdh,
+                                      fr_audio_origin);
             snprintf(srt_langs[srt_count], sizeof(srt_langs[0]), "%s", lang);
             srt_is_forced[srt_count] = sub->is_forced;
+            srt_is_sdh[srt_count] = sub->is_sdh;
 
             printf("  OCR PGS #%d %s → \"%s\"...\n", sub->index, lang,
                    srt_names[srt_count]);
@@ -835,12 +840,17 @@ int main(int argc, char *argv[]) {
           srt_lang = "ita";
 
         int forced = (strstr(extra_srt_paths[i], "forced") != NULL) ? 1 : 0;
+        int sdh = (strstr(extra_srt_paths[i], "sdh") != NULL ||
+                   strstr(extra_srt_paths[i], "SDH") != NULL)
+                      ? 1
+                      : 0;
 
         build_subtitle_track_name(srt_names[srt_count],
                                   sizeof(srt_names[0]), srt_lang, 1,
-                                  forced, 0);
+                                  forced, sdh, fr_audio_origin);
         snprintf(srt_langs[srt_count], sizeof(srt_langs[0]), "%s", srt_lang);
         srt_is_forced[srt_count] = forced;
+        srt_is_sdh[srt_count] = sdh;
 
         printf("  [SRT]  %s → \"%s\"\n", extra_srt_paths[i],
                srt_names[srt_count]);
@@ -870,16 +880,19 @@ int main(int argc, char *argv[]) {
         /* Reorder parallel arrays */
         char tmp_paths[64][4096], tmp_names[64][256], tmp_langs[64][64];
         int tmp_forced[64];
+        int tmp_sdh[64];
         memcpy(tmp_paths, srt_paths, sizeof(srt_paths));
         memcpy(tmp_names, srt_names, sizeof(srt_names));
         memcpy(tmp_langs, srt_langs, sizeof(srt_langs));
         memcpy(tmp_forced, srt_is_forced, sizeof(tmp_forced));
+        memcpy(tmp_sdh, srt_is_sdh, sizeof(tmp_sdh));
         for (int i = 0; i < srt_count; i++) {
           int s = order_idx[i];
           memcpy(srt_paths[i], tmp_paths[s], sizeof(srt_paths[0]));
           memcpy(srt_names[i], tmp_names[s], sizeof(srt_names[0]));
           memcpy(srt_langs[i], tmp_langs[s], sizeof(srt_langs[0]));
           srt_is_forced[i] = tmp_forced[s];
+          srt_is_sdh[i] = tmp_sdh[s];
         }
       }
 
@@ -965,6 +978,7 @@ int main(int argc, char *argv[]) {
           mux_subs[i].language = srt_langs[i];
           mux_subs[i].track_name = srt_names[i];
           mux_subs[i].is_forced = srt_is_forced[i];
+          mux_subs[i].is_sdh = srt_is_sdh[i];
           /* Only the first French forced subtitle is default */
           if (!sub_default_set && srt_is_forced[i] &&
               (strcmp(srt_langs[i], "fre") == 0 ||

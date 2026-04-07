@@ -25,6 +25,7 @@ typedef struct {
   const char *track_name;  /**< Display name (e.g. "Français | SRT (full)"). */
   int is_default;          /**< 1 if this should be the default track. */
   int is_forced;           /**< 1 if forced subtitle. */
+  int is_sdh;              /**< 1 if SDH / hearing-impaired subtitle. */
 } MuxSubtitleTrack;
 
 /** @brief Configuration for the final MKV mux. */
