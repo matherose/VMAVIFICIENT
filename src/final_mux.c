@@ -92,6 +92,15 @@ FinalMuxResult final_mux(const FinalMuxConfig *config) {
     shell_quote_append(cmd, cap, &pos, config->subs[i].path);
   }
 
+  /* Optional chapters source: added as a trailing input, but only its
+     chapters metadata is mapped into the output (no streams). */
+  int chapters_idx = -1;
+  if (config->chapters_source_path && config->chapters_source_path[0]) {
+    chapters_idx = 1 + config->audio_count + config->sub_count;
+    cmd_appendf(cmd, cap, &pos, " -i ");
+    shell_quote_append(cmd, cap, &pos, config->chapters_source_path);
+  }
+
   /* Stream maps. */
   cmd_appendf(cmd, cap, &pos, " -map 0:v:0");
   for (int i = 0; i < config->audio_count; i++)
@@ -100,11 +109,27 @@ FinalMuxResult final_mux(const FinalMuxConfig *config) {
     cmd_appendf(cmd, cap, &pos, " -map %d:s:0?",
                 1 + config->audio_count + i);
 
+  /* Chapters: take from source file if provided, else drop entirely
+     (the -1 sentinel disables chapters). */
+  if (chapters_idx >= 0)
+    cmd_appendf(cmd, cap, &pos, " -map_chapters %d", chapters_idx);
+  else
+    cmd_appendf(cmd, cap, &pos, " -map_chapters -1");
+
   /* Copy all streams, force SRT codec for text subs (safe no-op if already). */
   cmd_appendf(cmd, cap, &pos, " -c copy -c:s srt");
 
   /* Video stream: clear any default/forced flags we don't own. */
   cmd_appendf(cmd, cap, &pos, " -disposition:v:0 0");
+
+  if (config->video_title && config->video_title[0]) {
+    cmd_appendf(cmd, cap, &pos, " -metadata:s:v:0 title=");
+    shell_quote_append(cmd, cap, &pos, config->video_title);
+  }
+  if (config->video_language && config->video_language[0]) {
+    cmd_appendf(cmd, cap, &pos, " -metadata:s:v:0 language=%s",
+                config->video_language);
+  }
 
   /* Audio metadata + dispositions. */
   for (int i = 0; i < config->audio_count; i++) {
@@ -162,6 +187,9 @@ FinalMuxResult final_mux(const FinalMuxConfig *config) {
     cmd_appendf(cmd, cap, &pos, " -metadata title=");
     shell_quote_append(cmd, cap, &pos, config->title);
   }
+
+  /* Matroska: don't auto-mark a subtitle as default when none is tagged. */
+  cmd_appendf(cmd, cap, &pos, " -default_mode infer_no_subs");
 
   /* Output. */
   cmd_appendf(cmd, cap, &pos, " ");

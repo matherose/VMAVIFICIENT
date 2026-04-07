@@ -1003,6 +1003,9 @@ int main(int argc, char *argv[]) {
             .subs = mux_subs,
             .sub_count = srt_count,
             .title = mkv_title,
+            .video_title = mkv_title,
+            .video_language = iso639_1_to_2b(tmdb.original_language),
+            .chapters_source_path = filepath,
         };
 
         printf("\nMuxing final MKV (%d audio, %d subtitle tracks)...\n",
@@ -1016,6 +1019,30 @@ int main(int argc, char *argv[]) {
           printf("  [OK]   %s\n", output_name);
         else
           fprintf(stderr, "  [FAIL] %s (error %d)\n", output_name, mr.error);
+
+        /* Clean up intermediate files on success. Leaving sidecar .srt
+           files next to the final MKV causes players to auto-load them
+           as external subtitles, overriding the embedded defaults. */
+        if (mr.error == 0) {
+          printf("\nCleaning up intermediate files...\n");
+          for (int i = 0; i < opus_count; i++) {
+            if (remove(opus_paths[i]) == 0)
+              printf("  [RM]   %s\n", opus_paths[i]);
+          }
+          for (int i = 0; i < srt_count; i++) {
+            /* Skip user-supplied --srt files: they live outside output_dir
+               or weren't created by us. Only remove SRTs we wrote into
+               the output directory. */
+            if (strncmp(srt_paths[i], output_dir, strlen(output_dir)) == 0) {
+              if (remove(srt_paths[i]) == 0)
+                printf("  [RM]   %s\n", srt_paths[i]);
+            }
+          }
+          if (remove(av1_video_path) == 0)
+            printf("  [RM]   %s\n", av1_video_path);
+          if (rpu_path[0] && remove(rpu_path) == 0)
+            printf("  [RM]   %s\n", rpu_path);
+        }
       }
 
       if (enc_best)

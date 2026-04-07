@@ -37,6 +37,9 @@ typedef struct {
   const MuxSubtitleTrack *subs;    /**< Array of subtitle tracks. */
   int sub_count;                   /**< Number of subtitle tracks. */
   const char *title;               /**< MKV container title, or NULL. */
+  const char *video_title;         /**< Video stream title, or NULL. */
+  const char *video_language;      /**< Video stream ISO 639-2/B code, or NULL. */
+  const char *chapters_source_path;/**< File to copy chapters from, or NULL. */
 } FinalMuxConfig;
 
 /** @brief Result of the final mux operation. */
