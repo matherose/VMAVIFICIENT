@@ -637,7 +637,31 @@ int main(int argc, char *argv[]) {
       else
         snprintf(output_dir, sizeof(output_dir), "./");
 
-      /* ---- Map FrenchVariant to FrenchAudioOrigin ---- */
+      /* ---- Resolve FrenchAudioOrigin ----
+         The CLI language tag wins over the filename-derived French variant
+         so that e.g. --multivfi on a source with no VFI marker still labels
+         tracks as VFI. */
+      switch (lang_tag) {
+      case LANG_TAG_MULTI_VFI:
+      case LANG_TAG_DUAL_VFI:
+        fv = FRENCH_VARIANT_VFI;
+        break;
+      case LANG_TAG_MULTI_VFQ:
+      case LANG_TAG_DUAL_VFQ:
+        fv = FRENCH_VARIANT_VFQ;
+        break;
+      case LANG_TAG_MULTI_VFF:
+      case LANG_TAG_DUAL_VFF:
+      case LANG_TAG_VFF:
+      case LANG_TAG_TRUEFRENCH:
+      case LANG_TAG_FRENCH:
+        fv = FRENCH_VARIANT_VFF;
+        break;
+      default:
+        /* Keep filename-detected fv as-is for MULTI / VO / VOST / etc. */
+        break;
+      }
+
       FrenchAudioOrigin fr_audio_origin = FRENCH_AUDIO_VFF;
       if (strcmp(tmdb.original_language, "fr") == 0) {
         fr_audio_origin = FRENCH_AUDIO_VO;
