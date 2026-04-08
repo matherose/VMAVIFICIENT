@@ -20,6 +20,13 @@ endif()
 
 project(vmavificient VERSION 0.1.0 LANGUAGES C)
 
+# Enforce Ninja generator for the top-level build.
+if(NOT CMAKE_GENERATOR STREQUAL "Ninja")
+    message(FATAL_ERROR
+        "vmavificient requires the Ninja generator, got '${CMAKE_GENERATOR}'.\n"
+        "Reconfigure with:  cmake -G Ninja -B build")
+endif()
+
 if(NOT CMAKE_C_COMPILER_ID STREQUAL "Clang" AND NOT CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
     message(FATAL_ERROR "vmavificient requires LLVM/Clang, got ${CMAKE_C_COMPILER_ID}")
 endif()
@@ -138,7 +145,7 @@ file(MAKE_DIRECTORY "${SVTAV1_INSTALL}/include/svt-av1")
 # ---------------------------------------------------------------------------
 # Version pins  (update these to pull newer releases)
 # ---------------------------------------------------------------------------
-set(FFMPEG_GIT_TAG          "n7.1")
+set(FFMPEG_GIT_TAG          "n8.1")
 set(OPUS_GIT_TAG            "v1.5.2")
 set(LIBDOVI_GIT_TAG         "libdovi-3.3.2")
 set(LIBDOVI_VERSION         "3.3.2")
@@ -168,6 +175,7 @@ ExternalProject_Add(ep_opus
     GIT_TAG         ${OPUS_GIT_TAG}
     GIT_SHALLOW     TRUE
     PREFIX          "${DEPS_PREFIX}/build/opus"
+    CMAKE_GENERATOR "Ninja"
     CMAKE_ARGS
         -DCMAKE_INSTALL_PREFIX=${OPUS_INSTALL}
         -DCMAKE_BUILD_TYPE=Release
@@ -199,7 +207,6 @@ ExternalProject_Add(ep_ffmpeg
             --disable-doc
             --disable-autodetect
             --enable-gpl
-            --disable-postproc
             --enable-filter=cropdetect
             --enable-libopus
             --enable-encoder=libopus
@@ -273,6 +280,7 @@ ExternalProject_Add(ep_svtav1
     GIT_TAG         ${SVTAV1_GIT_TAG}
     GIT_SHALLOW     TRUE
     PREFIX          "${DEPS_PREFIX}/build/svtav1"
+    CMAKE_GENERATOR "Ninja"
     CMAKE_ARGS
         -DCMAKE_INSTALL_PREFIX=${SVTAV1_INSTALL}
         -DCMAKE_BUILD_TYPE=Release
@@ -335,6 +343,7 @@ add_executable(vmavificient
     src/media_analysis.c
     src/media_naming.c
     src/audio_encode.c
+    src/config.c
     src/encode_preset.c
     src/rpu_extract.c
     src/video_encode.c

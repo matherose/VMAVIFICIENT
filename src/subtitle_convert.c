@@ -85,7 +85,7 @@ void build_srt_filename(char *buf, size_t bufsize, const char *base_name,
     }
   }
 
-  const char *type_suffix = "";
+  const char *type_suffix = ".full";
   if (is_forced)
     type_suffix = ".forced";
   else if (is_sdh)

@@ -490,10 +490,11 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
     ret = swr_convert_frame(swr, resampled, frame);
     av_frame_unref(frame);
     if (ret >= 0) {
-      av_audio_fifo_realloc(fifo,
-                            av_audio_fifo_size(fifo) + resampled->nb_samples);
-      av_audio_fifo_write(fifo, (void **)resampled->data,
-                          resampled->nb_samples);
+      if (av_audio_fifo_realloc(fifo, av_audio_fifo_size(fifo) +
+                                          resampled->nb_samples) >= 0) {
+        av_audio_fifo_write(fifo, (void **)resampled->data,
+                            resampled->nb_samples);
+      }
       av_frame_unref(resampled);
     }
   }
@@ -509,10 +510,11 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
       av_frame_unref(resampled);
       break;
     }
-    av_audio_fifo_realloc(fifo,
-                          av_audio_fifo_size(fifo) + resampled->nb_samples);
-    av_audio_fifo_write(fifo, (void **)resampled->data,
-                        resampled->nb_samples);
+    if (av_audio_fifo_realloc(fifo, av_audio_fifo_size(fifo) +
+                                        resampled->nb_samples) >= 0) {
+      av_audio_fifo_write(fifo, (void **)resampled->data,
+                          resampled->nb_samples);
+    }
     av_frame_unref(resampled);
   }
 

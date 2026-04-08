@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 
 #include "audio_encode.h"
+#include "config.h"
 #include "encode_preset.h"
 #include "final_mux.h"
 #include "media_analysis.h"
@@ -232,6 +233,7 @@ static int sub_sort_key(const char *lang, int is_forced) {
 
 int main(int argc, char *argv[]) {
   init_logging();
+  config_init();
 
   if (check_dependencies() != 0) {
     fprintf(stderr, "Fatal: dependency sanity check failed.\n");
@@ -771,10 +773,13 @@ int main(int argc, char *argv[]) {
             } else {
               /* Extract text subtitle using ffmpeg command */
               char cmd[8192];
+              /* If already SRT (subrip), copy stream; else convert to srt. */
+              const char *codec_arg =
+                  (strcmp(sub->codec, "subrip") == 0) ? "copy" : "srt";
               snprintf(cmd, sizeof(cmd),
                        "ffmpeg -y -loglevel error -i \"%s\" -map 0:%d "
-                       "-c:s srt \"%s\"",
-                       filepath, sub->index, srt_paths[srt_count]);
+                       "-c:s %s \"%s\"",
+                       filepath, sub->index, codec_arg, srt_paths[srt_count]);
 
               printf("  Extracting #%d %s (%s) → \"%s\"...\n", sub->index,
                      lang, sub->codec, srt_names[srt_count]);
@@ -794,7 +799,8 @@ int main(int argc, char *argv[]) {
             bool srt_exists_for_lang = false;
             for (int j = 0; j < srt_count; j++) {
               if (strcmp(srt_langs[j], lang) == 0 &&
-                  srt_is_forced[j] == sub->is_forced) {
+                  srt_is_forced[j] == sub->is_forced &&
+                  srt_is_sdh[j] == sub->is_sdh) {
                 srt_exists_for_lang = true;
                 break;
               }

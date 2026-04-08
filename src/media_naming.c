@@ -4,6 +4,7 @@
  */
 
 #include "media_naming.h"
+#include "config.h"
 #include "utils.h"
 
 #include <ctype.h>
@@ -339,10 +340,11 @@ int build_output_filename(char *buf, size_t bufsize, const char *title,
       snprintf(feature, sizeof(feature), "HDR10");
   }
 
-  /* Assemble: TITLE.YEAR.LANG.RES.FEATURE.SOURCE.QUALITY.10bit.AV1.OPUS-matherose.mkv */
-  snprintf(buf, bufsize, "%s.%d.%s.%s.%s.%s.%s.10bit.AV1.OPUS-matherose.mkv",
+  /* Assemble: TITLE.YEAR.LANG.RES.FEATURE.SOURCE.QUALITY.10bit.AV1.OPUS-<group>.mkv */
+  const VmavConfig *cfg = config_get();
+  snprintf(buf, bufsize, "%s.%d.%s.%s.%s.%s.%s.10bit.AV1.OPUS-%s.mkv",
            safe_title, year, language_tag_to_string(lang_tag), resolution,
-           feature, source_to_string(source), quality);
+           feature, source_to_string(source), quality, cfg->release_group);
 
   return 0;
 }

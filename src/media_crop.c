@@ -227,7 +227,10 @@ CropInfo get_crop_info(const char *path) {
 
       while (decoded < WARMUP_FRAMES &&
              avcodec_receive_frame(dec_ctx, frame) == 0) {
-        av_buffersrc_add_frame(src_ctx, frame);
+        if (av_buffersrc_add_frame(src_ctx, frame) < 0) {
+          av_frame_unref(frame);
+          break;
+        }
         av_frame_unref(frame);
 
         while (av_buffersink_get_frame(sink_ctx, filt_frame) == 0) {

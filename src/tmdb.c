@@ -12,6 +12,8 @@
 #include <cJSON.h>
 #include <curl/curl.h>
 
+#include "config.h"
+
 /** @brief Buffer for accumulating HTTP response data. */
 typedef struct {
   char *data;
@@ -32,65 +34,24 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb,
   return total;
 }
 
-/**
- * @brief Read TMDB API key from .tmdb_api_key file.
- *
- * Searches in current directory, then home directory.
- * Strips trailing whitespace/newlines.
- *
- * @return Heap-allocated key string (caller must free), or NULL.
- */
-static char *read_api_key(void) {
-  const char *paths[] = {".tmdb_api_key", NULL};
-  char home_path[512] = "";
-
-  const char *home = getenv("HOME");
-  if (home) {
-    snprintf(home_path, sizeof(home_path), "%s/.tmdb_api_key", home);
-    paths[1] = home_path;
-  }
-
-  for (int i = 0; i < 2; i++) {
-    if (!paths[i])
-      continue;
-    FILE *f = fopen(paths[i], "r");
-    if (!f)
-      continue;
-    char buf[256];
-    if (fgets(buf, sizeof(buf), f)) {
-      fclose(f);
-      /* Strip trailing whitespace. */
-      size_t len = strlen(buf);
-      while (len > 0 &&
-             (buf[len - 1] == '\n' || buf[len - 1] == '\r' ||
-              buf[len - 1] == ' '))
-        buf[--len] = '\0';
-      if (len > 0)
-        return strdup(buf);
-    }
-    fclose(f);
-  }
-  return NULL;
-}
-
 TmdbMovieInfo tmdb_fetch_movie(int tmdb_id) {
   TmdbMovieInfo info = {.error = -1, .release_year = 0};
   info.original_title[0] = '\0';
   info.original_language[0] = '\0';
 
-  char *api_key = read_api_key();
-  if (!api_key) {
+  const VmavConfig *cfg = config_get();
+  if (!cfg->tmdb_api_key[0]) {
     fprintf(stderr,
             "Error: TMDB API key not found.\n"
-            "Create a .tmdb_api_key file in the current or home directory.\n");
+            "Set tmdb_api_key in config.ini (cwd or "
+            "$HOME/.config/vmavificient/config.ini).\n");
     return info;
   }
 
   char url[512];
   snprintf(url, sizeof(url),
            "https://api.themoviedb.org/3/movie/%d?api_key=%s", tmdb_id,
-           api_key);
-  free(api_key);
+           cfg->tmdb_api_key);
 
   CURL *curl = curl_easy_init();
   if (!curl) {

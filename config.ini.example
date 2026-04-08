@@ -1,0 +1,15 @@
+# vmavificient runtime configuration
+#
+# Place this file at one of:
+#   1. ./config.ini  (current working directory)
+#   2. $HOME/.config/vmavificient/config.ini
+#
+# Lines beginning with '#' or ';' are comments. Sections (e.g. [foo]) are
+# ignored — keys are global.
+
+# TMDB v3 API key (https://www.themoviedb.org/settings/api).
+tmdb_api_key =
+
+# Release group tag appended to the output filename, e.g.
+#   Title.YEAR.....OPUS-<release_group>.mkv
+release_group = matherose
