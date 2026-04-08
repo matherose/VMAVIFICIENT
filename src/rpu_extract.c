@@ -57,9 +57,8 @@ found:;
   /* Find the next start code to determine NAL size. */
   for (size_t j = 0; j + 2 < remaining; j++) {
     if (nal_start[j] == 0 && nal_start[j + 1] == 0 &&
-        (nal_start[j + 2] == 1 ||
-         (j + 3 < remaining && nal_start[j + 2] == 0 &&
-          nal_start[j + 3] == 1))) {
+        (nal_start[j + 2] == 1 || (j + 3 < remaining && nal_start[j + 2] == 0 &&
+                                   nal_start[j + 3] == 1))) {
       *nal_size = j;
       return nal_start;
     }
@@ -185,8 +184,7 @@ void build_rpu_filename(char *buf, size_t bufsize, const char *base_name) {
   snprintf(buf, bufsize, "%s.rpu.bin", base_name);
 }
 
-RpuExtractResult extract_rpu(const char *input_path,
-                              const char *output_path) {
+RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
   RpuExtractResult result = {.error = 0, .skipped = 0, .rpu_count = 0};
   snprintf(result.output_path, sizeof(result.output_path), "%s", output_path);
 
@@ -272,8 +270,7 @@ RpuExtractResult extract_rpu(const char *input_path,
     int found = find_unspec62_length_prefixed(pkt->data, pkt->size, &nal_data,
                                               &nal_size);
     if (!found)
-      found =
-          find_unspec62_annex_b(pkt->data, pkt->size, &nal_data, &nal_size);
+      found = find_unspec62_annex_b(pkt->data, pkt->size, &nal_data, &nal_size);
 
     if (found && nal_data && nal_size > 0) {
       /* Parse with libdovi. */
@@ -311,8 +308,8 @@ RpuExtractResult extract_rpu(const char *input_path,
     /* Progress update. */
     time_t now = time(NULL);
     if (now != last_progress && total_duration > 0) {
-      int64_t current_us =
-          av_rescale_q(pkt->pts, video_stream->time_base, (AVRational){1, AV_TIME_BASE});
+      int64_t current_us = av_rescale_q(pkt->pts, video_stream->time_base,
+                                        (AVRational){1, AV_TIME_BASE});
       print_extract_progress(current_us, total_duration, result.rpu_count,
                              start_time);
       last_progress = now;

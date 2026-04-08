@@ -18,15 +18,15 @@
  * @brief Configuration for a video encode job.
  */
 typedef struct {
-  const char *input_path;       /**< Source media file. */
-  const char *output_path;      /**< Output .mkv path. */
-  const char *rpu_path;         /**< Dolby Vision RPU .bin (NULL if none). */
-  const EncodePreset *preset;   /**< SVT-AV1 parameter preset. */
-  int film_grain;               /**< Film grain synthesis level (0–50). */
-  int target_bitrate;           /**< Target bitrate in kbps. */
-  const MediaInfo *info;        /**< Source media info. */
-  const CropInfo *crop;         /**< Crop values (NULL if none). */
-  const HdrInfo *hdr;           /**< HDR info. */
+  const char *input_path;     /**< Source media file. */
+  const char *output_path;    /**< Output .mkv path. */
+  const char *rpu_path;       /**< Dolby Vision RPU .bin (NULL if none). */
+  const EncodePreset *preset; /**< SVT-AV1 parameter preset. */
+  int film_grain;             /**< Film grain synthesis level (0–50). */
+  int target_bitrate;         /**< Target bitrate in kbps. */
+  const MediaInfo *info;      /**< Source media info. */
+  const CropInfo *crop;       /**< Crop values (NULL if none). */
+  const HdrInfo *hdr;         /**< HDR info. */
 } VideoEncodeConfig;
 
 /**

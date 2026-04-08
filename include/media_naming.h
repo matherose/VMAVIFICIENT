@@ -88,7 +88,8 @@ const char *language_tag_to_string(LanguageTag tag);
 /**
  * @brief Build the standardized output filename.
  *
- * Format: TITLE.YEAR.LANGUAGES.RESOLUTION.FEATURE.SOURCE.QUALITY.10bit.AV1.OPUS-matherose.mkv
+ * Format:
+ * TITLE.YEAR.LANGUAGES.RESOLUTION.FEATURE.SOURCE.QUALITY.10bit.AV1.OPUS-matherose.mkv
  *
  * @param buf       Output buffer.
  * @param bufsize   Size of output buffer.

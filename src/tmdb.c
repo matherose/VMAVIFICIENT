@@ -41,17 +41,15 @@ TmdbMovieInfo tmdb_fetch_movie(int tmdb_id) {
 
   const VmavConfig *cfg = config_get();
   if (!cfg->tmdb_api_key[0]) {
-    fprintf(stderr,
-            "Error: TMDB API key not found.\n"
-            "Set tmdb_api_key in config.ini (cwd or "
-            "$HOME/.config/vmavificient/config.ini).\n");
+    fprintf(stderr, "Error: TMDB API key not found.\n"
+                    "Set tmdb_api_key in config.ini (cwd or "
+                    "$HOME/.config/vmavificient/config.ini).\n");
     return info;
   }
 
   char url[512];
-  snprintf(url, sizeof(url),
-           "https://api.themoviedb.org/3/movie/%d?api_key=%s", tmdb_id,
-           cfg->tmdb_api_key);
+  snprintf(url, sizeof(url), "https://api.themoviedb.org/3/movie/%d?api_key=%s",
+           tmdb_id, cfg->tmdb_api_key);
 
   CURL *curl = curl_easy_init();
   if (!curl) {

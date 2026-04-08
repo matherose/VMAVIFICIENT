@@ -10,10 +10,10 @@
  * @brief Movie metadata retrieved from TMDB.
  */
 typedef struct {
-  int error;                   /**< 0 on success, -1 on failure. */
-  char original_title[512];    /**< UTF-8 original title. */
-  int release_year;            /**< Year extracted from release_date. */
-  char original_language[8];   /**< ISO 639-1 code (e.g. "en", "fr"). */
+  int error;                 /**< 0 on success, -1 on failure. */
+  char original_title[512];  /**< UTF-8 original title. */
+  int release_year;          /**< Year extracted from release_date. */
+  char original_language[8]; /**< ISO 639-1 code (e.g. "en", "fr"). */
 } TmdbMovieInfo;
 
 /**

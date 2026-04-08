@@ -20,7 +20,9 @@
 
 #include <EbSvtAv1Enc.h>
 
-void init_logging(void) { av_log_set_level(AV_LOG_FATAL); }
+void init_logging(void) {
+  av_log_set_level(AV_LOG_FATAL);
+}
 
 int check_dependencies(void) {
   struct {

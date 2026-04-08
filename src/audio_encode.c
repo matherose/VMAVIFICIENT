@@ -144,8 +144,8 @@ static int encode_from_fifo(AVAudioFifo *fifo, AVCodecContext *enc_ctx,
       return ret;
     }
 
-    int read = av_audio_fifo_read(fifo, (void **)enc_frame->data,
-                                  samples_to_read);
+    int read =
+        av_audio_fifo_read(fifo, (void **)enc_frame->data, samples_to_read);
     if (read < samples_to_read) {
       av_frame_free(&enc_frame);
       return AVERROR(EIO);
@@ -325,7 +325,8 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
   /* libopus only supports standard channel layouts. Map the decoder's
      layout to a default one with the same channel count so that
      variants like 5.1(side) are accepted. */
-  av_channel_layout_default(&enc_ctx->ch_layout, dec_ctx->ch_layout.nb_channels);
+  av_channel_layout_default(&enc_ctx->ch_layout,
+                            dec_ctx->ch_layout.nb_channels);
 
   av_opt_set(enc_ctx->priv_data, "application", "audio", 0);
   av_opt_set(enc_ctx->priv_data, "vbr", "constrained", 0);
@@ -339,8 +340,8 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
   }
 
   /* ── Set up resampler ── */
-  ret = swr_alloc_set_opts2(&swr, &enc_ctx->ch_layout, AV_SAMPLE_FMT_FLT,
-                            48000, &dec_ctx->ch_layout, dec_ctx->sample_fmt,
+  ret = swr_alloc_set_opts2(&swr, &enc_ctx->ch_layout, AV_SAMPLE_FMT_FLT, 48000,
+                            &dec_ctx->ch_layout, dec_ctx->sample_fmt,
                             dec_ctx->sample_rate, 0, NULL);
   if (ret < 0 || !swr) {
     fprintf(stderr, "  Error: cannot allocate resampler\n");
@@ -356,8 +357,8 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
   }
 
   /* ── Audio FIFO ── */
-  fifo = av_audio_fifo_alloc(AV_SAMPLE_FMT_FLT,
-                             enc_ctx->ch_layout.nb_channels, enc_ctx->frame_size);
+  fifo = av_audio_fifo_alloc(AV_SAMPLE_FMT_FLT, enc_ctx->ch_layout.nb_channels,
+                             enc_ctx->frame_size);
   if (!fifo) {
     result.error = AVERROR(ENOMEM);
     goto cleanup;
@@ -413,7 +414,8 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
   /* Total samples at output rate for progress tracking. */
   int64_t total_samples = 0;
   if (ifmt_ctx->duration > 0)
-    total_samples = (int64_t)((double)ifmt_ctx->duration / AV_TIME_BASE * 48000);
+    total_samples =
+        (int64_t)((double)ifmt_ctx->duration / AV_TIME_BASE * 48000);
   else if (in_stream->duration > 0)
     total_samples = av_rescale_q(in_stream->duration, in_stream->time_base,
                                  (AVRational){1, 48000});
@@ -450,9 +452,8 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
       }
 
       /* Push resampled data into FIFO. */
-      ret = av_audio_fifo_realloc(fifo,
-                                  av_audio_fifo_size(fifo) +
-                                      resampled->nb_samples);
+      ret = av_audio_fifo_realloc(fifo, av_audio_fifo_size(fifo) +
+                                            resampled->nb_samples);
       if (ret < 0) {
         av_frame_unref(resampled);
         result.error = ret;

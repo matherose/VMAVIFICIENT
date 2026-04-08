@@ -31,7 +31,9 @@ static const struct {
   const char *code;
 } lang_map[] = {
     /* French */
-    {"fran\xc3\xa7""ais", "fre"},  /* français (UTF-8) */
+    {"fran\xc3\xa7"
+     "ais",
+     "fre"}, /* français (UTF-8) */
     {"francais", "fre"},
     {"french", "fre"},
     /* English */
@@ -42,7 +44,9 @@ static const struct {
     {"german", "ger"},
     {"allemand", "ger"},
     /* Spanish */
-    {"espa\xc3\xb1""ol", "spa"},   /* español (UTF-8) */
+    {"espa\xc3\xb1"
+     "ol",
+     "spa"}, /* español (UTF-8) */
     {"espanol", "spa"},
     {"spanish", "spa"},
     {"castillan", "spa"},
@@ -51,7 +55,9 @@ static const struct {
     {"italian", "ita"},
     {"italien", "ita"},
     /* Portuguese */
-    {"portugu\xc3\xaa""s", "por"}, /* português (UTF-8) */
+    {"portugu\xc3\xaa"
+     "s",
+     "por"}, /* português (UTF-8) */
     {"portugues", "por"},
     {"portuguese", "por"},
     /* Dutch */
@@ -258,8 +264,7 @@ static int codec_quality_rank(int codec_id, int profile) {
   case AV_CODEC_ID_TRUEHD:
     return 60;
   case AV_CODEC_ID_DTS:
-    if (profile == AV_PROFILE_DTS_HD_MA ||
-        profile == AV_PROFILE_DTS_HD_MA_X ||
+    if (profile == AV_PROFILE_DTS_HD_MA || profile == AV_PROFILE_DTS_HD_MA_X ||
         profile == AV_PROFILE_DTS_HD_MA_X_IMAX)
       return 50;
     if (profile == AV_PROFILE_DTS_HD_HRA)
@@ -301,26 +306,48 @@ static const char *language_display_name(const char *code) {
     const char *code;
     const char *name;
   } names[] = {
-      {"eng", "English"},       {"fre", "Fran\xc3\xa7""ais"},
-      {"fra", "Fran\xc3\xa7""ais"}, {"ger", "German"},
-      {"deu", "German"},        {"spa", "Spanish"},
-      {"ita", "Italian"},       {"por", "Portuguese"},
-      {"dut", "Dutch"},         {"nld", "Dutch"},
-      {"rus", "Russian"},       {"jpn", "Japanese"},
-      {"chi", "Chinese"},       {"zho", "Chinese"},
-      {"kor", "Korean"},        {"ara", "Arabic"},
-      {"pol", "Polish"},        {"swe", "Swedish"},
-      {"nor", "Norwegian"},     {"dan", "Danish"},
-      {"fin", "Finnish"},       {"tur", "Turkish"},
-      {"hin", "Hindi"},         {"cze", "Czech"},
-      {"ces", "Czech"},         {"hun", "Hungarian"},
-      {"rum", "Romanian"},      {"ron", "Romanian"},
-      {"tha", "Thai"},          {"vie", "Vietnamese"},
-      {"gre", "Greek"},         {"ell", "Greek"},
-      {"heb", "Hebrew"},        {"ind", "Indonesian"},
-      {"may", "Malay"},         {"msa", "Malay"},
-      {"ukr", "Ukrainian"},     {"bul", "Bulgarian"},
-      {"hrv", "Croatian"},      {"slo", "Slovak"},
+      {"eng", "English"},
+      {"fre", "Fran\xc3\xa7"
+              "ais"},
+      {"fra", "Fran\xc3\xa7"
+              "ais"},
+      {"ger", "German"},
+      {"deu", "German"},
+      {"spa", "Spanish"},
+      {"ita", "Italian"},
+      {"por", "Portuguese"},
+      {"dut", "Dutch"},
+      {"nld", "Dutch"},
+      {"rus", "Russian"},
+      {"jpn", "Japanese"},
+      {"chi", "Chinese"},
+      {"zho", "Chinese"},
+      {"kor", "Korean"},
+      {"ara", "Arabic"},
+      {"pol", "Polish"},
+      {"swe", "Swedish"},
+      {"nor", "Norwegian"},
+      {"dan", "Danish"},
+      {"fin", "Finnish"},
+      {"tur", "Turkish"},
+      {"hin", "Hindi"},
+      {"cze", "Czech"},
+      {"ces", "Czech"},
+      {"hun", "Hungarian"},
+      {"rum", "Romanian"},
+      {"ron", "Romanian"},
+      {"tha", "Thai"},
+      {"vie", "Vietnamese"},
+      {"gre", "Greek"},
+      {"ell", "Greek"},
+      {"heb", "Hebrew"},
+      {"ind", "Indonesian"},
+      {"may", "Malay"},
+      {"msa", "Malay"},
+      {"ukr", "Ukrainian"},
+      {"bul", "Bulgarian"},
+      {"hrv", "Croatian"},
+      {"slo", "Slovak"},
       {"slk", "Slovak"},
       {NULL, NULL},
   };
@@ -376,7 +403,10 @@ void build_audio_track_name(char *buf, size_t bufsize, const char *language,
       variant = "VFF";
       break;
     }
-    snprintf(buf, bufsize, "Fran\xc3\xa7""ais [%s] %s", variant, layout);
+    snprintf(buf, bufsize,
+             "Fran\xc3\xa7"
+             "ais [%s] %s",
+             variant, layout);
   } else {
     const char *name = language_display_name(language);
     snprintf(buf, bufsize, "%s %s", name, layout);
@@ -411,8 +441,10 @@ void build_subtitle_track_name(char *buf, size_t bufsize, const char *language,
       variant = "VFF";
       break;
     }
-    snprintf(buf, bufsize, "Fran\xc3\xa7""ais [%s] | %s%s", variant, format,
-             suffix);
+    snprintf(buf, bufsize,
+             "Fran\xc3\xa7"
+             "ais [%s] | %s%s",
+             variant, format, suffix);
   } else {
     const char *name = language_display_name(language);
     snprintf(buf, bufsize, "%s | %s%s", name, format, suffix);

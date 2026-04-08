@@ -106,8 +106,7 @@ FinalMuxResult final_mux(const FinalMuxConfig *config) {
   for (int i = 0; i < config->audio_count; i++)
     cmd_appendf(cmd, cap, &pos, " -map %d:a:0", 1 + i);
   for (int i = 0; i < config->sub_count; i++)
-    cmd_appendf(cmd, cap, &pos, " -map %d:s:0?",
-                1 + config->audio_count + i);
+    cmd_appendf(cmd, cap, &pos, " -map %d:s:0?", 1 + config->audio_count + i);
 
   /* Chapters: take from source file if provided, else drop entirely
      (the -1 sentinel disables chapters). */
@@ -133,9 +132,10 @@ FinalMuxResult final_mux(const FinalMuxConfig *config) {
 
   /* Audio metadata + dispositions. */
   for (int i = 0; i < config->audio_count; i++) {
-    const char *lang = (config->audio[i].language && config->audio[i].language[0])
-                           ? config->audio[i].language
-                           : "und";
+    const char *lang =
+        (config->audio[i].language && config->audio[i].language[0])
+            ? config->audio[i].language
+            : "und";
     cmd_appendf(cmd, cap, &pos, " -metadata:s:a:%d language=%s", i, lang);
     if (config->audio[i].track_name && config->audio[i].track_name[0]) {
       cmd_appendf(cmd, cap, &pos, " -metadata:s:a:%d title=", i);
@@ -161,13 +161,13 @@ FinalMuxResult final_mux(const FinalMuxConfig *config) {
     disp[0] = '\0';
     size_t dpos = 0;
     int any = 0;
-#define DISP_ADD(flag)                                                       \
-  do {                                                                       \
-    if (any)                                                                 \
-      dpos += (size_t)snprintf(disp + dpos, sizeof(disp) - dpos, "+" flag);  \
-    else                                                                     \
-      dpos += (size_t)snprintf(disp + dpos, sizeof(disp) - dpos, flag);      \
-    any = 1;                                                                 \
+#define DISP_ADD(flag)                                                      \
+  do {                                                                      \
+    if (any)                                                                \
+      dpos += (size_t)snprintf(disp + dpos, sizeof(disp) - dpos, "+" flag); \
+    else                                                                    \
+      dpos += (size_t)snprintf(disp + dpos, sizeof(disp) - dpos, flag);     \
+    any = 1;                                                                \
   } while (0)
 
     if (config->subs[i].is_default)
@@ -178,8 +178,7 @@ FinalMuxResult final_mux(const FinalMuxConfig *config) {
       DISP_ADD("hearing_impaired");
 #undef DISP_ADD
 
-    cmd_appendf(cmd, cap, &pos, " -disposition:s:%d %s", i,
-                any ? disp : "0");
+    cmd_appendf(cmd, cap, &pos, " -disposition:s:%d %s", i, any ? disp : "0");
   }
 
   /* Container title. */

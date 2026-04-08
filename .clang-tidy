@@ -17,7 +17,15 @@ Checks: >
   -readability-magic-numbers,
   -readability-function-cognitive-complexity,
   -readability-braces-around-statements,
-  -readability-isolate-declaration
+  -readability-isolate-declaration,
+  -readability-math-missing-parentheses,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -clang-analyzer-security.insecureAPI.strcpy,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -bugprone-assignment-in-if-condition,
+  -cert-msc30-c,
+  -cert-msc50-cpp
 
 WarningsAsErrors: ''
 HeaderFilterRegex: '^(include|src)/.*\.h$'

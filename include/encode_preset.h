@@ -30,52 +30,55 @@ typedef enum {
  * Fields set to -1 mean "use encoder default" (sentinel value).
  */
 typedef struct {
-  int preset;                     /**< Encoder speed preset (always 4). */
-  int keyint;                     /**< Keyframe interval (300=4K, 240=HD). */
-  int tune;                       /**< Tune mode: 0=VQ, 1=PSNR, 5=Film Grain. */
-  double ac_bias;                 /**< AC bias / PsyRD (0.0–8.0). */
-  int variance_boost;             /**< Variance boost strength (1–4). */
-  int variance_octile;            /**< Variance boost octile (1–8). */
-  int variance_curve;             /**< Variance boost curve (0–3, 3=PQ). */
-  int sharpness;                  /**< Sharpness (-7 to 7). */
-  int luminance_bias;             /**< Luminance QP bias (0–100). */
-  int enable_tf;                  /**< Temporal filter: 0=off, 1=on, 2=adaptive. */
-  int tf_strength;                /**< TF strength (0–4). */
-  int kf_tf_strength;             /**< Keyframe TF strength (0–4). */
-  int tx_bias;                    /**< Transform bias (0–3). */
-  int sharp_tx;                   /**< Sharp transform opts (0–1). */
-  int complex_hvs;                /**< Complex HVS model (0–1). */
-  int noise_norm_strength;        /**< Noise normalization (0–4, -1=default). */
-  int noise_adaptive_filtering;   /**< Noise-adaptive filtering (0–4). */
-  int enable_dlf;                 /**< Deblocking filter (0–2, 2=accurate). */
-  int cdef_scaling;               /**< CDEF strength scaling (1–30). */
-  int chroma_qm_min;              /**< Chroma QM min (0–15, -1=default). */
-  int chroma_qm_max;              /**< Chroma QM max (0–15, -1=default). */
+  int preset;              /**< Encoder speed preset (always 4). */
+  int keyint;              /**< Keyframe interval (300=4K, 240=HD). */
+  int tune;                /**< Tune mode: 0=VQ, 1=PSNR, 5=Film Grain. */
+  double ac_bias;          /**< AC bias / PsyRD (0.0–8.0). */
+  int variance_boost;      /**< Variance boost strength (1–4). */
+  int variance_octile;     /**< Variance boost octile (1–8). */
+  int variance_curve;      /**< Variance boost curve (0–3, 3=PQ). */
+  int sharpness;           /**< Sharpness (-7 to 7). */
+  int luminance_bias;      /**< Luminance QP bias (0–100). */
+  int enable_tf;           /**< Temporal filter: 0=off, 1=on, 2=adaptive. */
+  int tf_strength;         /**< TF strength (0–4). */
+  int kf_tf_strength;      /**< Keyframe TF strength (0–4). */
+  int tx_bias;             /**< Transform bias (0–3). */
+  int sharp_tx;            /**< Sharp transform opts (0–1). */
+  int complex_hvs;         /**< Complex HVS model (0–1). */
+  int noise_norm_strength; /**< Noise normalization (0–4, -1=default). */
+  int noise_adaptive_filtering; /**< Noise-adaptive filtering (0–4). */
+  int enable_dlf;               /**< Deblocking filter (0–2, 2=accurate). */
+  int cdef_scaling;             /**< CDEF strength scaling (1–30). */
+  int chroma_qm_min;            /**< Chroma QM min (0–15, -1=default). */
+  int chroma_qm_max;            /**< Chroma QM max (0–15, -1=default). */
   double qp_scale_compress_strength; /**< QP scale compression (0.0–8.0). */
-  int max_tx_size;                /**< Max transform size: 32 or 64. */
-  int hbd_mds;                    /**< High bit-depth mode decisions (0–2). */
-  int enable_overlays;            /**< Overlays (0–1, -1=default). */
-  int adaptive_film_grain;        /**< Resolution-adaptive grain (0–1). */
-  int alt_lambda_factors;         /**< Alternative RDO lambdas (0–1). */
-  int enable_qm;                  /**< Quantization matrices (0–1). */
-  int qm_min;                     /**< QM min level (0–15, -1=default). */
-  int qm_max;                     /**< QM max level (0–15, -1=default). */
-  int spy_rd;                     /**< Perceptual RDO mode (0–4, -1=default). */
-  int undershoot_pct;             /**< VBR undershoot limit (0–100, -1=default). */
-  int overshoot_pct;              /**< VBR overshoot limit (0–100, -1=default). */
-  int min_qp;                     /**< Minimum QP allowed (0–63, -1=default). */
-  int max_qp;                     /**< Maximum QP allowed (0–63, -1=default). */
-  int enable_mfmv;                /**< Motion field motion vectors (0–1, -1=default). */
-  int unrestricted_mv;            /**< Unrestricted motion vectors (0–1, -1=default). */
-  int irefresh_type;              /**< Intra refresh type (1=open GOP, 2=closed, -1=default). */
-  int aq_mode;                    /**< Adaptive quantization mode (0–2, -1=default). */
-  int enable_restoration;         /**< Restoration filter (0–1, -1=default). */
-  int recode_loop;                /**< Recode loop level (0–4, -1=default). */
-  int look_ahead_distance;        /**< VBR look-ahead frames (0–120, -1=default). */
-  int enable_dg;                  /**< Dynamic GOP (0–1, -1=default). */
-  int fast_decode;                /**< Decoder-speed optimization level (0–2, -1=default). */
-  int scd;                        /**< Scene change detection (0–1, -1=default). */
-  int temporal_layer_chroma_qindex_offset; /**< Chroma QIndex offset applied to all temporal layers (0–6, -1=default). */
+  int max_tx_size;                   /**< Max transform size: 32 or 64. */
+  int hbd_mds;             /**< High bit-depth mode decisions (0–2). */
+  int enable_overlays;     /**< Overlays (0–1, -1=default). */
+  int adaptive_film_grain; /**< Resolution-adaptive grain (0–1). */
+  int alt_lambda_factors;  /**< Alternative RDO lambdas (0–1). */
+  int enable_qm;           /**< Quantization matrices (0–1). */
+  int qm_min;              /**< QM min level (0–15, -1=default). */
+  int qm_max;              /**< QM max level (0–15, -1=default). */
+  int spy_rd;              /**< Perceptual RDO mode (0–4, -1=default). */
+  int undershoot_pct;      /**< VBR undershoot limit (0–100, -1=default). */
+  int overshoot_pct;       /**< VBR overshoot limit (0–100, -1=default). */
+  int min_qp;              /**< Minimum QP allowed (0–63, -1=default). */
+  int max_qp;              /**< Maximum QP allowed (0–63, -1=default). */
+  int enable_mfmv;     /**< Motion field motion vectors (0–1, -1=default). */
+  int unrestricted_mv; /**< Unrestricted motion vectors (0–1, -1=default). */
+  int irefresh_type; /**< Intra refresh type (1=open GOP, 2=closed, -1=default).
+                      */
+  int aq_mode;       /**< Adaptive quantization mode (0–2, -1=default). */
+  int enable_restoration;  /**< Restoration filter (0–1, -1=default). */
+  int recode_loop;         /**< Recode loop level (0–4, -1=default). */
+  int look_ahead_distance; /**< VBR look-ahead frames (0–120, -1=default). */
+  int enable_dg;           /**< Dynamic GOP (0–1, -1=default). */
+  int fast_decode; /**< Decoder-speed optimization level (0–2, -1=default). */
+  int scd;         /**< Scene change detection (0–1, -1=default). */
+  int temporal_layer_chroma_qindex_offset; /**< Chroma QIndex offset applied to
+                                              all temporal layers (0–6,
+                                              -1=default). */
 } EncodePreset;
 
 /**

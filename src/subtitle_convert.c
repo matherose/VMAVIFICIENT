@@ -29,8 +29,8 @@
 
 #include <zlib.h>
 
-#include <tesseract/capi.h>
 #include <allheaders.h>
+#include <tesseract/capi.h>
 
 /* ====================================================================== */
 /*  Language mapping                                                      */
@@ -44,16 +44,15 @@ const char *iso639_to_tesseract_lang(const char *iso639) {
     const char *iso;
     const char *tess;
   } map[] = {
-      {"eng", "eng"}, {"fre", "fra"}, {"fra", "fra"}, {"ger", "deu"},
-      {"deu", "deu"}, {"spa", "spa"}, {"ita", "ita"}, {"por", "por"},
-      {"dut", "nld"}, {"nld", "nld"}, {"rus", "rus"}, {"jpn", "jpn"},
-      {"chi", "chi_sim"}, {"zho", "chi_sim"}, {"kor", "kor"},
-      {"ara", "ara"}, {"pol", "pol"}, {"swe", "swe"}, {"nor", "nor"},
-      {"dan", "dan"}, {"fin", "fin"}, {"tur", "tur"}, {"hin", "hin"},
-      {"cze", "ces"}, {"ces", "ces"}, {"hun", "hun"}, {"rum", "ron"},
-      {"ron", "ron"}, {"tha", "tha"}, {"vie", "vie"}, {"gre", "ell"},
-      {"ell", "ell"}, {"heb", "heb"}, {"ukr", "ukr"}, {"bul", "bul"},
-      {"hrv", "hrv"},
+      {"eng", "eng"},     {"fre", "fra"},     {"fra", "fra"}, {"ger", "deu"},
+      {"deu", "deu"},     {"spa", "spa"},     {"ita", "ita"}, {"por", "por"},
+      {"dut", "nld"},     {"nld", "nld"},     {"rus", "rus"}, {"jpn", "jpn"},
+      {"chi", "chi_sim"}, {"zho", "chi_sim"}, {"kor", "kor"}, {"ara", "ara"},
+      {"pol", "pol"},     {"swe", "swe"},     {"nor", "nor"}, {"dan", "dan"},
+      {"fin", "fin"},     {"tur", "tur"},     {"hin", "hin"}, {"cze", "ces"},
+      {"ces", "ces"},     {"hun", "hun"},     {"rum", "ron"}, {"ron", "ron"},
+      {"tha", "tha"},     {"vie", "vie"},     {"gre", "ell"}, {"ell", "ell"},
+      {"heb", "heb"},     {"ukr", "ukr"},     {"bul", "bul"}, {"hrv", "hrv"},
       {NULL, NULL},
   };
 
@@ -139,8 +138,8 @@ static void format_srt_time(char *buf, size_t bufsize, int64_t ms) {
 #define PGS_END 0x80 /* End of Display Set */
 
 /* PCS composition states */
-#define PCS_NORMAL     0x00
-#define PCS_ACQ_POINT  0x40
+#define PCS_NORMAL 0x00
+#define PCS_ACQ_POINT 0x40
 #define PCS_EPOCH_START 0x80
 
 /** @brief Palette entry: YCbCr + Alpha */
@@ -150,8 +149,8 @@ typedef struct {
 
 /** @brief A complete PGS Display Set ready for OCR */
 typedef struct {
-  int64_t pts_ms;         /**< Presentation timestamp in ms */
-  int valid;              /**< 1 if we have bitmap data */
+  int64_t pts_ms; /**< Presentation timestamp in ms */
+  int valid;      /**< 1 if we have bitmap data */
 
   /* Palette (256 entries max) */
   PgsPaletteEntry palette[256];
@@ -216,7 +215,10 @@ static uint8_t *try_zlib_decompress(const uint8_t *data, int data_size,
     /* Try larger buffer */
     buf_size = (uLongf)data_size * 32;
     uint8_t *tmp = realloc(buf, buf_size);
-    if (!tmp) { free(buf); return NULL; }
+    if (!tmp) {
+      free(buf);
+      return NULL;
+    }
     buf = tmp;
     zret = uncompress(buf, &buf_size, data, (uLong)data_size);
   }
@@ -260,7 +262,7 @@ static void parse_pgs_packet(PgsDisplaySet *ds, const uint8_t *data,
       /* Presentation Composition Segment */
       if (seg_size >= 11) {
         ds->composition_state = seg[7]; /* composition_state at offset 7 */
-        ds->valid = 0; /* reset until we get ODS */
+        ds->valid = 0;                  /* reset until we get ODS */
       }
       break;
 
@@ -282,8 +284,9 @@ static void parse_pgs_packet(PgsDisplaySet *ds, const uint8_t *data,
 
     case PGS_ODS: {
       /* Object Definition Segment:
-         id(2) + version(1) + seq_flag(1) + data_length(3) + width(2) + height(2) + rle_data(...)
-         seq_flag: 0xC0 = first+last, 0x80 = first, 0x40 = last, 0x00 = middle */
+         id(2) + version(1) + seq_flag(1) + data_length(3) + width(2) +
+         height(2) + rle_data(...) seq_flag: 0xC0 = first+last, 0x80 = first,
+         0x40 = last, 0x00 = middle */
       if (seg_size < 4)
         break;
 
@@ -434,7 +437,7 @@ static uint8_t *decode_pgs_rle(const uint8_t *rle, size_t rle_size, int w,
  * Transparent pixels (alpha < 128) → white (255).
  */
 static PIX *pgs_bitmap_to_pix(const uint8_t *bitmap, int w, int h,
-                               const PgsPaletteEntry *palette) {
+                              const PgsPaletteEntry *palette) {
   PIX *pix = pixCreate(w, h, 8);
   if (!pix)
     return NULL;
@@ -510,8 +513,8 @@ static PIX *prepare_pix_for_ocr(PIX *src) {
 
   /* Otsu binarization: produces a clean 1bpp image that Tesseract
      handles much better than raw grayscale for glyph discrimination */
-  PIX *binary = pixOtsuThreshOnBackgroundNorm(padded, NULL, 10, 15, 100,
-                                               50, 255, 2, 2, 0.1, NULL);
+  PIX *binary = pixOtsuThreshOnBackgroundNorm(padded, NULL, 10, 15, 100, 50,
+                                              255, 2, 2, 0.1, NULL);
   if (binary) {
     pixDestroy(&padded);
 
@@ -565,9 +568,8 @@ static void strip_whitespace(char *text) {
     return;
 
   size_t len = strlen(text);
-  while (len > 0 &&
-         (text[len - 1] == ' ' || text[len - 1] == '\n' ||
-          text[len - 1] == '\r' || text[len - 1] == '\t'))
+  while (len > 0 && (text[len - 1] == ' ' || text[len - 1] == '\n' ||
+                     text[len - 1] == '\r' || text[len - 1] == '\t'))
     text[--len] = '\0';
 
   char *start = text;
@@ -583,10 +585,11 @@ static void strip_whitespace(char *text) {
 /* ====================================================================== */
 
 SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
-                                          const TrackInfo *track,
-                                          const char *output_path,
-                                          const char *tesseract_lang) {
-  SubtitleConvertResult result = {.error = 0, .skipped = 0, .subtitle_count = 0};
+                                         const TrackInfo *track,
+                                         const char *output_path,
+                                         const char *tesseract_lang) {
+  SubtitleConvertResult result = {
+      .error = 0, .skipped = 0, .subtitle_count = 0};
   snprintf(result.output_path, sizeof(result.output_path), "%s", output_path);
 
   /* Skip if output already exists. */
@@ -705,8 +708,8 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
     /* Get PTS in ms */
     int64_t pts_ms = 0;
     if (pkt->pts != AV_NOPTS_VALUE)
-      pts_ms = av_rescale_q(pkt->pts, sub_stream->time_base,
-                            (AVRational){1, 1000});
+      pts_ms =
+          av_rescale_q(pkt->pts, sub_stream->time_base, (AVRational){1, 1000});
 
     /* Parse PGS segments from this packet */
     parse_pgs_packet(&ds, pkt->data, pkt->size);
@@ -814,8 +817,8 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
         char start_str[32], end_str[32];
         format_srt_time(start_str, sizeof(start_str), prev_pts_ms);
         format_srt_time(end_str, sizeof(end_str), end_ms);
-        fprintf(srt_fp, "%d\n%s --> %s\n%s\n\n", sub_index, start_str,
-                end_str, text);
+        fprintf(srt_fp, "%d\n%s --> %s\n%s\n\n", sub_index, start_str, end_str,
+                text);
       }
     }
     if (text)

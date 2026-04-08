@@ -19,10 +19,10 @@ typedef struct {
   char codec[64];    /**< Short codec name (e.g. "aac", "srt"). */
   int channels;      /**< Number of audio channels (0 for subtitles). */
   int64_t bitrate;   /**< Bitrate in bits/s (0 if unknown). */
-  int codec_id;      /**< AVCodecID value (for internal ranking, stored as int). */
-  int profile;       /**< Codec profile (e.g. DTS-HD MA vs plain DTS). */
-  int is_forced;     /**< 1 if track is forced (disposition or title hint). */
-  int is_sdh;        /**< 1 if track is SDH / closed captions. */
+  int codec_id;  /**< AVCodecID value (for internal ranking, stored as int). */
+  int profile;   /**< Codec profile (e.g. DTS-HD MA vs plain DTS). */
+  int is_forced; /**< 1 if track is forced (disposition or title hint). */
+  int is_sdh;    /**< 1 if track is SDH / closed captions. */
 } TrackInfo;
 
 /**
@@ -70,10 +70,10 @@ TrackInfo *select_best_audio_per_language(const MediaTracks *tracks,
  * @brief French audio origin for track naming.
  */
 typedef enum {
-  FRENCH_AUDIO_VFF,  /**< France */
-  FRENCH_AUDIO_VFQ,  /**< Quebec */
-  FRENCH_AUDIO_VFI,  /**< International */
-  FRENCH_AUDIO_VO,   /**< Original (movie is French) */
+  FRENCH_AUDIO_VFF, /**< France */
+  FRENCH_AUDIO_VFQ, /**< Quebec */
+  FRENCH_AUDIO_VFI, /**< International */
+  FRENCH_AUDIO_VO,  /**< Original (movie is French) */
 } FrenchAudioOrigin;
 
 /**

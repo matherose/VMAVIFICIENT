@@ -27,54 +27,55 @@
 #include "video_encode.h"
 
 static void print_usage(const char *prog) {
-  fprintf(stderr,
-          "Usage: %s [options] <input_file>\n"
-          "\n"
-          "Options:\n"
-          "  --tmdb <id>      TMDB movie ID for naming (requires TMDB_API_KEY)\n"
-          "  --bitrate <kbps> Override target video bitrate (e.g. 3500)\n"
-          "  --srt <path>     Additional SRT subtitle file (can be repeated)\n"
-          "  --help           Show this help\n"
-          "\n"
-          "Language flags (override auto-detection):\n"
-          "  --multi          MULTi\n"
-          "  --multivfi       MULTi.VFI\n"
-          "  --multivff       MULTi.VFF\n"
-          "  --multivfq       MULTi.VFQ\n"
-          "  --multivf2       MULTi.VF2\n"
-          "  --multivof       MULTi.VOF\n"
-          "  --dual_vfi       DUAL.VFI\n"
-          "  --dual_vff       DUAL.VFF\n"
-          "  --dual_vfq       DUAL.VFQ\n"
-          "  --french         FRENCH\n"
-          "  --vff            VFF\n"
-          "  --vof            VOF\n"
-          "  --truefrench     TRUEFRENCH\n"
-          "  --vo             VO\n"
-          "  --vost           VOST\n"
-          "  --fansub         FANSUB\n"
-          "\n"
-          "Source flags (override auto-detection):\n"
-          "  --bdrip          BDRip\n"
-          "  --bluray         BluRay\n"
-          "  --remux          REMUX\n"
-          "  --dvdrip         DVDRip\n"
-          "  --dvdremux       DVDRemux\n"
-          "  --webrip         WEBRip\n"
-          "  --webdl          WEB-DL\n"
-          "  --web            WEB\n"
-          "  --hdtv           HDTV\n"
-          "  --hdrip          HDRip\n"
-          "  --tvrip          TVRip\n"
-          "  --vhsrip         VHSRip\n"
-          "\n"
-          "Quality presets (default: live-action):\n"
-          "  --animation       Animation content\n"
-          "  --super35_analog  Super 35mm analog film\n"
-          "  --super35_digital Super 35mm digital\n"
-          "  --imax_analog     IMAX analog film\n"
-          "  --imax_digital    IMAX digital\n",
-          prog);
+  fprintf(
+      stderr,
+      "Usage: %s [options] <input_file>\n"
+      "\n"
+      "Options:\n"
+      "  --tmdb <id>      TMDB movie ID for naming (requires TMDB_API_KEY)\n"
+      "  --bitrate <kbps> Override target video bitrate (e.g. 3500)\n"
+      "  --srt <path>     Additional SRT subtitle file (can be repeated)\n"
+      "  --help           Show this help\n"
+      "\n"
+      "Language flags (override auto-detection):\n"
+      "  --multi          MULTi\n"
+      "  --multivfi       MULTi.VFI\n"
+      "  --multivff       MULTi.VFF\n"
+      "  --multivfq       MULTi.VFQ\n"
+      "  --multivf2       MULTi.VF2\n"
+      "  --multivof       MULTi.VOF\n"
+      "  --dual_vfi       DUAL.VFI\n"
+      "  --dual_vff       DUAL.VFF\n"
+      "  --dual_vfq       DUAL.VFQ\n"
+      "  --french         FRENCH\n"
+      "  --vff            VFF\n"
+      "  --vof            VOF\n"
+      "  --truefrench     TRUEFRENCH\n"
+      "  --vo             VO\n"
+      "  --vost           VOST\n"
+      "  --fansub         FANSUB\n"
+      "\n"
+      "Source flags (override auto-detection):\n"
+      "  --bdrip          BDRip\n"
+      "  --bluray         BluRay\n"
+      "  --remux          REMUX\n"
+      "  --dvdrip         DVDRip\n"
+      "  --dvdremux       DVDRemux\n"
+      "  --webrip         WEBRip\n"
+      "  --webdl          WEB-DL\n"
+      "  --web            WEB\n"
+      "  --hdtv           HDTV\n"
+      "  --hdrip          HDRip\n"
+      "  --tvrip          TVRip\n"
+      "  --vhsrip         VHSRip\n"
+      "\n"
+      "Quality presets (default: live-action):\n"
+      "  --animation       Animation content\n"
+      "  --super35_analog  Super 35mm analog film\n"
+      "  --super35_digital Super 35mm digital\n"
+      "  --imax_analog     IMAX analog film\n"
+      "  --imax_digital    IMAX digital\n",
+      prog);
 }
 
 /**
@@ -219,8 +220,7 @@ static int audio_lang_priority(const char *lang) {
 static int cmp_audio_order(const void *a, const void *b) {
   const TrackInfo *ta = a;
   const TrackInfo *tb = b;
-  return audio_lang_priority(ta->language) -
-         audio_lang_priority(tb->language);
+  return audio_lang_priority(ta->language) - audio_lang_priority(tb->language);
 }
 
 static int sub_sort_key(const char *lang, int is_forced) {
@@ -353,7 +353,8 @@ int main(int argc, char *argv[]) {
       if (extra_srt_count < 16)
         extra_srt_paths[extra_srt_count++] = optarg;
       else
-        fprintf(stderr, "Warning: too many --srt files, ignoring '%s'\n", optarg);
+        fprintf(stderr, "Warning: too many --srt files, ignoring '%s'\n",
+                optarg);
       break;
     case OPT_HELP:
       print_usage(argv[0]);
@@ -520,11 +521,10 @@ int main(int argc, char *argv[]) {
   if (tracks.error == 0) {
     printf("\nAudio tracks (%d):\n", tracks.audio_count);
     for (int i = 0; i < tracks.audio_count; i++) {
-      printf("  #%d  %-6s  %-8s  %dch  %lld kbps  %s\n",
-             tracks.audio[i].index, tracks.audio[i].language,
-             tracks.audio[i].codec, tracks.audio[i].channels,
-             (long long)(tracks.audio[i].bitrate / 1000),
-             tracks.audio[i].name);
+      printf("  #%d  %-6s  %-8s  %dch  %lld kbps  %s\n", tracks.audio[i].index,
+             tracks.audio[i].language, tracks.audio[i].codec,
+             tracks.audio[i].channels,
+             (long long)(tracks.audio[i].bitrate / 1000), tracks.audio[i].name);
     }
 
     /* ---- Best audio per language ---- */
@@ -712,8 +712,8 @@ int main(int argc, char *argv[]) {
 
           printf("  [%d/%d] %s (%s, %dch, %lld kbps) → \"%s\"...\n", i + 1,
                  enc_best_count, enc_best[i].language, enc_best[i].codec,
-                 enc_best[i].channels,
-                 (long long)(enc_best[i].bitrate / 1000), audio_names[i]);
+                 enc_best[i].channels, (long long)(enc_best[i].bitrate / 1000),
+                 audio_names[i]);
 
           OpusEncodeResult r =
               encode_track_to_opus(filepath, &enc_best[i], opus_paths[i]);
@@ -738,8 +738,7 @@ int main(int argc, char *argv[]) {
       int srt_count = 0;
 
       if (tracks.error == 0 && tracks.subtitle_count > 0) {
-        printf("\nProcessing %d subtitle track(s)...\n",
-               tracks.subtitle_count);
+        printf("\nProcessing %d subtitle track(s)...\n", tracks.subtitle_count);
 
         for (int i = 0; i < tracks.subtitle_count && srt_count < 48; i++) {
           TrackInfo *sub = &tracks.subtitles[i];
@@ -748,17 +747,16 @@ int main(int argc, char *argv[]) {
           if (is_text_subtitle(sub)) {
             /* Text subtitle: extract directly to SRT via FFmpeg CLI */
             char srt_fname[2048];
-            build_srt_filename(srt_fname, sizeof(srt_fname), base_name,
-                               lang, fv, sub->is_forced, sub->is_sdh);
+            build_srt_filename(srt_fname, sizeof(srt_fname), base_name, lang,
+                               fv, sub->is_forced, sub->is_sdh);
 
-            snprintf(srt_paths[srt_count], sizeof(srt_paths[0]),
-                     "%s%s", output_dir, srt_fname);
+            snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s%s",
+                     output_dir, srt_fname);
 
             /* Build display name */
-            build_subtitle_track_name(srt_names[srt_count],
-                                      sizeof(srt_names[0]), lang, 1,
-                                      sub->is_forced, sub->is_sdh,
-                                      fr_audio_origin);
+            build_subtitle_track_name(
+                srt_names[srt_count], sizeof(srt_names[0]), lang, 1,
+                sub->is_forced, sub->is_sdh, fr_audio_origin);
             snprintf(srt_langs[srt_count], sizeof(srt_langs[0]), "%s", lang);
             srt_is_forced[srt_count] = sub->is_forced;
             srt_is_sdh[srt_count] = sub->is_sdh;
@@ -767,8 +765,8 @@ int main(int argc, char *argv[]) {
             struct stat srt_st;
             if (stat(srt_paths[srt_count], &srt_st) == 0 &&
                 srt_st.st_size > 0) {
-              printf("  [SKIP] %s (already exists) → \"%s\"\n",
-                     srt_fname, srt_names[srt_count]);
+              printf("  [SKIP] %s (already exists) → \"%s\"\n", srt_fname,
+                     srt_names[srt_count]);
               srt_count++;
             } else {
               /* Extract text subtitle using ffmpeg command */
@@ -781,8 +779,8 @@ int main(int argc, char *argv[]) {
                        "-c:s %s \"%s\"",
                        filepath, sub->index, codec_arg, srt_paths[srt_count]);
 
-              printf("  Extracting #%d %s (%s) → \"%s\"...\n", sub->index,
-                     lang, sub->codec, srt_names[srt_count]);
+              printf("  Extracting #%d %s (%s) → \"%s\"...\n", sub->index, lang,
+                     sub->codec, srt_names[srt_count]);
 
               int rc = system(cmd);
               if (rc == 0) {
@@ -813,16 +811,15 @@ int main(int argc, char *argv[]) {
             }
 
             char srt_fname[2048];
-            build_srt_filename(srt_fname, sizeof(srt_fname), base_name,
-                               lang, fv, sub->is_forced, sub->is_sdh);
+            build_srt_filename(srt_fname, sizeof(srt_fname), base_name, lang,
+                               fv, sub->is_forced, sub->is_sdh);
 
-            snprintf(srt_paths[srt_count], sizeof(srt_paths[0]),
-                     "%s%s", output_dir, srt_fname);
+            snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s%s",
+                     output_dir, srt_fname);
 
-            build_subtitle_track_name(srt_names[srt_count],
-                                      sizeof(srt_names[0]), lang, 1,
-                                      sub->is_forced, sub->is_sdh,
-                                      fr_audio_origin);
+            build_subtitle_track_name(
+                srt_names[srt_count], sizeof(srt_names[0]), lang, 1,
+                sub->is_forced, sub->is_sdh, fr_audio_origin);
             snprintf(srt_langs[srt_count], sizeof(srt_langs[0]), "%s", lang);
             srt_is_forced[srt_count] = sub->is_forced;
             srt_is_sdh[srt_count] = sub->is_sdh;
@@ -875,9 +872,8 @@ int main(int argc, char *argv[]) {
                       ? 1
                       : 0;
 
-        build_subtitle_track_name(srt_names[srt_count],
-                                  sizeof(srt_names[0]), srt_lang, 1,
-                                  forced, sdh, fr_audio_origin);
+        build_subtitle_track_name(srt_names[srt_count], sizeof(srt_names[0]),
+                                  srt_lang, 1, forced, sdh, fr_audio_origin);
         snprintf(srt_langs[srt_count], sizeof(srt_langs[0]), "%s", srt_lang);
         srt_is_forced[srt_count] = forced;
         srt_is_sdh[srt_count] = sdh;
@@ -953,12 +949,13 @@ int main(int argc, char *argv[]) {
                output_dir, base_name);
 
       {
-        int bitrate = cli_bitrate > 0
-                          ? cli_bitrate
-                          : get_target_bitrate(info.height,
-                                               grain.error == 0 ? grain.grain_score : 0.0);
-        printf("\nEncoding video to AV1 (%d kbps, %s, %s)...\n",
-               bitrate, quality_type_to_string(cli_quality),
+        int bitrate =
+            cli_bitrate > 0
+                ? cli_bitrate
+                : get_target_bitrate(
+                      info.height, grain.error == 0 ? grain.grain_score : 0.0);
+        printf("\nEncoding video to AV1 (%d kbps, %s, %s)...\n", bitrate,
+               quality_type_to_string(cli_quality),
                info.height >= 2160 ? "4K" : "HD");
 
         VideoEncodeConfig vcfg = {
@@ -994,8 +991,7 @@ int main(int argc, char *argv[]) {
         MuxAudioTrack mux_audio[32];
         for (int i = 0; i < opus_count && i < 32; i++) {
           mux_audio[i].path = opus_paths[i];
-          mux_audio[i].language =
-              enc_best ? enc_best[i].language : "und";
+          mux_audio[i].language = enc_best ? enc_best[i].language : "und";
           mux_audio[i].track_name = audio_names[i];
           mux_audio[i].is_default = (i == 0) ? 1 : 0;
         }
@@ -1022,8 +1018,8 @@ int main(int argc, char *argv[]) {
 
         /* Build MKV container title: "Movie (Year)" */
         char mkv_title[1024];
-        snprintf(mkv_title, sizeof(mkv_title), "%s (%d)",
-                 tmdb.original_title, tmdb.release_year);
+        snprintf(mkv_title, sizeof(mkv_title), "%s (%d)", tmdb.original_title,
+                 tmdb.release_year);
 
         FinalMuxConfig mux_cfg = {
             .video_path = av1_video_path,

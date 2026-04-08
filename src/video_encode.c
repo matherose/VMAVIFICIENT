@@ -37,8 +37,8 @@
 /*  Suppress SVT-AV1 log output (we show our own progress)               */
 /* ====================================================================== */
 
-static void svt_silent_log(void *context, SvtAv1LogLevel level,
-                           const char *tag, const char *fmt, va_list args) {
+static void svt_silent_log(void *context, SvtAv1LogLevel level, const char *tag,
+                           const char *fmt, va_list args) {
   (void)context;
   (void)level;
   (void)tag;
@@ -287,11 +287,9 @@ static void set_hdr10_metadata(EbSvtAv1EncConfiguration *cfg,
   const AVPacketSideData *mdcv_sd = NULL;
   const AVPacketSideData *cll_sd = NULL;
   for (int i = 0; i < par->nb_coded_side_data; i++) {
-    if (par->coded_side_data[i].type ==
-        AV_PKT_DATA_MASTERING_DISPLAY_METADATA)
+    if (par->coded_side_data[i].type == AV_PKT_DATA_MASTERING_DISPLAY_METADATA)
       mdcv_sd = &par->coded_side_data[i];
-    else if (par->coded_side_data[i].type ==
-             AV_PKT_DATA_CONTENT_LIGHT_LEVEL)
+    else if (par->coded_side_data[i].type == AV_PKT_DATA_CONTENT_LIGHT_LEVEL)
       cll_sd = &par->coded_side_data[i];
   }
 
@@ -337,8 +335,8 @@ static void set_hdr10_metadata(EbSvtAv1EncConfiguration *cfg,
 /* ====================================================================== */
 
 VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
-  VideoEncodeResult result = {.error = 0, .skipped = 0, .frames_encoded = 0,
-                              .bytes_written = 0};
+  VideoEncodeResult result = {
+      .error = 0, .skipped = 0, .frames_encoded = 0, .bytes_written = 0};
 
   /* Skip if output already exists. */
   struct stat st;
@@ -397,8 +395,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   ret = avformat_open_input(&ifmt_ctx, config->input_path, NULL, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "  Video Error: cannot open '%s': %s\n",
-            config->input_path, errbuf);
+    fprintf(stderr, "  Video Error: cannot open '%s': %s\n", config->input_path,
+            errbuf);
     result.error = ret;
     return result;
   }
@@ -557,9 +555,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   out_stream->codecpar->color_range = in_stream->codecpar->color_range;
 
   /* Time base: use the encoder's frame rate */
-  out_stream->time_base = (AVRational){
-      (int)svt_config.frame_rate_denominator,
-      (int)svt_config.frame_rate_numerator};
+  out_stream->time_base = (AVRational){(int)svt_config.frame_rate_denominator,
+                                       (int)svt_config.frame_rate_numerator};
 
   if (!(ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {
     ret = avio_open(&ofmt_ctx->pb, config->output_path, AVIO_FLAG_WRITE);
@@ -639,8 +636,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
           int is_semiplanar = (desc->nb_components >= 2 &&
                                desc->comp[1].plane == desc->comp[2].plane);
 
-          src_data[0] = frame->data[0] +
-                        crop_top * frame->linesize[0] +
+          src_data[0] = frame->data[0] + crop_top * frame->linesize[0] +
                         crop_left * bytes_per_sample;
 
           if (is_semiplanar) {
@@ -679,7 +675,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
       io_fmt.cr_stride = (uint32_t)(enc_input->linesize[2] / bytes_per_sample);
 
       input_buf.p_buffer = (uint8_t *)&io_fmt;
-      input_buf.n_filled_len = (uint32_t)(out_w * out_h * bytes_per_sample * 3 / 2);
+      input_buf.n_filled_len =
+          (uint32_t)(out_w * out_h * bytes_per_sample * 3 / 2);
       input_buf.pts = frame_number;
       input_buf.pic_type = EB_AV1_INVALID_PICTURE;
       input_buf.flags = 0;
@@ -733,9 +730,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
             /* Copy sequence header as extradata if present */
             if (out_pkt->flags & EB_BUFFERFLAG_HAS_TD) {
               /* The first packet with TD contains the sequence header */
-              out_stream->codecpar->extradata =
-                  av_mallocz(out_pkt->n_filled_len +
-                             AV_INPUT_BUFFER_PADDING_SIZE);
+              out_stream->codecpar->extradata = av_mallocz(
+                  out_pkt->n_filled_len + AV_INPUT_BUFFER_PADDING_SIZE);
               if (out_stream->codecpar->extradata) {
                 memcpy(out_stream->codecpar->extradata, out_pkt->p_buffer,
                        out_pkt->n_filled_len);
@@ -747,8 +743,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
             ret = avformat_write_header(ofmt_ctx, NULL);
             if (ret < 0) {
               av_make_error_string(errbuf, sizeof(errbuf), ret);
-              fprintf(stderr,
-                      "  Video Error: cannot write output header: %s\n",
+              fprintf(stderr, "  Video Error: cannot write output header: %s\n",
                       errbuf);
               svt_av1_enc_release_out_buffer(&out_pkt);
               result.error = ret;
@@ -809,8 +804,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
         src_linesize[p] = frame->linesize[p];
       }
       if (need_crop && (crop_top || crop_left)) {
-        const AVPixFmtDescriptor *desc =
-            av_pix_fmt_desc_get(dec_ctx->pix_fmt);
+        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(dec_ctx->pix_fmt);
         int h_shift = desc->log2_chroma_w;
         int v_shift = desc->log2_chroma_h;
         int is_semiplanar = (desc->nb_components >= 2 &&
@@ -834,8 +828,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
                           (crop_left >> h_shift) * bytes_per_sample;
         }
       }
-      sws_scale(sws_ctx, src_data, src_linesize, 0, out_h,
-                cropped_frame->data, cropped_frame->linesize);
+      sws_scale(sws_ctx, src_data, src_linesize, 0, out_h, cropped_frame->data,
+                cropped_frame->linesize);
     }
     AVFrame *enc_input = cropped_frame;
 
@@ -852,7 +846,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
     io_fmt.cr_stride = (uint32_t)(enc_input->linesize[2] / bytes_per_sample);
 
     input_buf.p_buffer = (uint8_t *)&io_fmt;
-    input_buf.n_filled_len = (uint32_t)(out_w * out_h * bytes_per_sample * 3 / 2);
+    input_buf.n_filled_len =
+        (uint32_t)(out_w * out_h * bytes_per_sample * 3 / 2);
     input_buf.pts = frame_number;
     input_buf.pic_type = EB_AV1_INVALID_PICTURE;
 
@@ -899,8 +894,8 @@ flush_encoder:
   /* Drain all remaining encoded packets */
   {
     EbBufferHeaderType *out_pkt = NULL;
-    while (svt_av1_enc_get_packet(svt_handle, &out_pkt, (uint8_t)pic_send_done) ==
-           EB_ErrorNone) {
+    while (svt_av1_enc_get_packet(svt_handle, &out_pkt,
+                                  (uint8_t)pic_send_done) == EB_ErrorNone) {
       if (out_pkt->flags & EB_BUFFERFLAG_EOS) {
         svt_av1_enc_release_out_buffer(&out_pkt);
         break;
@@ -909,14 +904,12 @@ flush_encoder:
       if (out_pkt->n_filled_len > 0) {
         if (!header_written) {
           if (out_pkt->flags & EB_BUFFERFLAG_HAS_TD) {
-            out_stream->codecpar->extradata =
-                av_mallocz(out_pkt->n_filled_len +
-                           AV_INPUT_BUFFER_PADDING_SIZE);
+            out_stream->codecpar->extradata = av_mallocz(
+                out_pkt->n_filled_len + AV_INPUT_BUFFER_PADDING_SIZE);
             if (out_stream->codecpar->extradata) {
               memcpy(out_stream->codecpar->extradata, out_pkt->p_buffer,
                      out_pkt->n_filled_len);
-              out_stream->codecpar->extradata_size =
-                  (int)out_pkt->n_filled_len;
+              out_stream->codecpar->extradata_size = (int)out_pkt->n_filled_len;
             }
           }
           ret = avformat_write_header(ofmt_ctx, NULL);

@@ -222,8 +222,7 @@ GrainScore get_grain_score(const char *path) {
      * and apply a scale factor so the score spans [0, 1] for typical
      * Blu-ray content.
      */
-    const AVPixFmtDescriptor *pix_desc =
-        av_pix_fmt_desc_get(dec_ctx->pix_fmt);
+    const AVPixFmtDescriptor *pix_desc = av_pix_fmt_desc_get(dec_ctx->pix_fmt);
     int bits = pix_desc ? pix_desc->comp[0].depth : 8;
     double max_val = (double)((1 << bits) - 1);
 

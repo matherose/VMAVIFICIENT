@@ -17,15 +17,13 @@ static const struct {
   const char *iso1;
   const char *iso2b;
 } iso_map[] = {
-    {"en", "eng"}, {"fr", "fre"}, {"de", "ger"}, {"es", "spa"},
-    {"it", "ita"}, {"ja", "jpn"}, {"ko", "kor"}, {"zh", "chi"},
-    {"pt", "por"}, {"ru", "rus"}, {"ar", "ara"}, {"hi", "hin"},
-    {"nl", "dut"}, {"sv", "swe"}, {"no", "nor"}, {"da", "dan"},
-    {"fi", "fin"}, {"tr", "tur"}, {"pl", "pol"}, {"cs", "cze"},
-    {"hu", "hun"}, {"ro", "rum"}, {"th", "tha"}, {"vi", "vie"},
-    {"el", "gre"}, {"he", "heb"}, {"id", "ind"}, {"ms", "may"},
-    {"uk", "ukr"}, {"bg", "bul"}, {"hr", "hrv"}, {"sk", "slo"},
-    {NULL, NULL},
+    {"en", "eng"}, {"fr", "fre"}, {"de", "ger"}, {"es", "spa"}, {"it", "ita"},
+    {"ja", "jpn"}, {"ko", "kor"}, {"zh", "chi"}, {"pt", "por"}, {"ru", "rus"},
+    {"ar", "ara"}, {"hi", "hin"}, {"nl", "dut"}, {"sv", "swe"}, {"no", "nor"},
+    {"da", "dan"}, {"fi", "fin"}, {"tr", "tur"}, {"pl", "pol"}, {"cs", "cze"},
+    {"hu", "hun"}, {"ro", "rum"}, {"th", "tha"}, {"vi", "vie"}, {"el", "gre"},
+    {"he", "heb"}, {"id", "ind"}, {"ms", "may"}, {"uk", "ukr"}, {"bg", "bul"},
+    {"hr", "hrv"}, {"sk", "slo"}, {NULL, NULL},
 };
 
 const char *iso639_1_to_2b(const char *iso1) {
@@ -340,7 +338,8 @@ int build_output_filename(char *buf, size_t bufsize, const char *title,
       snprintf(feature, sizeof(feature), "HDR10");
   }
 
-  /* Assemble: TITLE.YEAR.LANG.RES.FEATURE.SOURCE.QUALITY.10bit.AV1.OPUS-<group>.mkv */
+  /* Assemble:
+   * TITLE.YEAR.LANG.RES.FEATURE.SOURCE.QUALITY.10bit.AV1.OPUS-<group>.mkv */
   const VmavConfig *cfg = config_get();
   snprintf(buf, bufsize, "%s.%d.%s.%s.%s.%s.%s.10bit.AV1.OPUS-%s.mkv",
            safe_title, year, language_tag_to_string(lang_tag), resolution,
