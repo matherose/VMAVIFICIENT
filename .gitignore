@@ -692,6 +692,7 @@ FodyWeavers.xsd
 
 .claude
 .tmdb_api_key
+config.ini
 build
 *.bin
 *.srt
