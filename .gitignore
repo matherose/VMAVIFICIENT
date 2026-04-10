@@ -696,3 +696,4 @@ config.ini
 build
 *.bin
 *.srt
+rust/vmav_ssimu2/target/
