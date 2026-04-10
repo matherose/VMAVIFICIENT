@@ -227,8 +227,26 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
 
   /* ---- Cut samples ---- */
   char sample_paths[8][1024];
+  char ref_paths[8][1024]; /* scoring reference: cropped FFV1 if crop active */
   printf("\nCRF search: cutting %d sample clip(s) of %ds from source...\n",
          n_samples, dur);
+
+  /* Build crop filter string if crop is active. encode_video() applies crop
+   * internally, so the encoded output will be smaller than the raw sample.
+   * We must create a cropped reference at the same resolution for scoring. */
+  int has_crop = (cfg->crop && cfg->crop->error == 0 &&
+                  (cfg->crop->top || cfg->crop->bottom ||
+                   cfg->crop->left || cfg->crop->right));
+  char crop_filter[256] = "";
+  if (has_crop) {
+    int cw = cfg->info->width - cfg->crop->left - cfg->crop->right;
+    int ch = cfg->info->height - cfg->crop->top - cfg->crop->bottom;
+    cw &= ~1;
+    ch &= ~1;
+    snprintf(crop_filter, sizeof(crop_filter),
+             "crop=%d:%d:%d:%d", cw, ch, cfg->crop->left, cfg->crop->top);
+  }
+
   for (int i = 0; i < n_samples; i++) {
     snprintf(sample_paths[i], sizeof(sample_paths[i]),
              "%s/crfsearch_sample_%d.mkv", cfg->workdir, i);
@@ -236,6 +254,31 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
     if (cut_sample(cfg->input_path, sample_paths[i], offsets[i], dur) < 0) {
       result.error = -1;
       return result;
+    }
+
+    /* Create cropped FFV1 reference for scoring (once per sample). */
+    if (has_crop) {
+      snprintf(ref_paths[i], sizeof(ref_paths[i]),
+               "%s/crfsearch_sample_%d_ref.ffv1.mkv", cfg->workdir, i);
+      if (!file_exists_nonempty(ref_paths[i])) {
+        char cmd[4096];
+        snprintf(cmd, sizeof(cmd),
+                 "ffmpeg -y -loglevel error -nostdin -i \"%s\" "
+                 "-vf \"%s\" -c:v ffv1 -level 3 -pix_fmt yuv420p10le "
+                 "-an -sn -dn \"%s\"",
+                 sample_paths[i], crop_filter, ref_paths[i]);
+        printf("  creating cropped reference for sample %d\n", i);
+        int rc = system(cmd);
+        if (rc != 0 || !file_exists_nonempty(ref_paths[i])) {
+          fprintf(stderr,
+                  "  CRF search: cropped ref creation failed (rc=%d)\n", rc);
+          result.error = -1;
+          return result;
+        }
+      }
+    } else {
+      /* No crop: use the raw sample directly as reference. */
+      snprintf(ref_paths[i], sizeof(ref_paths[i]), "%s", sample_paths[i]);
     }
   }
 
@@ -280,7 +323,7 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
 
       printf("  scoring sample %d @ CRF %d\n", i, crf);
       Ssimu2Result sr =
-          ssimu2_score_files(sample_paths[i], ffv1_path, stride);
+          ssimu2_score_files(ref_paths[i], ffv1_path, stride);
       if (sr.error < 0) {
         fprintf(stderr, "  CRF search: score failed (err=%d)\n", sr.error);
         continue;
