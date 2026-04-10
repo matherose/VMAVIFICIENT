@@ -132,6 +132,7 @@ set(OPUS_INSTALL   "${DEPS_PREFIX}/opus")
 set(DOVI_INSTALL   "${DEPS_PREFIX}/libdovi")
 set(HDR10_INSTALL  "${DEPS_PREFIX}/libhdr10plus")
 set(SVTAV1_INSTALL "${DEPS_PREFIX}/svtav1")
+set(SSIMU2_INSTALL "${DEPS_PREFIX}/vmav_ssimu2")
 
 # CMake validates INTERFACE_INCLUDE_DIRECTORIES at configure time,
 # so the directories must already exist even though headers arrive later.
@@ -141,6 +142,7 @@ file(MAKE_DIRECTORY "${DOVI_INSTALL}/include")
 file(MAKE_DIRECTORY "${HDR10_INSTALL}/include")
 file(MAKE_DIRECTORY "${SVTAV1_INSTALL}/include")
 file(MAKE_DIRECTORY "${SVTAV1_INSTALL}/include/svt-av1")
+file(MAKE_DIRECTORY "${SSIMU2_INSTALL}/include")
 
 # ---------------------------------------------------------------------------
 # Version pins  (update these to pull newer releases)
@@ -273,6 +275,33 @@ ExternalProject_Add(ep_libhdr10plus
 )
 
 # ===========================================================================
+# vmav_ssimu2  (in-tree Rust staticlib wrapping the ssimulacra2 perceptual
+#               metric; built with cargo, linked into the C binary)
+# ===========================================================================
+set(SSIMU2_CRATE_DIR "${CMAKE_SOURCE_DIR}/rust/vmav_ssimu2")
+set(SSIMU2_CARGO_TARGET_DIR "${DEPS_PREFIX}/build/vmav_ssimu2")
+set(SSIMU2_STATIC_LIB "${SSIMU2_INSTALL}/lib/libvmav_ssimu2.a")
+
+ExternalProject_Add(ep_vmav_ssimu2
+    SOURCE_DIR        "${SSIMU2_CRATE_DIR}"
+    PREFIX            "${DEPS_PREFIX}/build/vmav_ssimu2_ep"
+    DOWNLOAD_COMMAND  ""
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND
+        ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${SSIMU2_CARGO_TARGET_DIR}
+            ${CARGO} build --release --manifest-path=${SSIMU2_CRATE_DIR}/Cargo.toml
+    INSTALL_COMMAND
+        ${CMAKE_COMMAND} -E make_directory ${SSIMU2_INSTALL}/lib
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different
+            ${SSIMU2_CARGO_TARGET_DIR}/release/libvmav_ssimu2.a
+            ${SSIMU2_STATIC_LIB}
+    BUILD_BYPRODUCTS "${SSIMU2_STATIC_LIB}"
+    LOG_BUILD     TRUE
+    LOG_INSTALL   TRUE
+)
+
+# ===========================================================================
 # SVT-AV1-HDR  (AV1 encoder with Dolby Vision / HDR10+ passthrough)
 # ===========================================================================
 ExternalProject_Add(ep_svtav1
@@ -323,6 +352,14 @@ set_target_properties(Hdr10Plus::hdr10plus PROPERTIES
 )
 add_dependencies(Hdr10Plus::hdr10plus ep_libhdr10plus)
 
+# IMPORTED target – vmav_ssimu2 (embedded SSIMULACRA2)
+add_library(Vmav::ssimu2 STATIC IMPORTED GLOBAL)
+set_target_properties(Vmav::ssimu2 PROPERTIES
+    IMPORTED_LOCATION             "${SSIMU2_STATIC_LIB}"
+    INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/include"
+)
+add_dependencies(Vmav::ssimu2 ep_vmav_ssimu2)
+
 # IMPORTED target – SvtAv1Enc
 add_library(SvtAv1::Enc STATIC IMPORTED GLOBAL)
 set_target_properties(SvtAv1::Enc PROPERTIES
@@ -341,12 +378,14 @@ add_executable(vmavificient
     src/media_hdr.c
     src/media_crop.c
     src/media_analysis.c
+    src/media_ssimu2.c
     src/media_naming.c
     src/audio_encode.c
     src/config.c
     src/encode_preset.c
     src/rpu_extract.c
     src/video_encode.c
+    src/crf_search.c
     src/subtitle_convert.c
     src/final_mux.c
     src/tmdb.c
@@ -379,6 +418,7 @@ target_link_libraries(vmavificient PRIVATE
     FFmpeg::swscale
     FFmpeg::avutil
     SvtAv1::Enc
+    Vmav::ssimu2
     Dovi::dovi
     Hdr10Plus::hdr10plus
     "${OPUS_INSTALL}/lib/libopus.a"
@@ -394,6 +434,80 @@ target_link_libraries(vmavificient PRIVATE
 # macOS needs iconv (for FFmpeg) and frameworks (for Rust std)
 if(APPLE)
     target_link_libraries(vmavificient PRIVATE
+        iconv
+        "-framework CoreFoundation"
+        "-framework Security"
+    )
+endif()
+
+# ===========================================================================
+# Integration test: ssimu2_score_files (self-scoring sanity check)
+# ===========================================================================
+add_executable(test_ssimu2_files
+    rust/vmav_ssimu2/test_files.c
+    src/media_ssimu2.c
+)
+target_include_directories(test_ssimu2_files PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"
+    "${FF_INSTALL}/include"
+)
+target_link_libraries(test_ssimu2_files PRIVATE
+    FFmpeg::avformat
+    FFmpeg::avfilter
+    FFmpeg::avcodec
+    FFmpeg::swresample
+    FFmpeg::swscale
+    FFmpeg::avutil
+    Vmav::ssimu2
+    "${OPUS_INSTALL}/lib/libopus.a"
+    Threads::Threads
+    z
+    m
+)
+if(APPLE)
+    target_link_libraries(test_ssimu2_files PRIVATE
+        iconv
+        "-framework CoreFoundation"
+        "-framework Security"
+    )
+endif()
+
+# ===========================================================================
+# Integration test: crf_search_run (end-to-end probe on a real source)
+# ===========================================================================
+add_executable(test_crf_search
+    rust/vmav_ssimu2/test_crf_search.c
+    src/crf_search.c
+    src/video_encode.c
+    src/media_ssimu2.c
+    src/media_info.c
+    src/media_hdr.c
+    src/media_crop.c
+    src/encode_preset.c
+)
+target_include_directories(test_crf_search PRIVATE
+    "${CMAKE_SOURCE_DIR}/include"
+    "${FF_INSTALL}/include"
+    "${SVTAV1_INSTALL}/include"
+)
+target_link_libraries(test_crf_search PRIVATE
+    FFmpeg::avformat
+    FFmpeg::avfilter
+    FFmpeg::avcodec
+    FFmpeg::swresample
+    FFmpeg::swscale
+    FFmpeg::avutil
+    SvtAv1::Enc
+    Vmav::ssimu2
+    Dovi::dovi
+    Hdr10Plus::hdr10plus
+    "${OPUS_INSTALL}/lib/libopus.a"
+    Threads::Threads
+    z
+    m
+)
+if(APPLE)
+    target_link_libraries(test_crf_search PRIVATE
         iconv
         "-framework CoreFoundation"
         "-framework Security"

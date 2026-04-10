@@ -24,6 +24,7 @@
 #include "subtitle_convert.h"
 #include "tmdb.h"
 #include "utils.h"
+#include "crf_search.h"
 #include "video_encode.h"
 
 static void print_usage(const char *prog) {
@@ -943,6 +944,41 @@ int main(int argc, char *argv[]) {
         }
       }
 
+      /* ---- SSIMULACRA2 CRF search (if no manual bitrate override) ---- */
+      int crf_bitrate = 0;
+      if (cli_bitrate <= 0) {
+        char crfsearch_dir[4096];
+        snprintf(crfsearch_dir, sizeof(crfsearch_dir), "%scrfsearch", output_dir);
+        mkdir(crfsearch_dir, 0755);
+
+        CrfSearchConfig crf_cfg = {
+            .input_path = filepath,
+            .rpu_path = NULL, /* RPU is metadata, doesn't affect AV1 quality */
+            .preset = enc_preset,
+            .info = &info,
+            .crop = (crop.error == 0) ? &crop : NULL,
+            .hdr = &hdr,
+            .film_grain = film_grain,
+            .target_p10 = 92.0,
+            .sample_count = 2,
+            .sample_duration = 10,
+            .frame_stride = 1,
+            .crf_probes = {25, 35, 45, 55},
+            .workdir = crfsearch_dir,
+        };
+
+        CrfSearchResult crf_res = crf_search_run(&crf_cfg);
+        if (crf_res.error == 0 && crf_res.measured_bitrate_kbps > 0) {
+          crf_bitrate = crf_res.measured_bitrate_kbps;
+          printf("\nCRF search complete: CRF %d -> %d kbps (predicted p10=%.3f)\n",
+                 crf_res.recommended_crf, crf_bitrate, crf_res.predicted_p10);
+        } else {
+          fprintf(stderr,
+                  "\nCRF search failed (err=%d), falling back to preset bitrate\n",
+                  crf_res.error);
+        }
+      }
+
       /* ---- AV1 video encoding ---- */
       char av1_video_path[4096];
       snprintf(av1_video_path, sizeof(av1_video_path), "%s%s.video.mkv",
@@ -952,8 +988,11 @@ int main(int argc, char *argv[]) {
         int bitrate =
             cli_bitrate > 0
                 ? cli_bitrate
-                : get_target_bitrate(
-                      info.height, grain.error == 0 ? grain.grain_score : 0.0);
+                : crf_bitrate > 0
+                    ? crf_bitrate
+                    : get_target_bitrate(
+                          info.height,
+                          grain.error == 0 ? grain.grain_score : 0.0);
         printf("\nEncoding video to AV1 (%d kbps, %s, %s)...\n", bitrate,
                quality_type_to_string(cli_quality),
                info.height >= 2160 ? "4K" : "HD");

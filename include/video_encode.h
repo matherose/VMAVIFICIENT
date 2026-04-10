@@ -23,7 +23,8 @@ typedef struct {
   const char *rpu_path;       /**< Dolby Vision RPU .bin (NULL if none). */
   const EncodePreset *preset; /**< SVT-AV1 parameter preset. */
   int film_grain;             /**< Film grain synthesis level (0–50). */
-  int target_bitrate;         /**< Target bitrate in kbps. */
+  int target_bitrate;         /**< Target bitrate in kbps (VBR mode, ignored if crf > 0). */
+  int crf;                    /**< CRF value 1–63 for CRF mode, or 0 to use VBR @ target_bitrate. */
   const MediaInfo *info;      /**< Source media info. */
   const CropInfo *crop;       /**< Crop values (NULL if none). */
   const HdrInfo *hdr;         /**< HDR info. */

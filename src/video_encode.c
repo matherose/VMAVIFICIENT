@@ -156,12 +156,17 @@ static void print_progress(int64_t frames_done, int64_t total_frames,
 
 static void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg,
                                    const EncodePreset *p, int film_grain,
-                                   int target_bitrate_kbps) {
+                                   int target_bitrate_kbps, int crf) {
   cfg->enc_mode = (int8_t)p->preset;
   cfg->intra_period_length = p->keyint;
   cfg->tune = (uint8_t)p->tune;
-  cfg->rate_control_mode = SVT_AV1_RC_MODE_VBR;
-  cfg->target_bit_rate = (uint32_t)target_bitrate_kbps * 1000;
+  if (crf > 0) {
+    cfg->rate_control_mode = SVT_AV1_RC_MODE_CQP_OR_CRF;
+    cfg->qp = (uint32_t)crf;
+  } else {
+    cfg->rate_control_mode = SVT_AV1_RC_MODE_VBR;
+    cfg->target_bit_rate = (uint32_t)target_bitrate_kbps * 1000;
+  }
 
   cfg->ac_bias = p->ac_bias;
   cfg->enable_variance_boost = true;
@@ -490,7 +495,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
 
   /* Apply quality preset */
   apply_preset_to_config(&svt_config, config->preset, config->film_grain,
-                         config->target_bitrate);
+                         config->target_bitrate, config->crf);
 
   /* PQ content adjustments (HDR10 / HDR10+ / Dolby Vision) */
   if (in_stream->codecpar->color_trc == AVCOL_TRC_SMPTE2084) {
