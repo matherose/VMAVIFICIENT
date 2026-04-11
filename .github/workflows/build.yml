@@ -1,0 +1,129 @@
+name: Build, Test & Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: macos-arm64
+          - os: macos-13
+            name: macos-x86_64
+          - os: ubuntu-24.04
+            name: linux-x86_64
+          - os: ubuntu-24.04-arm
+            name: linux-arm64
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Dependencies ──────────────────────────────────────────────
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install ninja pkg-config tesseract leptonica curl
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang lld ninja-build pkg-config \
+            libtesseract-dev libleptonica-dev \
+            libcurl4-openssl-dev nasm
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ matrix.name }}-${{ hashFiles('rust/**/Cargo.lock', 'rust/**/Cargo.toml') }}
+          restore-keys: cargo-${{ matrix.name }}-
+
+      - name: Install cargo-c
+        run: cargo install cargo-c
+
+      # ── Build ─────────────────────────────────────────────────────
+      - name: Configure
+        run: |
+          cmake -G Ninja -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CROSSCOMPILING=ON
+
+      - name: Build
+        run: cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+
+      - name: Verify binary
+        run: ./build/vmavificient --help
+
+      # ── Test ──────────────────────────────────────────────────────
+      - name: Download test media (Big Buck Bunny 1080p)
+        run: |
+          curl -L -o bbb.mp4.zip \
+            "https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_30fps_normal.mp4.zip"
+          unzip bbb.mp4.zip
+          ls -lh bbb_sunflower_1080p_30fps_normal.mp4
+
+      - name: Test encode
+        run: |
+          ./build/vmavificient --bitrate 500 bbb_sunflower_1080p_30fps_normal.mp4
+        timeout-minutes: 60
+
+      - name: Verify output
+        run: |
+          OUTPUT=$(ls -1 *.mkv 2>/dev/null | head -1)
+          if [ -z "$OUTPUT" ]; then
+            echo "::error::No MKV output file produced"
+            exit 1
+          fi
+          echo "Output: $OUTPUT ($(du -h "$OUTPUT" | cut -f1))"
+
+      # ── Package ───────────────────────────────────────────────────
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp build/vmavificient dist/vmavificient-${{ matrix.name }}
+          chmod +x dist/vmavificient-${{ matrix.name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vmavificient-${{ matrix.name }}
+          path: dist/vmavificient-${{ matrix.name }}
+
+  # ── Release (on tag push) ───────────────────────────────────────
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
