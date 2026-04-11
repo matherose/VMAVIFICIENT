@@ -133,13 +133,11 @@ This means you can use, modify, and distribute this software freely, including i
 
 ### Third-party licenses
 
-- FFmpeg: LGPL-2.1+ / GPL-2.0+ (built with `--enable-gpl`)
-- SVT-AV1-HDR: BSD-3-Clause
-- libdovi: MIT
-- libhdr10plus: MIT
-- Opus: BSD-3-Clause
-- cJSON: MIT
-- ssimulacra2 (Rust crate): BSD-3-Clause
-- yuvxyb (Rust crate): BSD-2-Clause
-
-
+- [FFmpeg](https://ffmpeg.org/): LGPL-2.1+ / GPL-2.0+ (built with `--enable-gpl`)
+- [SVT-AV1-HDR](https://github.com/juliobbv-p/svt-av1-hdr): BSD-3-Clause
+- [libdovi](https://github.com/quietvoid/dovi_tool): MIT
+- [libhdr10plus](https://github.com/quietvoid/hdr10plus_tool): MIT
+- [Opus](https://opus-codec.org/): BSD-3-Clause
+- [cJSON](https://github.com/DaveGamble/cJSON): MIT
+- [ssimulacra2](https://crates.io/crates/ssimulacra2) (Rust crate): BSD-3-Clause
+- [yuvxyb](https://crates.io/crates/yuvxyb) (Rust crate): BSD-2-Clause
