@@ -317,7 +317,8 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
     goto cleanup;
   }
 
-  enc_ctx->bit_rate = track->channels * 64000LL;
+  int audio_bitrate = track->channels * 56000;
+  enc_ctx->bit_rate = audio_bitrate;
   enc_ctx->sample_rate = 48000;
   enc_ctx->sample_fmt = AV_SAMPLE_FMT_FLT;
   enc_ctx->time_base = (AVRational){1, 48000};
@@ -329,8 +330,12 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
                             dec_ctx->ch_layout.nb_channels);
 
   av_opt_set(enc_ctx->priv_data, "application", "audio", 0);
-  av_opt_set(enc_ctx->priv_data, "vbr", "constrained", 0);
+  av_opt_set(enc_ctx->priv_data, "vbr", "on", 0);
   av_opt_set_int(enc_ctx->priv_data, "compression_level", 10, 0);
+
+  /* Multichannel: mapping_family=1 for correct 5.1/7.1/7.1+ layout */
+  if (track->channels > 2)
+    av_opt_set_int(enc_ctx->priv_data, "mapping_family", 1, 0);
 
   ret = avcodec_open2(enc_ctx, encoder, NULL);
   if (ret < 0) {
