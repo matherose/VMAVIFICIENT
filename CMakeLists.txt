@@ -210,10 +210,11 @@ ExternalProject_Add(ep_zlib
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON
         -DZLIB_BUILD_EXAMPLES=OFF
         -DBUILD_SHARED_LIBS=OFF
-    BUILD_COMMAND   cmake --build <BINARY_DIR> --parallel ${NPROC} --target zlibstatic
     INSTALL_COMMAND cmake --install <BINARY_DIR>
-    # zlib's CMake build installs both libz.a and libz.so/.dylib; delete the
-    # shared library so downstream deps cannot accidentally pick it up.
+    # zlib 1.3.1 unconditionally declares the shared `zlib` target via
+    # add_library(... SHARED ...), so BUILD_SHARED_LIBS=OFF doesn't suppress it
+    # and `cmake --install` always installs both libz.a and libz.so/.dylib.
+    # Delete the shared library after install so downstream deps link static.
     COMMAND ${CMAKE_COMMAND} -E rm -f
         "${ZLIB_INSTALL}/lib/libz.so"
         "${ZLIB_INSTALL}/lib/libz.so.1"
@@ -284,6 +285,15 @@ ExternalProject_Add(ep_curl
         -DCURL_USE_OPENSSL=ON
         -DCURL_USE_LIBSSH2=OFF
         -DCURL_USE_LIBPSL=OFF
+        -DCURL_USE_LIBSSH=OFF
+        -DCURL_USE_GSSAPI=OFF
+        -DUSE_LIBIDN2=OFF
+        -DCURL_BROTLI=OFF
+        -DCURL_ZSTD=OFF
+        -DUSE_NGHTTP2=OFF
+        -DUSE_NGTCP2=OFF
+        -DUSE_QUICHE=OFF
+        -DUSE_LIBRTMP=OFF
         -DCURL_ZLIB=ON
         -DHTTP_ONLY=ON
         -DCURL_DISABLE_LDAP=ON
