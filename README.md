@@ -141,3 +141,7 @@ This means you can use, modify, and distribute this software freely, including i
 - [cJSON](https://github.com/DaveGamble/cJSON): MIT
 - [ssimulacra2](https://crates.io/crates/ssimulacra2) (Rust crate): BSD-3-Clause
 - [yuvxyb](https://crates.io/crates/yuvxyb) (Rust crate): BSD-2-Clause
+
+## Credits
+
+Built with significant help from [Claude](https://claude.ai) (Anthropic) — SSIMULACRA2 integration, CRF search orchestrator, Rust FFI layer, and encoding pipeline.
