@@ -16,8 +16,6 @@ jobs:
         include:
           - os: macos-14
             name: macos-arm64
-          - os: macos-13
-            name: macos-x86_64
           - os: ubuntu-24.04
             name: linux-x86_64
           - os: ubuntu-24.04-arm
@@ -30,10 +28,14 @@ jobs:
       - uses: actions/checkout@v4
 
       # ── Dependencies ──────────────────────────────────────────────
+      # Build-tool-only installs. All runtime libraries (tesseract, leptonica,
+      # curl, openssl, zlib, ...) are built from source by CMake and linked
+      # statically so the final binary has no dependency on brew/apt packages.
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install ninja pkg-config tesseract leptonica curl
+          brew install ninja pkg-config nasm
+          # perl + make are preinstalled on GitHub macOS runners (needed by OpenSSL Configure).
 
       - name: Install dependencies (Linux)
         if: runner.os == 'Linux'
@@ -41,8 +43,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             clang lld ninja-build pkg-config \
-            libtesseract-dev libleptonica-dev \
-            libcurl4-openssl-dev nasm
+            nasm perl make autoconf automake libtool
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

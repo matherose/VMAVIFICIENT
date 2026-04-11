@@ -17,8 +17,23 @@ if(NOT DEFINED CMAKE_C_COMPILER)
     endif()
     set(CMAKE_C_COMPILER "${LLVM_CLANG}" CACHE FILEPATH "C compiler" FORCE)
 endif()
+if(NOT DEFINED CMAKE_CXX_COMPILER)
+    find_program(LLVM_CLANGXX clang++
+        HINTS
+            /opt/homebrew/opt/llvm/bin
+            /usr/local/opt/llvm/bin
+            ENV LLVM_PREFIX
+        NO_DEFAULT_PATH
+    )
+    if(NOT LLVM_CLANGXX)
+        find_program(LLVM_CLANGXX clang++ REQUIRED)
+    endif()
+    set(CMAKE_CXX_COMPILER "${LLVM_CLANGXX}" CACHE FILEPATH "C++ compiler" FORCE)
+endif()
 
-project(vmavificient VERSION 0.1.0 LANGUAGES C)
+# C++ is enabled purely so CMake picks the C++ driver when linking the final
+# executable (tesseract is C++ and drags in libc++/libstdc++).
+project(vmavificient VERSION 0.1.0 LANGUAGES C CXX)
 
 # Enforce Ninja generator for the top-level build.
 if(NOT CMAKE_GENERATOR STREQUAL "Ninja")
@@ -112,27 +127,22 @@ if(NOT CARGO_CINSTALL)
         "Install it with:  cargo install cargo-c")
 endif()
 find_package(Threads REQUIRED)
-find_package(CURL REQUIRED)
-find_package(PkgConfig REQUIRED)
-
-# Try system pkg-config first, then Homebrew paths
-if(APPLE)
-    set(ENV{PKG_CONFIG_PATH}
-        "$ENV{PKG_CONFIG_PATH}:/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig")
-endif()
-pkg_check_modules(TESSERACT REQUIRED tesseract)
-pkg_check_modules(LEPTONICA REQUIRED lept)
 
 # ---------------------------------------------------------------------------
 # Dependency install prefixes
 # ---------------------------------------------------------------------------
-set(DEPS_PREFIX    "${CMAKE_BINARY_DIR}/deps")
-set(FF_INSTALL     "${DEPS_PREFIX}/ffmpeg")
-set(OPUS_INSTALL   "${DEPS_PREFIX}/opus")
-set(DOVI_INSTALL   "${DEPS_PREFIX}/libdovi")
-set(HDR10_INSTALL  "${DEPS_PREFIX}/libhdr10plus")
-set(SVTAV1_INSTALL "${DEPS_PREFIX}/svtav1")
-set(SSIMU2_INSTALL "${DEPS_PREFIX}/vmav_ssimu2")
+set(DEPS_PREFIX     "${CMAKE_BINARY_DIR}/deps")
+set(FF_INSTALL      "${DEPS_PREFIX}/ffmpeg")
+set(OPUS_INSTALL    "${DEPS_PREFIX}/opus")
+set(DOVI_INSTALL    "${DEPS_PREFIX}/libdovi")
+set(HDR10_INSTALL   "${DEPS_PREFIX}/libhdr10plus")
+set(SVTAV1_INSTALL  "${DEPS_PREFIX}/svtav1")
+set(SSIMU2_INSTALL  "${DEPS_PREFIX}/vmav_ssimu2")
+set(ZLIB_INSTALL    "${DEPS_PREFIX}/zlib")
+set(OPENSSL_INSTALL "${DEPS_PREFIX}/openssl")
+set(CURL_INSTALL    "${DEPS_PREFIX}/curl")
+set(LEPT_INSTALL    "${DEPS_PREFIX}/leptonica")
+set(TESS_INSTALL    "${DEPS_PREFIX}/tesseract")
 
 # CMake validates INTERFACE_INCLUDE_DIRECTORIES at configure time,
 # so the directories must already exist even though headers arrive later.
@@ -143,6 +153,13 @@ file(MAKE_DIRECTORY "${HDR10_INSTALL}/include")
 file(MAKE_DIRECTORY "${SVTAV1_INSTALL}/include")
 file(MAKE_DIRECTORY "${SVTAV1_INSTALL}/include/svt-av1")
 file(MAKE_DIRECTORY "${SSIMU2_INSTALL}/include")
+file(MAKE_DIRECTORY "${ZLIB_INSTALL}/include")
+file(MAKE_DIRECTORY "${OPENSSL_INSTALL}/include")
+file(MAKE_DIRECTORY "${CURL_INSTALL}/include")
+file(MAKE_DIRECTORY "${LEPT_INSTALL}/include")
+file(MAKE_DIRECTORY "${LEPT_INSTALL}/include/leptonica")
+file(MAKE_DIRECTORY "${TESS_INSTALL}/include")
+file(MAKE_DIRECTORY "${TESS_INSTALL}/include/tesseract")
 
 # ---------------------------------------------------------------------------
 # Version pins  (update these to pull newer releases)
@@ -155,6 +172,11 @@ set(LIBHDR10PLUS_GIT_TAG    "libhdr10plus-2.1.5")
 set(LIBHDR10PLUS_VERSION    "2.1.5")
 set(SVTAV1_GIT_TAG          "v4.0.1")
 set(CJSON_GIT_TAG           "v1.7.18")
+set(ZLIB_GIT_TAG            "v1.3.1")
+set(OPENSSL_GIT_TAG         "openssl-3.3.2")
+set(CURL_GIT_TAG            "curl-8_11_0")
+set(LEPTONICA_GIT_TAG       "1.85.0")
+set(TESSERACT_GIT_TAG       "5.5.0")
 
 # ===========================================================================
 # cJSON  (lightweight JSON parser – fetched via FetchContent)
@@ -167,7 +189,208 @@ FetchContent_Declare(cjson
 set(ENABLE_CJSON_TEST OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_AND_STATIC_LIBS OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+# cJSON 1.7.18 still declares cmake_minimum_required(VERSION 2.x), which modern
+# CMake refuses. Bump the effective minimum for the nested project only.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 FetchContent_MakeAvailable(cjson)
+unset(CMAKE_POLICY_VERSION_MINIMUM CACHE)
+
+# ===========================================================================
+# zlib  (required by ffmpeg, curl, leptonica, and project source)
+# ===========================================================================
+ExternalProject_Add(ep_zlib
+    GIT_REPOSITORY  https://github.com/madler/zlib.git
+    GIT_TAG         ${ZLIB_GIT_TAG}
+    GIT_SHALLOW     TRUE
+    PREFIX          "${DEPS_PREFIX}/build/zlib"
+    CMAKE_GENERATOR "Ninja"
+    CMAKE_ARGS
+        -DCMAKE_INSTALL_PREFIX=${ZLIB_INSTALL}
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DZLIB_BUILD_EXAMPLES=OFF
+        -DBUILD_SHARED_LIBS=OFF
+    BUILD_COMMAND   cmake --build <BINARY_DIR> --parallel ${NPROC} --target zlibstatic
+    INSTALL_COMMAND cmake --install <BINARY_DIR>
+    # zlib's CMake build installs both libz.a and libz.so/.dylib; delete the
+    # shared library so downstream deps cannot accidentally pick it up.
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+        "${ZLIB_INSTALL}/lib/libz.so"
+        "${ZLIB_INSTALL}/lib/libz.so.1"
+        "${ZLIB_INSTALL}/lib/libz.so.1.3.1"
+        "${ZLIB_INSTALL}/lib/libz.dylib"
+        "${ZLIB_INSTALL}/lib/libz.1.dylib"
+        "${ZLIB_INSTALL}/lib/libz.1.3.1.dylib"
+    BUILD_BYPRODUCTS "${ZLIB_INSTALL}/lib/libz.a"
+    LOG_CONFIGURE   TRUE
+    LOG_BUILD       TRUE
+    LOG_INSTALL     TRUE
+)
+
+# ===========================================================================
+# OpenSSL  (TLS backend for libcurl; Configure script, not CMake)
+# ===========================================================================
+ExternalProject_Add(ep_openssl
+    GIT_REPOSITORY  https://github.com/openssl/openssl.git
+    GIT_TAG         ${OPENSSL_GIT_TAG}
+    GIT_SHALLOW     TRUE
+    PREFIX          "${DEPS_PREFIX}/build/openssl"
+    DEPENDS         ep_zlib
+    CONFIGURE_COMMAND
+        ${CMAKE_COMMAND} -E env
+            "CC=${CMAKE_C_COMPILER}"
+        <SOURCE_DIR>/config
+            --prefix=${OPENSSL_INSTALL}
+            --openssldir=${OPENSSL_INSTALL}/ssl
+            --libdir=lib
+            no-shared
+            no-tests
+            no-docs
+            no-apps
+            no-legacy
+            zlib
+            --with-zlib-include=${ZLIB_INSTALL}/include
+            --with-zlib-lib=${ZLIB_INSTALL}/lib
+    BUILD_COMMAND   make -j${NPROC}
+    INSTALL_COMMAND make install_sw
+    BUILD_IN_SOURCE TRUE
+    BUILD_BYPRODUCTS
+        "${OPENSSL_INSTALL}/lib/libssl.a"
+        "${OPENSSL_INSTALL}/lib/libcrypto.a"
+    LOG_CONFIGURE   TRUE
+    LOG_BUILD       TRUE
+    LOG_INSTALL     TRUE
+)
+
+# ===========================================================================
+# libcurl  (statically linked HTTP client – used by TMDB lookup)
+# ===========================================================================
+ExternalProject_Add(ep_curl
+    GIT_REPOSITORY  https://github.com/curl/curl.git
+    GIT_TAG         ${CURL_GIT_TAG}
+    GIT_SHALLOW     TRUE
+    PREFIX          "${DEPS_PREFIX}/build/curl"
+    DEPENDS         ep_openssl ep_zlib
+    CMAKE_GENERATOR "Ninja"
+    CMAKE_ARGS
+        -DCMAKE_INSTALL_PREFIX=${CURL_INSTALL}
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DCMAKE_PREFIX_PATH=${OPENSSL_INSTALL}\;${ZLIB_INSTALL}
+        -DBUILD_SHARED_LIBS=OFF
+        -DBUILD_STATIC_LIBS=ON
+        -DBUILD_CURL_EXE=OFF
+        -DBUILD_TESTING=OFF
+        -DCURL_USE_OPENSSL=ON
+        -DCURL_USE_LIBSSH2=OFF
+        -DCURL_USE_LIBPSL=OFF
+        -DCURL_ZLIB=ON
+        -DHTTP_ONLY=ON
+        -DCURL_DISABLE_LDAP=ON
+        -DCURL_DISABLE_LDAPS=ON
+        -DCURL_DISABLE_DICT=ON
+        -DCURL_DISABLE_FILE=ON
+        -DCURL_DISABLE_FTP=ON
+        -DCURL_DISABLE_GOPHER=ON
+        -DCURL_DISABLE_IMAP=ON
+        -DCURL_DISABLE_MQTT=ON
+        -DCURL_DISABLE_POP3=ON
+        -DCURL_DISABLE_RTSP=ON
+        -DCURL_DISABLE_SMB=ON
+        -DCURL_DISABLE_SMTP=ON
+        -DCURL_DISABLE_TELNET=ON
+        -DCURL_DISABLE_TFTP=ON
+        -DOPENSSL_ROOT_DIR=${OPENSSL_INSTALL}
+        -DOPENSSL_USE_STATIC_LIBS=ON
+        -DZLIB_ROOT=${ZLIB_INSTALL}
+        -DZLIB_USE_STATIC_LIBS=ON
+    BUILD_COMMAND   cmake --build <BINARY_DIR> --parallel ${NPROC}
+    INSTALL_COMMAND cmake --install <BINARY_DIR>
+    BUILD_BYPRODUCTS "${CURL_INSTALL}/lib/libcurl.a"
+    LOG_CONFIGURE   TRUE
+    LOG_BUILD       TRUE
+    LOG_INSTALL     TRUE
+)
+
+# ===========================================================================
+# Leptonica  (image library – tesseract's dependency)
+#
+# Only used for in-memory Pix buffers in the subtitle OCR path, so every
+# optional file-format backend is disabled to keep the link footprint small
+# and avoid dragging in libpng/libjpeg/libtiff/libwebp.
+# ===========================================================================
+ExternalProject_Add(ep_leptonica
+    GIT_REPOSITORY  https://github.com/DanBloomberg/leptonica.git
+    GIT_TAG         ${LEPTONICA_GIT_TAG}
+    GIT_SHALLOW     TRUE
+    PREFIX          "${DEPS_PREFIX}/build/leptonica"
+    DEPENDS         ep_zlib
+    CMAKE_GENERATOR "Ninja"
+    CMAKE_ARGS
+        -DCMAKE_INSTALL_PREFIX=${LEPT_INSTALL}
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DCMAKE_PREFIX_PATH=${ZLIB_INSTALL}
+        -DBUILD_SHARED_LIBS=OFF
+        -DBUILD_PROG=OFF
+        -DSW_BUILD=OFF
+        -DENABLE_ZLIB=ON
+        -DENABLE_PNG=OFF
+        -DENABLE_JPEG=OFF
+        -DENABLE_TIFF=OFF
+        -DENABLE_WEBP=OFF
+        -DENABLE_OPENJPEG=OFF
+        -DENABLE_GIF=OFF
+        -DCMAKE_DISABLE_FIND_PACKAGE_PNG=ON
+        -DCMAKE_DISABLE_FIND_PACKAGE_JPEG=ON
+        -DCMAKE_DISABLE_FIND_PACKAGE_TIFF=ON
+        -DCMAKE_DISABLE_FIND_PACKAGE_WebP=ON
+        -DCMAKE_DISABLE_FIND_PACKAGE_WebPMux=ON
+        -DCMAKE_DISABLE_FIND_PACKAGE_GIF=ON
+        -DCMAKE_DISABLE_FIND_PACKAGE_OpenJPEG=ON
+        -DZLIB_ROOT=${ZLIB_INSTALL}
+        -DZLIB_USE_STATIC_LIBS=ON
+    BUILD_COMMAND   cmake --build <BINARY_DIR> --parallel ${NPROC}
+    INSTALL_COMMAND cmake --install <BINARY_DIR>
+    BUILD_BYPRODUCTS "${LEPT_INSTALL}/lib/libleptonica.a"
+    LOG_CONFIGURE   TRUE
+    LOG_BUILD       TRUE
+    LOG_INSTALL     TRUE
+)
+
+# ===========================================================================
+# Tesseract  (OCR engine used by the subtitle converter)
+# ===========================================================================
+ExternalProject_Add(ep_tesseract
+    GIT_REPOSITORY  https://github.com/tesseract-ocr/tesseract.git
+    GIT_TAG         ${TESSERACT_GIT_TAG}
+    GIT_SHALLOW     TRUE
+    PREFIX          "${DEPS_PREFIX}/build/tesseract"
+    DEPENDS         ep_leptonica
+    CMAKE_GENERATOR "Ninja"
+    CMAKE_ARGS
+        -DCMAKE_INSTALL_PREFIX=${TESS_INSTALL}
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DCMAKE_PREFIX_PATH=${LEPT_INSTALL}\;${ZLIB_INSTALL}
+        -DLeptonica_DIR=${LEPT_INSTALL}/lib/cmake/leptonica
+        -DBUILD_SHARED_LIBS=OFF
+        -DBUILD_TRAINING_TOOLS=OFF
+        -DBUILD_TESTS=OFF
+        -DDISABLED_LEGACY_ENGINE=ON
+        -DDISABLE_CURL=ON
+        -DDISABLE_ARCHIVE=ON
+        -DGRAPHICS_DISABLED=ON
+        -DUSE_SYSTEM_ICU=OFF
+        -DCMAKE_DISABLE_FIND_PACKAGE_LibArchive=ON
+        -DCMAKE_DISABLE_FIND_PACKAGE_CURL=ON
+    BUILD_COMMAND   cmake --build <BINARY_DIR> --parallel ${NPROC}
+    INSTALL_COMMAND cmake --install <BINARY_DIR>
+    BUILD_BYPRODUCTS "${TESS_INSTALL}/lib/libtesseract.a"
+    LOG_CONFIGURE   TRUE
+    LOG_BUILD       TRUE
+    LOG_INSTALL     TRUE
+)
 
 # ===========================================================================
 # libopus  (reference OPUS codec – built via CMake)
@@ -199,8 +422,10 @@ ExternalProject_Add(ep_ffmpeg
     GIT_TAG         ${FFMPEG_GIT_TAG}
     GIT_SHALLOW     TRUE
     PREFIX          "${DEPS_PREFIX}/build/ffmpeg"
-    DEPENDS         ep_opus
+    DEPENDS         ep_opus ep_zlib
     CONFIGURE_COMMAND
+        ${CMAKE_COMMAND} -E env
+            "PKG_CONFIG_PATH=${OPUS_INSTALL}/lib/pkgconfig:${ZLIB_INSTALL}/lib/pkgconfig"
         <SOURCE_DIR>/configure
             --prefix=${FF_INSTALL}
             --enable-static
@@ -213,8 +438,11 @@ ExternalProject_Add(ep_ffmpeg
             --enable-libopus
             --enable-encoder=libopus
             --enable-decoder=libopus
+            --enable-zlib
             --extra-cflags=-I${OPUS_INSTALL}/include
+            --extra-cflags=-I${ZLIB_INSTALL}/include
             --extra-ldflags=-L${OPUS_INSTALL}/lib
+            --extra-ldflags=-L${ZLIB_INSTALL}/lib
     BUILD_COMMAND   make -j${NPROC}
     INSTALL_COMMAND make install
     BUILD_IN_SOURCE TRUE
@@ -368,6 +596,54 @@ set_target_properties(SvtAv1::Enc PROPERTIES
 )
 add_dependencies(SvtAv1::Enc ep_svtav1)
 
+# IMPORTED target – zlib (in-tree static build)
+add_library(Vmav::zlib STATIC IMPORTED GLOBAL)
+set_target_properties(Vmav::zlib PROPERTIES
+    IMPORTED_LOCATION             "${ZLIB_INSTALL}/lib/libz.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${ZLIB_INSTALL}/include"
+)
+add_dependencies(Vmav::zlib ep_zlib)
+
+# IMPORTED targets – OpenSSL (used only as a transitive dep of libcurl)
+add_library(Vmav::ssl STATIC IMPORTED GLOBAL)
+set_target_properties(Vmav::ssl PROPERTIES
+    IMPORTED_LOCATION             "${OPENSSL_INSTALL}/lib/libssl.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${OPENSSL_INSTALL}/include"
+)
+add_dependencies(Vmav::ssl ep_openssl)
+
+add_library(Vmav::crypto STATIC IMPORTED GLOBAL)
+set_target_properties(Vmav::crypto PROPERTIES
+    IMPORTED_LOCATION             "${OPENSSL_INSTALL}/lib/libcrypto.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${OPENSSL_INSTALL}/include"
+)
+add_dependencies(Vmav::crypto ep_openssl)
+
+# IMPORTED target – libcurl (static)
+add_library(Vmav::curl STATIC IMPORTED GLOBAL)
+set_target_properties(Vmav::curl PROPERTIES
+    IMPORTED_LOCATION             "${CURL_INSTALL}/lib/libcurl.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${CURL_INSTALL}/include"
+    INTERFACE_COMPILE_DEFINITIONS "CURL_STATICLIB"
+)
+add_dependencies(Vmav::curl ep_curl)
+
+# IMPORTED target – Leptonica
+add_library(Vmav::leptonica STATIC IMPORTED GLOBAL)
+set_target_properties(Vmav::leptonica PROPERTIES
+    IMPORTED_LOCATION             "${LEPT_INSTALL}/lib/libleptonica.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${LEPT_INSTALL}/include;${LEPT_INSTALL}/include/leptonica"
+)
+add_dependencies(Vmav::leptonica ep_leptonica)
+
+# IMPORTED target – Tesseract
+add_library(Vmav::tesseract STATIC IMPORTED GLOBAL)
+set_target_properties(Vmav::tesseract PROPERTIES
+    IMPORTED_LOCATION             "${TESS_INSTALL}/lib/libtesseract.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${TESS_INSTALL}/include;${TESS_INSTALL}/include/tesseract"
+)
+add_dependencies(Vmav::tesseract ep_tesseract)
+
 # ===========================================================================
 # Executable
 # ===========================================================================
@@ -395,18 +671,13 @@ add_executable(vmavificient
 target_compile_options(vmavificient PRIVATE ${VMAV_OPT_FLAGS})
 target_link_options(vmavificient PRIVATE ${VMAV_LINK_FLAGS})
 
+# tesseract is C++; use the C++ linker driver so libc++/libstdc++ is pulled in.
+set_target_properties(vmavificient PROPERTIES LINKER_LANGUAGE CXX)
+
 target_include_directories(vmavificient PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
     "${cjson_SOURCE_DIR}"
     "${SVTAV1_INSTALL}/include"
-    ${TESSERACT_INCLUDE_DIRS}
-    ${LEPTONICA_INCLUDE_DIRS}
-)
-
-# Link directories for Tesseract/Leptonica (from pkg-config)
-target_link_directories(vmavificient PRIVATE
-    ${TESSERACT_LIBRARY_DIRS}
-    ${LEPTONICA_LIBRARY_DIRS}
 )
 
 # Link order matters for static archives: dependents before dependencies.
@@ -422,22 +693,29 @@ target_link_libraries(vmavificient PRIVATE
     Dovi::dovi
     Hdr10Plus::hdr10plus
     "${OPUS_INSTALL}/lib/libopus.a"
-    Threads::Threads
-    CURL::libcurl
-    ${TESSERACT_LIBRARIES}
-    ${LEPTONICA_LIBRARIES}
+    Vmav::tesseract
+    Vmav::leptonica
+    Vmav::curl
+    Vmav::ssl
+    Vmav::crypto
+    Vmav::zlib
     cjson
-    z
+    Threads::Threads
     m
 )
 
-# macOS needs iconv (for FFmpeg) and frameworks (for Rust std)
+# macOS needs iconv (for FFmpeg) and frameworks (for Rust std + SecureTransport
+# fallbacks referenced by OpenSSL on Apple platforms).
 if(APPLE)
     target_link_libraries(vmavificient PRIVATE
         iconv
         "-framework CoreFoundation"
         "-framework Security"
+        "-framework SystemConfiguration"
     )
+else()
+    # OpenSSL's engine layer references dlopen on Linux.
+    target_link_libraries(vmavificient PRIVATE dl)
 endif()
 
 # ===========================================================================
@@ -451,6 +729,7 @@ target_include_directories(test_ssimu2_files PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
     "${FF_INSTALL}/include"
 )
+set_target_properties(test_ssimu2_files PROPERTIES LINKER_LANGUAGE CXX)
 target_link_libraries(test_ssimu2_files PRIVATE
     FFmpeg::avformat
     FFmpeg::avfilter
@@ -460,8 +739,8 @@ target_link_libraries(test_ssimu2_files PRIVATE
     FFmpeg::avutil
     Vmav::ssimu2
     "${OPUS_INSTALL}/lib/libopus.a"
+    Vmav::zlib
     Threads::Threads
-    z
     m
 )
 if(APPLE)
@@ -490,6 +769,7 @@ target_include_directories(test_crf_search PRIVATE
     "${FF_INSTALL}/include"
     "${SVTAV1_INSTALL}/include"
 )
+set_target_properties(test_crf_search PROPERTIES LINKER_LANGUAGE CXX)
 target_link_libraries(test_crf_search PRIVATE
     FFmpeg::avformat
     FFmpeg::avfilter
@@ -502,8 +782,8 @@ target_link_libraries(test_crf_search PRIVATE
     Dovi::dovi
     Hdr10Plus::hdr10plus
     "${OPUS_INSTALL}/lib/libopus.a"
+    Vmav::zlib
     Threads::Threads
-    z
     m
 )
 if(APPLE)
