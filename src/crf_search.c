@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 /* ====================================================================== */
 /*  Helpers                                                               */
@@ -228,8 +229,10 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
   /* ---- Cut samples ---- */
   char sample_paths[8][1024];
   char ref_paths[8][1024]; /* scoring reference: cropped FFV1 if crop active */
-  printf("\nCRF search: cutting %d sample clip(s) of %ds from source...\n",
-         n_samples, dur);
+
+  printf("\nOptimal bitrate search (target SSIMULACRA2 p10 >= %.2f)\n",
+         cfg->target_p10);
+  printf("  Preparing %d samples (%ds each)...\n", n_samples, dur);
 
   /* Build crop filter string if crop is active. encode_video() applies crop
    * internally, so the encoded output will be smaller than the raw sample.
@@ -250,7 +253,6 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
   for (int i = 0; i < n_samples; i++) {
     snprintf(sample_paths[i], sizeof(sample_paths[i]),
              "%s/crfsearch_sample_%d.mkv", cfg->workdir, i);
-    printf("  sample %d @ %ds -> %s\n", i, offsets[i], sample_paths[i]);
     if (cut_sample(cfg->input_path, sample_paths[i], offsets[i], dur) < 0) {
       result.error = -1;
       return result;
@@ -267,7 +269,6 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
                  "-vf \"%s\" -c:v ffv1 -level 3 -pix_fmt yuv420p10le "
                  "-an -sn -dn \"%s\"",
                  sample_paths[i], crop_filter, ref_paths[i]);
-        printf("  creating cropped reference for sample %d\n", i);
         int rc = system(cmd);
         if (rc != 0 || !file_exists_nonempty(ref_paths[i])) {
           fprintf(stderr,
@@ -282,31 +283,39 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
     }
   }
 
+  printf("\n  %-7s  %8s  %10s  %7s  %s\n",
+         "CRF", "p10", "kbps", "time", "");
+  printf("  %-7s  %8s  %10s  %7s  %s\n",
+         "-------", "--------", "----------", "-------", "----------");
+  fflush(stdout);
+
   /* ---- Probe each CRF ---- */
   double probe_p10[4] = {0};
   double probe_kbps[4] = {0};
   int probe_ok[4] = {0};
+  time_t search_start = time(NULL);
 
   for (int p = 0; p < n_probes; p++) {
     int crf = cfg->crf_probes[p];
     double sum_p10 = 0.0;
     double sum_kbps = 0.0;
     int scored = 0;
+    time_t probe_start = time(NULL);
 
-    printf("\nCRF search: probing CRF %d (%d sample(s))...\n", crf, n_samples);
+    /* Print in-progress indicator on stderr (overwritten by final result) */
+    fprintf(stderr, "\r  CRF %-3d  probing...                                   ",
+            crf);
+    fflush(stderr);
+
     for (int i = 0; i < n_samples; i++) {
       char enc_path[1024];
       snprintf(enc_path, sizeof(enc_path), "%s/crfsearch_sample_%d_crf%d.mkv",
                cfg->workdir, i, crf);
 
-      printf("  encoding sample %d @ CRF %d\n", i, crf);
       if (encode_sample_at_crf(cfg, sample_paths[i], enc_path, crf) < 0)
         continue;
 
-      /* Measure encoded bitrate — file size / requested duration. The
-       * actual sample duration can be slightly longer than `dur` (GOP
-       * snapping in -c copy), but within a few percent; good enough for
-       * calibration. */
+      /* Measure encoded bitrate — file size / requested duration. */
       struct stat enc_st;
       double this_kbps = 0.0;
       if (stat(enc_path, &enc_st) == 0 && enc_st.st_size > 0 && dur > 0) {
@@ -317,34 +326,54 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
       char ffv1_path[1024];
       snprintf(ffv1_path, sizeof(ffv1_path),
                "%s/crfsearch_sample_%d_crf%d.ffv1.mkv", cfg->workdir, i, crf);
-      printf("  transcoding sample %d @ CRF %d to FFV1\n", i, crf);
       if (transcode_av1_to_ffv1(enc_path, ffv1_path) < 0)
         continue;
 
-      printf("  scoring sample %d @ CRF %d\n", i, crf);
       Ssimu2Result sr =
           ssimu2_score_files(ref_paths[i], ffv1_path, stride);
       if (sr.error < 0) {
-        fprintf(stderr, "  CRF search: score failed (err=%d)\n", sr.error);
+        fprintf(stderr,
+                "\r  CRF %-3d  score failed (err=%d)                       \n",
+                crf, sr.error);
         continue;
       }
-      printf("    frames=%d  mean=%.3f  p10=%.3f  min=%.3f  kbps=%.0f\n",
-             sr.frames_scored, sr.mean, sr.p10, sr.min, this_kbps);
       sum_p10 += sr.p10;
       sum_kbps += this_kbps;
       scored++;
     }
 
+    time_t probe_end = time(NULL);
+    int probe_sec = (int)difftime(probe_end, probe_start);
+
     if (scored == 0) {
-      fprintf(stderr, "  CRF search: no samples scored at CRF %d\n", crf);
+      fprintf(stderr,
+              "\r  CRF %-3d  failed                                       \n",
+              crf);
       continue;
     }
     probe_p10[p] = sum_p10 / scored;
     probe_kbps[p] = sum_kbps / scored;
     probe_ok[p] = 1;
     result.probes_succeeded++;
-    printf("  CRF %d: mean p10 = %.3f, mean kbps = %.0f across %d sample(s)\n",
-           crf, probe_p10[p], probe_kbps[p], scored);
+
+    /* ETA: average time per completed probe × remaining probes */
+    int probes_done = p + 1;
+    int probes_left = n_probes - probes_done;
+    int elapsed_total = (int)difftime(probe_end, search_start);
+    char eta_str[32] = "";
+    if (probes_left > 0 && probes_done > 0) {
+      int avg_per_probe = elapsed_total / probes_done;
+      int eta_sec = avg_per_probe * probes_left;
+      snprintf(eta_str, sizeof(eta_str), "ETA %02d:%02d",
+               eta_sec / 60, eta_sec % 60);
+    }
+
+    /* Clear the in-progress line and print final result for this probe */
+    fprintf(stderr, "\r");
+    printf("  CRF %-3d  %7.2f   %8.0f    %02d:%02d   %s\n",
+           crf, probe_p10[p], probe_kbps[p],
+           probe_sec / 60, probe_sec % 60, eta_str);
+    fflush(stdout);
   }
 
   if (result.probes_succeeded < 1) {
@@ -398,9 +427,12 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
   result.predicted_p10 = pred;
   result.measured_bitrate_kbps = (int)(pred_kbps + 0.5);
 
-  printf("\nCRF search: target p10=%.2f -> recommended CRF %d "
-         "(predicted p10=%.3f, bitrate=%d kbps)\n",
-         cfg->target_p10, rec, pred, result.measured_bitrate_kbps);
+  int total_sec = (int)difftime(time(NULL), search_start);
+  printf("  %-7s  %8s  %10s  %7s\n",
+         "-------", "--------", "----------", "-------");
+  printf("\n  Result: CRF %d -> %d kbps (predicted p10 = %.2f) in %02d:%02d\n",
+         rec, result.measured_bitrate_kbps, pred,
+         total_sec / 60, total_sec % 60);
 
   return result;
 }
