@@ -143,4 +143,3 @@ This means you can use, modify, and distribute this software freely, including i
 - yuvxyb (Rust crate): BSD-2-Clause
 
 
-
