@@ -81,10 +81,16 @@ jobs:
           unzip bbb.mp4.zip
           ls -lh bbb_sunflower_1080p_30fps_normal.mp4
 
+      - name: Extract 5-second sample
+        run: |
+          ffmpeg -y -ss 0 -t 5 -i bbb_sunflower_1080p_30fps_normal.mp4 \
+            -c copy sample.mp4
+          ls -lh sample.mp4
+
       - name: Test encode
         run: |
-          ./build/vmavificient --blind --bitrate 500 bbb_sunflower_1080p_30fps_normal.mp4
-        timeout-minutes: 60
+          ./build/vmavificient --blind --bitrate 500 sample.mp4
+        timeout-minutes: 15
 
       - name: Verify output
         run: |

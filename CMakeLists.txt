@@ -444,9 +444,14 @@ ExternalProject_Add(ep_ffmpeg
     GIT_SHALLOW     TRUE
     PREFIX          "${DEPS_PREFIX}/build/ffmpeg"
     DEPENDS         ep_opus ep_zlib
+    # Multi-path PKG_CONFIG_PATH because CMake-based deps may install .pc
+    # files under lib/, lib64/, lib/<multiarch>/pkgconfig (Debian/Ubuntu)
+    # or share/pkgconfig depending on distro and CMake version. Listing
+    # every plausible location sidesteps Debian's GNUInstallDirs multiarch
+    # remapping that has bitten us in CI before.
     CONFIGURE_COMMAND
         ${CMAKE_COMMAND} -E env
-            "PKG_CONFIG_PATH=${OPUS_INSTALL}/lib/pkgconfig:${ZLIB_INSTALL}/lib/pkgconfig"
+            "PKG_CONFIG_PATH=${OPUS_INSTALL}/lib/pkgconfig:${OPUS_INSTALL}/lib64/pkgconfig:${OPUS_INSTALL}/lib/x86_64-linux-gnu/pkgconfig:${OPUS_INSTALL}/lib/aarch64-linux-gnu/pkgconfig:${OPUS_INSTALL}/share/pkgconfig:${ZLIB_INSTALL}/lib/pkgconfig:${ZLIB_INSTALL}/lib64/pkgconfig:${ZLIB_INSTALL}/lib/x86_64-linux-gnu/pkgconfig:${ZLIB_INSTALL}/lib/aarch64-linux-gnu/pkgconfig:${ZLIB_INSTALL}/share/pkgconfig"
         <SOURCE_DIR>/configure
             --prefix=${FF_INSTALL}
             --enable-static
@@ -463,7 +468,13 @@ ExternalProject_Add(ep_ffmpeg
             --extra-cflags=-I${OPUS_INSTALL}/include
             --extra-cflags=-I${ZLIB_INSTALL}/include
             --extra-ldflags=-L${OPUS_INSTALL}/lib
+            --extra-ldflags=-L${OPUS_INSTALL}/lib64
+            --extra-ldflags=-L${OPUS_INSTALL}/lib/x86_64-linux-gnu
+            --extra-ldflags=-L${OPUS_INSTALL}/lib/aarch64-linux-gnu
             --extra-ldflags=-L${ZLIB_INSTALL}/lib
+            --extra-ldflags=-L${ZLIB_INSTALL}/lib64
+            --extra-ldflags=-L${ZLIB_INSTALL}/lib/x86_64-linux-gnu
+            --extra-ldflags=-L${ZLIB_INSTALL}/lib/aarch64-linux-gnu
     BUILD_COMMAND   make -j${NPROC}
     INSTALL_COMMAND make install
     BUILD_IN_SOURCE TRUE
