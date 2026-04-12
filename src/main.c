@@ -234,6 +234,16 @@ static int sub_sort_key(const char *lang, int is_forced) {
 
 int main(int argc, char *argv[]) {
   init_logging();
+
+  /* Handle --help / -h before config_init so users can discover the CLI
+   * without having to provision a config.ini first. */
+  for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
+      print_usage(argv[0]);
+      return 0;
+    }
+  }
+
   config_init();
 
   if (check_dependencies() != 0) {
