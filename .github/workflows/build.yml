@@ -34,7 +34,7 @@ jobs:
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install ninja pkg-config nasm
+          brew install ninja pkg-config nasm ffmpeg
           # perl + make are preinstalled on GitHub macOS runners (needed by OpenSSL Configure).
 
       - name: Install dependencies (Linux)
