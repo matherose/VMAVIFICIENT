@@ -96,10 +96,15 @@ endif()
 
 # Linker optimizations: dead-strip + use lld if available.
 set(VMAV_LINK_FLAGS "")
-find_program(LLVM_LLD ld.lld)
-if(LLVM_LLD)
-    list(APPEND VMAV_LINK_FLAGS -fuse-ld=lld)
-    message(STATUS "Linker: lld")
+# lld is faster than the GNU linker on Linux, but Homebrew's lld crashes with
+# LTO on macOS arm64 ("Unsupported stack probing method"), so only use it on
+# non-Apple platforms.
+if(NOT APPLE)
+    find_program(LLVM_LLD ld.lld)
+    if(LLVM_LLD)
+        list(APPEND VMAV_LINK_FLAGS -fuse-ld=lld)
+        message(STATUS "Linker: lld")
+    endif()
 endif()
 if(APPLE)
     list(APPEND VMAV_LINK_FLAGS -Wl,-dead_strip)
@@ -141,6 +146,9 @@ set(SSIMU2_INSTALL  "${DEPS_PREFIX}/vmav_ssimu2")
 set(ZLIB_INSTALL    "${DEPS_PREFIX}/zlib")
 set(OPENSSL_INSTALL "${DEPS_PREFIX}/openssl")
 set(CURL_INSTALL    "${DEPS_PREFIX}/curl")
+set(PNG_INSTALL     "${DEPS_PREFIX}/libpng")
+set(JPEG_INSTALL    "${DEPS_PREFIX}/libjpeg")
+set(TIFF_INSTALL    "${DEPS_PREFIX}/libtiff")
 set(LEPT_INSTALL    "${DEPS_PREFIX}/leptonica")
 set(TESS_INSTALL    "${DEPS_PREFIX}/tesseract")
 
@@ -156,6 +164,9 @@ file(MAKE_DIRECTORY "${SSIMU2_INSTALL}/include")
 file(MAKE_DIRECTORY "${ZLIB_INSTALL}/include")
 file(MAKE_DIRECTORY "${OPENSSL_INSTALL}/include")
 file(MAKE_DIRECTORY "${CURL_INSTALL}/include")
+file(MAKE_DIRECTORY "${PNG_INSTALL}/include")
+file(MAKE_DIRECTORY "${JPEG_INSTALL}/include")
+file(MAKE_DIRECTORY "${TIFF_INSTALL}/include")
 file(MAKE_DIRECTORY "${LEPT_INSTALL}/include")
 file(MAKE_DIRECTORY "${LEPT_INSTALL}/include/leptonica")
 file(MAKE_DIRECTORY "${TESS_INSTALL}/include")
@@ -175,6 +186,9 @@ set(CJSON_GIT_TAG           "v1.7.18")
 set(ZLIB_GIT_TAG            "v1.3.1")
 set(OPENSSL_GIT_TAG         "openssl-3.3.2")
 set(CURL_GIT_TAG            "curl-8_11_0")
+set(LIBPNG_GIT_TAG          "v1.6.43")
+set(LIBJPEG_GIT_TAG         "3.1.0")
+set(LIBTIFF_GIT_TAG         "v4.7.0")
 set(LEPTONICA_GIT_TAG       "1.85.0")
 set(TESSERACT_GIT_TAG       "5.5.0")
 
@@ -328,42 +342,144 @@ ExternalProject_Add(ep_curl
 )
 
 # ===========================================================================
+# libpng  (PNG codec – required by leptonica for subtitle image handling)
+# ===========================================================================
+ExternalProject_Add(ep_libpng
+    GIT_REPOSITORY  https://github.com/glennrp/libpng.git
+    GIT_TAG         ${LIBPNG_GIT_TAG}
+    GIT_SHALLOW     TRUE
+    PREFIX          "${DEPS_PREFIX}/build/libpng"
+    DEPENDS         ep_zlib
+    CMAKE_GENERATOR "Ninja"
+    CMAKE_ARGS
+        -DCMAKE_INSTALL_PREFIX=${PNG_INSTALL}
+        -DCMAKE_INSTALL_LIBDIR=lib
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DBUILD_SHARED_LIBS=OFF
+        -DPNG_SHARED=OFF
+        -DPNG_STATIC=ON
+        -DPNG_TESTS=OFF
+        -DPNG_TOOLS=OFF
+        -DZLIB_ROOT=${ZLIB_INSTALL}
+        -DZLIB_USE_STATIC_LIBS=ON
+    BUILD_COMMAND   cmake --build <BINARY_DIR> --parallel ${NPROC}
+    INSTALL_COMMAND cmake --install <BINARY_DIR>
+    BUILD_BYPRODUCTS "${PNG_INSTALL}/lib/libpng16.a" "${PNG_INSTALL}/lib/libpng.a"
+    LOG_CONFIGURE   TRUE
+    LOG_BUILD       TRUE
+    LOG_INSTALL     TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
+)
+
+# ===========================================================================
+# libjpeg-turbo  (JPEG codec – required by leptonica's TIFF support)
+# ===========================================================================
+ExternalProject_Add(ep_libjpeg
+    GIT_REPOSITORY  https://github.com/libjpeg-turbo/libjpeg-turbo.git
+    GIT_TAG         ${LIBJPEG_GIT_TAG}
+    GIT_SHALLOW     TRUE
+    PREFIX          "${DEPS_PREFIX}/build/libjpeg"
+    CMAKE_GENERATOR "Ninja"
+    CMAKE_ARGS
+        -DCMAKE_INSTALL_PREFIX=${JPEG_INSTALL}
+        -DCMAKE_INSTALL_LIBDIR=lib
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DENABLE_SHARED=OFF
+        -DENABLE_STATIC=ON
+        -DWITH_TURBOJPEG=OFF
+    BUILD_COMMAND   cmake --build <BINARY_DIR> --parallel ${NPROC}
+    INSTALL_COMMAND cmake --install <BINARY_DIR>
+    BUILD_BYPRODUCTS "${JPEG_INSTALL}/lib/libjpeg.a"
+    LOG_CONFIGURE   TRUE
+    LOG_BUILD       TRUE
+    LOG_INSTALL     TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
+)
+
+# ===========================================================================
+# libtiff  (TIFF codec – required by leptonica for bitmap font rendering)
+# ===========================================================================
+ExternalProject_Add(ep_libtiff
+    GIT_REPOSITORY  https://gitlab.com/libtiff/libtiff.git
+    GIT_TAG         ${LIBTIFF_GIT_TAG}
+    GIT_SHALLOW     TRUE
+    PREFIX          "${DEPS_PREFIX}/build/libtiff"
+    DEPENDS         ep_zlib ep_libjpeg
+    CMAKE_GENERATOR "Ninja"
+    CMAKE_ARGS
+        -DCMAKE_INSTALL_PREFIX=${TIFF_INSTALL}
+        -DCMAKE_INSTALL_LIBDIR=lib
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DCMAKE_PREFIX_PATH=${JPEG_INSTALL}\;${ZLIB_INSTALL}
+        -DBUILD_SHARED_LIBS=OFF
+        -Dtiff-tools=OFF
+        -Dtiff-tests=OFF
+        -Dtiff-contrib=OFF
+        -Dtiff-docs=OFF
+        -Dtiff-deprecated=OFF
+        -Dtiff-install=ON
+        -Djpeg=ON
+        -DJPEG_INCLUDE_DIR=${JPEG_INSTALL}/include
+        -DJPEG_LIBRARY=${JPEG_INSTALL}/lib/libjpeg.a
+        -Djbig=OFF
+        -Dlerc=OFF
+        -Dlzma=OFF
+        -Dwebp=OFF
+        -Dzstd=OFF
+        -Dlibdeflate=OFF
+        -Dzlib=ON
+        -DZLIB_ROOT=${ZLIB_INSTALL}
+        -DZLIB_USE_STATIC_LIBS=ON
+    BUILD_COMMAND   cmake --build <BINARY_DIR> --parallel ${NPROC}
+    INSTALL_COMMAND cmake --install <BINARY_DIR>
+    BUILD_BYPRODUCTS "${TIFF_INSTALL}/lib/libtiff.a"
+    LOG_CONFIGURE   TRUE
+    LOG_BUILD       TRUE
+    LOG_INSTALL     TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
+)
+
+# ===========================================================================
 # Leptonica  (image library – tesseract's dependency)
-#
-# Only used for in-memory Pix buffers in the subtitle OCR path, so every
-# optional file-format backend is disabled to keep the link footprint small
-# and avoid dragging in libpng/libjpeg/libtiff/libwebp.
 # ===========================================================================
 ExternalProject_Add(ep_leptonica
     GIT_REPOSITORY  https://github.com/DanBloomberg/leptonica.git
     GIT_TAG         ${LEPTONICA_GIT_TAG}
     GIT_SHALLOW     TRUE
     PREFIX          "${DEPS_PREFIX}/build/leptonica"
-    DEPENDS         ep_zlib
+    DEPENDS         ep_zlib ep_libpng ep_libjpeg ep_libtiff
     CMAKE_GENERATOR "Ninja"
     CMAKE_ARGS
         -DCMAKE_INSTALL_PREFIX=${LEPT_INSTALL}
         -DCMAKE_INSTALL_LIBDIR=lib
         -DCMAKE_BUILD_TYPE=Release
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON
-        -DCMAKE_PREFIX_PATH=${ZLIB_INSTALL}
+        -DCMAKE_PREFIX_PATH=${ZLIB_INSTALL}\;${PNG_INSTALL}\;${JPEG_INSTALL}\;${TIFF_INSTALL}
         -DBUILD_SHARED_LIBS=OFF
         -DBUILD_PROG=OFF
         -DSW_BUILD=OFF
         -DENABLE_ZLIB=ON
-        -DENABLE_PNG=OFF
-        -DENABLE_JPEG=OFF
-        -DENABLE_TIFF=OFF
+        -DENABLE_PNG=ON
+        -DENABLE_JPEG=ON
+        -DENABLE_TIFF=ON
         -DENABLE_WEBP=OFF
         -DENABLE_OPENJPEG=OFF
         -DENABLE_GIF=OFF
-        -DCMAKE_DISABLE_FIND_PACKAGE_PNG=ON
-        -DCMAKE_DISABLE_FIND_PACKAGE_JPEG=ON
-        -DCMAKE_DISABLE_FIND_PACKAGE_TIFF=ON
+        -DJPEG_INCLUDE_DIR=${JPEG_INSTALL}/include
+        -DJPEG_LIBRARY=${JPEG_INSTALL}/lib/libjpeg.a
         -DCMAKE_DISABLE_FIND_PACKAGE_WebP=ON
         -DCMAKE_DISABLE_FIND_PACKAGE_WebPMux=ON
         -DCMAKE_DISABLE_FIND_PACKAGE_GIF=ON
         -DCMAKE_DISABLE_FIND_PACKAGE_OpenJPEG=ON
+        -DPNG_ROOT=${PNG_INSTALL}
+        -DPNG_PNG_INCLUDE_DIR=${PNG_INSTALL}/include
+        -DPNG_LIBRARY=${PNG_INSTALL}/lib/libpng16.a
+        -DTIFF_ROOT=${TIFF_INSTALL}
+        -DTIFF_INCLUDE_DIR=${TIFF_INSTALL}/include
+        -DTIFF_LIBRARY=${TIFF_INSTALL}/lib/libtiff.a
         -DZLIB_ROOT=${ZLIB_INSTALL}
         -DZLIB_USE_STATIC_LIBS=ON
     BUILD_COMMAND   cmake --build <BINARY_DIR> --parallel ${NPROC}
@@ -654,6 +770,30 @@ set_target_properties(Vmav::curl PROPERTIES
 )
 add_dependencies(Vmav::curl ep_curl)
 
+# IMPORTED target – libjpeg-turbo
+add_library(Vmav::jpeg STATIC IMPORTED GLOBAL)
+set_target_properties(Vmav::jpeg PROPERTIES
+    IMPORTED_LOCATION             "${JPEG_INSTALL}/lib/libjpeg.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${JPEG_INSTALL}/include"
+)
+add_dependencies(Vmav::jpeg ep_libjpeg)
+
+# IMPORTED target – libtiff
+add_library(Vmav::tiff STATIC IMPORTED GLOBAL)
+set_target_properties(Vmav::tiff PROPERTIES
+    IMPORTED_LOCATION             "${TIFF_INSTALL}/lib/libtiff.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${TIFF_INSTALL}/include"
+)
+add_dependencies(Vmav::tiff ep_libtiff)
+
+# IMPORTED target – libpng
+add_library(Vmav::png STATIC IMPORTED GLOBAL)
+set_target_properties(Vmav::png PROPERTIES
+    IMPORTED_LOCATION             "${PNG_INSTALL}/lib/libpng16.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${PNG_INSTALL}/include"
+)
+add_dependencies(Vmav::png ep_libpng)
+
 # IMPORTED target – Leptonica
 add_library(Vmav::leptonica STATIC IMPORTED GLOBAL)
 set_target_properties(Vmav::leptonica PROPERTIES
@@ -721,6 +861,9 @@ target_link_libraries(vmavificient PRIVATE
     "${OPUS_INSTALL}/lib/libopus.a"
     Vmav::tesseract
     Vmav::leptonica
+    Vmav::tiff
+    Vmav::jpeg
+    Vmav::png
     Vmav::curl
     Vmav::ssl
     Vmav::crypto
