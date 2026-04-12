@@ -83,7 +83,7 @@ jobs:
 
       - name: Test encode
         run: |
-          ./build/vmavificient --bitrate 500 bbb_sunflower_1080p_30fps_normal.mp4
+          ./build/vmavificient --blind --bitrate 500 bbb_sunflower_1080p_30fps_normal.mp4
         timeout-minutes: 60
 
       - name: Verify output

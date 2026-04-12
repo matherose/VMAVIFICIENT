@@ -34,6 +34,8 @@ static void print_usage(const char *prog) {
       "\n"
       "Options:\n"
       "  --tmdb <id>      TMDB movie ID for naming (requires TMDB_API_KEY)\n"
+      "  --blind          Skip TMDB lookup; name output as <input-stem>.mkv\n"
+      "                   (no config.ini required)\n"
       "  --bitrate <kbps> Override target video bitrate (e.g. 3500)\n"
       "  --srt <path>     Additional SRT subtitle file (can be repeated)\n"
       "  --help           Show this help\n"
@@ -236,15 +238,21 @@ int main(int argc, char *argv[]) {
   init_logging();
 
   /* Handle --help / -h before config_init so users can discover the CLI
-   * without having to provision a config.ini first. */
+   * without having to provision a config.ini first. Likewise, --blind
+   * runs the encode pipeline without any TMDB/release-group metadata, so
+   * config.ini is not required in that mode either. */
+  bool blind = false;
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
       print_usage(argv[0]);
       return 0;
     }
+    if (strcmp(argv[i], "--blind") == 0)
+      blind = true;
   }
 
-  config_init();
+  if (!blind)
+    config_init();
 
   if (check_dependencies() != 0) {
     fprintf(stderr, "Fatal: dependency sanity check failed.\n");
@@ -266,6 +274,7 @@ int main(int argc, char *argv[]) {
     OPT_BITRATE = 'b',
     OPT_SRT = 's',
     /* Language flags (start at 256 to avoid ASCII collision). */
+    OPT_BLIND = 255,
     OPT_MULTI = 256,
     OPT_MULTIVFI,
     OPT_MULTIVFF,
@@ -308,6 +317,7 @@ int main(int argc, char *argv[]) {
       {"bitrate", required_argument, 0, OPT_BITRATE},
       {"srt", required_argument, 0, OPT_SRT},
       {"help", no_argument, 0, OPT_HELP},
+      {"blind", no_argument, 0, OPT_BLIND},
       /* Language flags. */
       {"multi", no_argument, 0, OPT_MULTI},
       {"multivfi", no_argument, 0, OPT_MULTIVFI},
@@ -370,6 +380,9 @@ int main(int argc, char *argv[]) {
     case OPT_HELP:
       print_usage(argv[0]);
       return 0;
+    case OPT_BLIND:
+      /* Already detected in the pre-scan above; nothing more to do here. */
+      break;
     /* Language flags. */
     case OPT_MULTI:
       cli_lang_tag = LANG_TAG_MULTI;
@@ -577,8 +590,44 @@ int main(int argc, char *argv[]) {
     printf("  Film grain:      %d\n", film_grain);
   }
 
-  /* ---- TMDB naming ---- */
-  if (tmdb_id > 0) {
+  /* ---- Naming setup (TMDB or --blind) ---- */
+  char output_name[1024] = "";
+  char base_name[1024] = "";
+  char output_dir[2048] = "";
+  char mkv_title[1024] = "";
+  const char *video_language = "und";
+  SourceType source = cli_source;
+  FrenchVariant fv = FRENCH_VARIANT_UNKNOWN;
+  FrenchAudioOrigin fr_audio_origin = FRENCH_AUDIO_VFF;
+  bool naming_ok = false;
+
+  if (blind) {
+    /* Derive the output name straight from the input filepath: no TMDB,
+       no release-group suffix — just `<input-stem>.mkv` next to the
+       source file. Used by CI and anyone without a config.ini. */
+    const char *fname = strrchr(filepath, '/');
+    fname = fname ? fname + 1 : filepath;
+    snprintf(base_name, sizeof(base_name), "%s", fname);
+    char *dot = strrchr(base_name, '.');
+    if (dot)
+      *dot = '\0';
+    snprintf(output_name, sizeof(output_name), "%s.mkv", base_name);
+    snprintf(mkv_title, sizeof(mkv_title), "%s", base_name);
+
+    snprintf(output_dir, sizeof(output_dir), "%s", filepath);
+    char *slash = strrchr(output_dir, '/');
+    if (slash)
+      *(slash + 1) = '\0';
+    else
+      snprintf(output_dir, sizeof(output_dir), "./");
+
+    if (tracks.error == 0 && tracks.audio_count > 0 &&
+        tracks.audio[0].language[0])
+      video_language = tracks.audio[0].language;
+
+    printf("\nBlind mode — output filename:\n  %s\n", output_name);
+    naming_ok = true;
+  } else if (tmdb_id > 0) {
     printf("\nFetching TMDB info for ID %d...\n", tmdb_id);
     TmdbMovieInfo tmdb = tmdb_fetch_movie(tmdb_id);
     if (tmdb.error != 0) {
@@ -589,14 +638,12 @@ int main(int argc, char *argv[]) {
       printf("  Language: %s\n", tmdb.original_language);
 
       /* Source: CLI flag > filename detection > interactive prompt. */
-      SourceType source = cli_source;
       if (source == SOURCE_UNKNOWN)
         source = detect_source_from_filename(filepath);
       if (source == SOURCE_UNKNOWN)
         source = ask_source();
 
       /* Determine French variant for OPUS naming. */
-      FrenchVariant fv = FRENCH_VARIANT_UNKNOWN;
       bool has_french = false;
       if (tracks.error == 0) {
         for (int i = 0; i < tracks.audio_count; i++) {
@@ -627,7 +674,6 @@ int main(int argc, char *argv[]) {
         }
       }
 
-      char output_name[1024];
       build_output_filename(output_name, sizeof(output_name),
                             tmdb.original_title, tmdb.release_year, lang_tag,
                             &info, &hdr, source);
@@ -635,14 +681,12 @@ int main(int argc, char *argv[]) {
       printf("\nOutput filename:\n  %s\n", output_name);
 
       /* Strip .mkv to get base name. */
-      char base_name[1024];
       snprintf(base_name, sizeof(base_name), "%s", output_name);
       char *ext = strrchr(base_name, '.');
       if (ext && strcmp(ext, ".mkv") == 0)
         *ext = '\0';
 
       /* Output dir: same directory as input file. */
-      char output_dir[2048];
       snprintf(output_dir, sizeof(output_dir), "%s", filepath);
       char *last_slash = strrchr(output_dir, '/');
       if (last_slash)
@@ -675,7 +719,6 @@ int main(int argc, char *argv[]) {
         break;
       }
 
-      FrenchAudioOrigin fr_audio_origin = FRENCH_AUDIO_VFF;
       if (strcmp(tmdb.original_language, "fr") == 0) {
         fr_audio_origin = FRENCH_AUDIO_VO;
       } else {
@@ -692,6 +735,20 @@ int main(int argc, char *argv[]) {
         }
       }
 
+      snprintf(mkv_title, sizeof(mkv_title), "%s (%d)", tmdb.original_title,
+               tmdb.release_year);
+      {
+        const char *vlang = iso639_1_to_2b(tmdb.original_language);
+        if (vlang)
+          video_language = vlang;
+      }
+
+      naming_ok = true;
+    }
+  }
+
+  if (naming_ok) {
+    {
       /* ---- OPUS audio encoding ---- */
       int enc_best_count = 0;
       TrackInfo *enc_best =
@@ -1065,11 +1122,6 @@ int main(int argc, char *argv[]) {
           }
         }
 
-        /* Build MKV container title: "Movie (Year)" */
-        char mkv_title[1024];
-        snprintf(mkv_title, sizeof(mkv_title), "%s (%d)", tmdb.original_title,
-                 tmdb.release_year);
-
         FinalMuxConfig mux_cfg = {
             .video_path = av1_video_path,
             .output_path = final_path,
@@ -1079,7 +1131,7 @@ int main(int argc, char *argv[]) {
             .sub_count = srt_count,
             .title = mkv_title,
             .video_title = mkv_title,
-            .video_language = iso639_1_to_2b(tmdb.original_language),
+            .video_language = video_language,
             .chapters_source_path = filepath,
         };
 
