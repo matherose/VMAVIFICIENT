@@ -226,6 +226,7 @@ ExternalProject_Add(ep_zlib
     LOG_CONFIGURE   TRUE
     LOG_BUILD       TRUE
     LOG_INSTALL     TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
 )
 
 # ===========================================================================
@@ -261,6 +262,7 @@ ExternalProject_Add(ep_openssl
     LOG_CONFIGURE   TRUE
     LOG_BUILD       TRUE
     LOG_INSTALL     TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
 )
 
 # ===========================================================================
@@ -320,6 +322,7 @@ ExternalProject_Add(ep_curl
     LOG_CONFIGURE   TRUE
     LOG_BUILD       TRUE
     LOG_INSTALL     TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
 )
 
 # ===========================================================================
@@ -366,6 +369,7 @@ ExternalProject_Add(ep_leptonica
     LOG_CONFIGURE   TRUE
     LOG_BUILD       TRUE
     LOG_INSTALL     TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
 )
 
 # ===========================================================================
@@ -400,6 +404,7 @@ ExternalProject_Add(ep_tesseract
     LOG_CONFIGURE   TRUE
     LOG_BUILD       TRUE
     LOG_INSTALL     TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
 )
 
 # ===========================================================================
@@ -422,6 +427,7 @@ ExternalProject_Add(ep_opus
     LOG_CONFIGURE   TRUE
     LOG_BUILD       TRUE
     LOG_INSTALL     TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
 )
 
 # ===========================================================================
@@ -466,6 +472,7 @@ ExternalProject_Add(ep_ffmpeg
     LOG_CONFIGURE   TRUE
     LOG_BUILD       TRUE
     LOG_INSTALL     TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
 )
 
 # ===========================================================================
@@ -488,6 +495,7 @@ ExternalProject_Add(ep_libdovi
     BUILD_IN_SOURCE TRUE
     BUILD_BYPRODUCTS "${DOVI_INSTALL}/lib/libdovi.a"
     LOG_INSTALL     TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
 )
 
 # ===========================================================================
@@ -510,6 +518,7 @@ ExternalProject_Add(ep_libhdr10plus
     BUILD_IN_SOURCE TRUE
     BUILD_BYPRODUCTS "${HDR10_INSTALL}/lib/libhdr10plus-rs.a"
     LOG_INSTALL     TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
 )
 
 # ===========================================================================
@@ -537,6 +546,7 @@ ExternalProject_Add(ep_vmav_ssimu2
     BUILD_BYPRODUCTS "${SSIMU2_STATIC_LIB}"
     LOG_BUILD     TRUE
     LOG_INSTALL   TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
 )
 
 # ===========================================================================
@@ -559,6 +569,7 @@ ExternalProject_Add(ep_svtav1
     LOG_CONFIGURE   TRUE
     LOG_BUILD       TRUE
     LOG_INSTALL     TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
 )
 
 # ===========================================================================
