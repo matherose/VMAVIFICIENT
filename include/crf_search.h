@@ -1,11 +1,11 @@
 /**
  * @file crf_search.h
- * @brief SSIMULACRA2-driven CRF search for quality-targeted AV1 encoding.
+ * @brief Quality-metric-driven CRF search for quality-targeted AV1 encoding.
  *
  * Cuts short sample clips from a source, encodes each at several CRF values
  * using the project's real encode path, scores the encoded samples against
- * their references with SSIMULACRA2, and solves for the CRF that is
- * predicted to hit a target perceptual score.
+ * their references with a perceptual metric (VMAF or SSIMULACRA2), and solves
+ * for the CRF that is predicted to hit a target perceptual score.
  *
  * The target metric is the 10th-percentile per-frame score (p10), matching
  * the "Light" quality philosophy of bounding worst-case quality rather than
@@ -23,6 +23,12 @@
 extern "C" {
 #endif
 
+/** Quality metric used for CRF search scoring. */
+typedef enum {
+  CRF_METRIC_SSIMU2 = 0, /**< SSIMULACRA2 (best for 4K/HDR). */
+  CRF_METRIC_VMAF   = 1, /**< VMAF v0.6.1 (best for HD/SDR). */
+} CrfMetric;
+
 /**
  * @brief Inputs for a CRF search run.
  */
@@ -35,10 +41,11 @@ typedef struct {
   const HdrInfo *hdr;         /**< HDR info. */
   int film_grain;             /**< Grain synthesis level (0–50). */
 
-  double target_p10;          /**< Desired SSIMULACRA2 p10 score. */
+  CrfMetric metric;           /**< Quality metric to use for scoring. */
+  double target_p10;          /**< Desired p10 score (metric-dependent). */
   int sample_count;           /**< Number of sample clips to cut (>=1). */
   int sample_duration;        /**< Seconds per sample clip (>=2). */
-  int frame_stride;           /**< Score every Nth frame (>=1). */
+  int frame_stride;           /**< Score every Nth frame (>=1, SSIMU2 only). */
 
   int crf_probes[4];          /**< CRF values to probe (0-terminated). */
 
