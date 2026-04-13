@@ -120,7 +120,13 @@ static int encode_sample_at_crf(const CrfSearchConfig *cfg,
       .output_path = encoded_path,
       .rpu_path = NULL, /* see file header */
       .preset = cfg->preset,
-      .film_grain = cfg->film_grain,
+      .film_grain = 0, /* disable grain synthesis for scoring accuracy:
+                         * SVT-AV1 film-grain denoises then resynthesises
+                         * a *different* grain pattern; SSIMULACRA2 sees the
+                         * pattern mismatch as distortion → artificially low
+                         * scores.  With fg=0, the encoder preserves grain
+                         * as-is and the metric compares like with like.
+                         * The final encode still uses cfg->film_grain. */
       .target_bitrate = 0,
       .crf = crf,
       .info = cfg->info,
