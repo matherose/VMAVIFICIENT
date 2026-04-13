@@ -935,6 +935,7 @@ add_executable(test_crf_search
 )
 target_include_directories(test_crf_search PRIVATE
     "${CMAKE_SOURCE_DIR}/include"
+    "${cjson_SOURCE_DIR}"
     "${FF_INSTALL}/include"
     "${SVTAV1_INSTALL}/include"
 )
@@ -952,6 +953,7 @@ target_link_libraries(test_crf_search PRIVATE
     Hdr10Plus::hdr10plus
     "${OPUS_INSTALL}/lib/libopus.a"
     Vmav::zlib
+    cjson
     Threads::Threads
     m
 )
