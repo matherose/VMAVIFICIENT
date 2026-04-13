@@ -1026,7 +1026,7 @@ int main(int argc, char *argv[]) {
             .crop = (crop.error == 0) ? &crop : NULL,
             .hdr = &hdr,
             .film_grain = film_grain,
-            .target_p10 = 92.0,
+            .target_p10 = (info.height >= 2160) ? 88.0 : 82.0,
             .sample_count = 2,
             .sample_duration = 10,
             .frame_stride = 1,
