@@ -7,8 +7,8 @@
  *      using `ffmpeg -ss -t -c copy` (stream copy — fast, bit-exact, snaps
  *      to nearest keyframe).
  *   2. For each probe CRF, encode every sample with encode_video() in CRF
- *      rate-control mode (the new `.crf` field) and score the result
- *      against its source sample via ssimu2_score_files().
+ *      rate-control mode and score the result against its source sample
+ *      via VMAF (HD) or SSIMULACRA2 (4K).
  *   3. Aggregate per-CRF p10 scores across samples (mean), then linearly
  *      interpolate to solve for the target p10. Clamp to [20, 40].
  *
@@ -23,7 +23,7 @@
 #include "media_ssimu2.h"
 #include "video_encode.h"
 
-#include <math.h>
+#include <cJSON.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -68,6 +68,110 @@ static int transcode_av1_to_ffv1(const char *src_av1, const char *dst_ffv1) {
     return -1;
   }
   return 0;
+}
+
+/**
+ * @brief Score a pair of files with VMAF via system ffmpeg.
+ *
+ * Runs `ffmpeg -lavfi libvmaf`, writes a JSON log, parses per-frame VMAF
+ * scores with cJSON, and returns the p10 (10th-percentile).
+ *
+ * @return p10 on success, or -1.0 on failure.
+ */
+static double score_vmaf_p10(const char *ref_path, const char *dis_path,
+                             const char *json_path) {
+  /* Run VMAF via system ffmpeg. distorted = first input, ref = second. */
+  char cmd[4096];
+  snprintf(cmd, sizeof(cmd),
+           "ffmpeg -y -loglevel error -nostdin "
+           "-i \"%s\" -i \"%s\" "
+           "-lavfi libvmaf=log_fmt=json:log_path=\"%s\":n_threads=4 "
+           "-f null -",
+           dis_path, ref_path, json_path);
+  int rc = system(cmd);
+  if (rc != 0) {
+    fprintf(stderr, "  CRF search: VMAF scoring failed (rc=%d)\n", rc);
+    return -1.0;
+  }
+
+  /* Read JSON file into memory. */
+  FILE *fp = fopen(json_path, "rb");
+  if (!fp) {
+    fprintf(stderr, "  CRF search: cannot open VMAF log %s\n", json_path);
+    return -1.0;
+  }
+  fseek(fp, 0, SEEK_END);
+  long fsize = ftell(fp);
+  fseek(fp, 0, SEEK_SET);
+  if (fsize <= 0 || fsize > 100 * 1024 * 1024) { /* sanity: max 100 MB */
+    fclose(fp);
+    return -1.0;
+  }
+  char *json_buf = (char *)malloc((size_t)fsize + 1);
+  if (!json_buf) {
+    fclose(fp);
+    return -1.0;
+  }
+  fread(json_buf, 1, (size_t)fsize, fp);
+  json_buf[fsize] = '\0';
+  fclose(fp);
+
+  /* Parse with cJSON. */
+  cJSON *root = cJSON_Parse(json_buf);
+  free(json_buf);
+  if (!root) {
+    fprintf(stderr, "  CRF search: VMAF JSON parse failed\n");
+    return -1.0;
+  }
+
+  cJSON *frames = cJSON_GetObjectItemCaseSensitive(root, "frames");
+  if (!cJSON_IsArray(frames)) {
+    cJSON_Delete(root);
+    return -1.0;
+  }
+
+  int n = cJSON_GetArraySize(frames);
+  if (n <= 0) {
+    cJSON_Delete(root);
+    return -1.0;
+  }
+
+  double *scores = (double *)malloc((size_t)n * sizeof(double));
+  if (!scores) {
+    cJSON_Delete(root);
+    return -1.0;
+  }
+
+  int count = 0;
+  cJSON *frame = NULL;
+  cJSON_ArrayForEach(frame, frames) {
+    cJSON *metrics = cJSON_GetObjectItemCaseSensitive(frame, "metrics");
+    if (!metrics)
+      continue;
+    cJSON *vmaf = cJSON_GetObjectItemCaseSensitive(metrics, "vmaf");
+    if (cJSON_IsNumber(vmaf))
+      scores[count++] = vmaf->valuedouble;
+  }
+  cJSON_Delete(root);
+
+  if (count == 0) {
+    free(scores);
+    return -1.0;
+  }
+
+  /* Sort ascending to compute p10. */
+  for (int i = 0; i < count - 1; i++)
+    for (int j = i + 1; j < count; j++)
+      if (scores[j] < scores[i]) {
+        double tmp = scores[i];
+        scores[i] = scores[j];
+        scores[j] = tmp;
+      }
+
+  int p10_idx = count / 10; /* 10th percentile index */
+  double p10 = scores[p10_idx];
+  free(scores);
+  return p10;
 }
 
 /**
@@ -236,8 +340,10 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
   char sample_paths[8][1024];
   char ref_paths[8][1024]; /* scoring reference: cropped FFV1 if crop active */
 
-  printf("\nOptimal bitrate search (target SSIMULACRA2 p10 >= %.2f)\n",
-         cfg->target_p10);
+  const char *metric_name =
+      (cfg->metric == CRF_METRIC_VMAF) ? "VMAF" : "SSIMULACRA2";
+  printf("\nOptimal bitrate search (target %s p10 >= %.2f)\n",
+         metric_name, cfg->target_p10);
   printf("  Preparing %d samples (%ds each)...\n", n_samples, dur);
 
   /* Build crop filter string if crop is active. encode_video() applies crop
@@ -257,14 +363,40 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
   }
 
   for (int i = 0; i < n_samples; i++) {
-    snprintf(sample_paths[i], sizeof(sample_paths[i]),
+    char raw_path[1024];
+    snprintf(raw_path, sizeof(raw_path),
              "%s/crfsearch_sample_%d.mkv", cfg->workdir, i);
-    if (cut_sample(cfg->input_path, sample_paths[i], offsets[i], dur) < 0) {
+    if (cut_sample(cfg->input_path, raw_path, offsets[i], dur) < 0) {
       result.error = -1;
       return result;
     }
 
-    /* Create cropped FFV1 reference for scoring (once per sample). */
+    /* Transcode the stream-copied sample to lossless FFV1. This decodes
+     * the source codec (e.g. H.264) exactly once, eliminating non-
+     * deterministic error concealment on broken reference frames (the
+     * "mmco: unref short failure" problem with AVC stream copies).
+     * The FFV1 is used as encoder input so both encode and score paths
+     * see identical decoded pixels. */
+    snprintf(sample_paths[i], sizeof(sample_paths[i]),
+             "%s/crfsearch_sample_%d.ffv1.mkv", cfg->workdir, i);
+    if (!file_exists_nonempty(sample_paths[i])) {
+      char cmd[4096];
+      snprintf(cmd, sizeof(cmd),
+               "ffmpeg -y -loglevel error -nostdin -i \"%s\" "
+               "-c:v ffv1 -level 3 -pix_fmt yuv420p10le "
+               "-an -sn -dn \"%s\"",
+               raw_path, sample_paths[i]);
+      int rc = system(cmd);
+      if (rc != 0 || !file_exists_nonempty(sample_paths[i])) {
+        fprintf(stderr,
+                "  CRF search: FFV1 transcode failed (rc=%d)\n", rc);
+        result.error = -1;
+        return result;
+      }
+    }
+
+    /* Scoring reference: cropped FFV1 if crop is active, otherwise the
+     * uncropped FFV1 sample directly. */
     if (has_crop) {
       snprintf(ref_paths[i], sizeof(ref_paths[i]),
                "%s/crfsearch_sample_%d_ref.ffv1.mkv", cfg->workdir, i);
@@ -284,7 +416,6 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
         }
       }
     } else {
-      /* No crop: use the raw sample directly as reference. */
       snprintf(ref_paths[i], sizeof(ref_paths[i]), "%s", sample_paths[i]);
     }
   }
@@ -328,22 +459,37 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
         this_kbps = (double)enc_st.st_size * 8.0 / 1000.0 / (double)dur;
       }
 
-      /* Transcode encoded AV1 -> lossless FFV1 so our libav can decode it. */
-      char ffv1_path[1024];
-      snprintf(ffv1_path, sizeof(ffv1_path),
-               "%s/crfsearch_sample_%d_crf%d.ffv1.mkv", cfg->workdir, i, crf);
-      if (transcode_av1_to_ffv1(enc_path, ffv1_path) < 0)
+      double this_p10 = -1.0;
+
+      if (cfg->metric == CRF_METRIC_VMAF) {
+        /* VMAF: score via system ffmpeg — it can decode AV1 natively. */
+        char vmaf_json[1024];
+        snprintf(vmaf_json, sizeof(vmaf_json),
+                 "%s/crfsearch_sample_%d_crf%d_vmaf.json", cfg->workdir, i, crf);
+        this_p10 = score_vmaf_p10(ref_paths[i], enc_path, vmaf_json);
+      } else {
+        /* SSIMULACRA2: transcode AV1 → FFV1 (our libav lacks dav1d). */
+        char ffv1_path[1024];
+        snprintf(ffv1_path, sizeof(ffv1_path),
+                 "%s/crfsearch_sample_%d_crf%d.ffv1.mkv", cfg->workdir, i, crf);
+        if (transcode_av1_to_ffv1(enc_path, ffv1_path) < 0)
+          continue;
+
+        Ssimu2Result sr =
+            ssimu2_score_files(ref_paths[i], ffv1_path, stride);
+        if (sr.error < 0) {
+          fprintf(stderr,
+                  "\r  CRF %-3d  score failed (err=%d)                       \n",
+                  crf, sr.error);
+          continue;
+        }
+        this_p10 = sr.p10;
+      }
+
+      if (this_p10 < 0.0)
         continue;
 
-      Ssimu2Result sr =
-          ssimu2_score_files(ref_paths[i], ffv1_path, stride);
-      if (sr.error < 0) {
-        fprintf(stderr,
-                "\r  CRF %-3d  score failed (err=%d)                       \n",
-                crf, sr.error);
-        continue;
-      }
-      sum_p10 += sr.p10;
+      sum_p10 += this_p10;
       sum_kbps += this_kbps;
       scored++;
     }
