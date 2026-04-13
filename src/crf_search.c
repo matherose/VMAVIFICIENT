@@ -86,7 +86,7 @@ static int cut_sample(const char *src, const char *dst, int offset_sec,
 
   char cmd[4096];
   snprintf(cmd, sizeof(cmd),
-           "ffmpeg -y -loglevel error -nostdin -ss %d -i \"%s\" -t %d "
+           "ffmpeg -y -loglevel fatal -nostdin -ss %d -i \"%s\" -t %d "
            "-map 0:v:0 -c copy -an -sn -dn \"%s\"",
            offset_sec, src, duration_sec, dst);
   int rc = system(cmd);
@@ -283,10 +283,10 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
     }
   }
 
-  printf("\n  %-7s  %8s  %10s  %7s  %s\n",
-         "CRF", "p10", "kbps", "time", "");
-  printf("  %-7s  %8s  %10s  %7s  %s\n",
-         "-------", "--------", "----------", "-------", "----------");
+  printf("\n  %-7s  %7s  %9s  %7s\n",
+         "CRF", "p10", "kbps", "time");
+  printf("  %-7s  %7s  %9s  %7s\n",
+         "-------", "-------", "---------", "-------");
   fflush(stdout);
 
   /* ---- Probe each CRF ---- */
@@ -370,7 +370,7 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
 
     /* Clear the in-progress line and print final result for this probe */
     fprintf(stderr, "\r");
-    printf("  CRF %-3d  %7.2f   %8.0f    %02d:%02d   %s\n",
+    printf("  CRF %-3d  %7.2f  %9.0f  %3d:%02d  %s\n",
            crf, probe_p10[p], probe_kbps[p],
            probe_sec / 60, probe_sec % 60, eta_str);
     fflush(stdout);
@@ -428,8 +428,8 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
   result.measured_bitrate_kbps = (int)(pred_kbps + 0.5);
 
   int total_sec = (int)difftime(time(NULL), search_start);
-  printf("  %-7s  %8s  %10s  %7s\n",
-         "-------", "--------", "----------", "-------");
+  printf("  %-7s  %7s  %9s  %7s\n",
+         "-------", "-------", "---------", "-------");
   printf("\n  Result: CRF %d -> %d kbps (predicted p10 = %.2f) in %02d:%02d\n",
          rec, result.measured_bitrate_kbps, pred,
          total_sec / 60, total_sec % 60);
