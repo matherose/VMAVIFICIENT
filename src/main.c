@@ -27,6 +27,11 @@
 #include "crf_search.h"
 #include "video_encode.h"
 
+/* Target VMAF p10 for CRF search — "wow at 6 ft" perceptual transparency.
+ * 93 matches ab-av1 community defaults and falls in the "high quality at
+ * normal viewing distance" band. Tune after subjective verification. */
+#define VMAF_TARGET_P10 93.0
+
 static void print_usage(const char *prog) {
   fprintf(
       stderr,
@@ -1011,7 +1016,7 @@ int main(int argc, char *argv[]) {
         }
       }
 
-      /* ---- SSIMULACRA2 CRF search (if no manual bitrate override) ---- */
+      /* ---- VMAF CRF search (if no manual bitrate override) ---- */
       int crf_bitrate = 0;
       if (cli_bitrate <= 0) {
         char crfsearch_dir[4096];
@@ -1026,21 +1031,20 @@ int main(int argc, char *argv[]) {
             .crop = (crop.error == 0) ? &crop : NULL,
             .hdr = &hdr,
             .film_grain = film_grain,
-            .metric = (info.height >= 2160) ? CRF_METRIC_SSIMU2
-                                                : CRF_METRIC_VMAF,
-            .target_p10 = (info.height >= 2160) ? 88.0 : 92.0,
+            .target_p10 = VMAF_TARGET_P10,
             .sample_count = 2,
             .sample_duration = 10,
-            .frame_stride = 1,
-            .crf_probes = {25, 35, 45, 55},
+            .max_probes = 8,
             .workdir = crfsearch_dir,
         };
 
         CrfSearchResult crf_res = crf_search_run(&crf_cfg);
         if (crf_res.error == 0 && crf_res.measured_bitrate_kbps > 0) {
           crf_bitrate = crf_res.measured_bitrate_kbps;
-          printf("\nCRF search complete: CRF %d -> %d kbps (predicted p10=%.3f)\n",
-                 crf_res.recommended_crf, crf_bitrate, crf_res.predicted_p10);
+          printf("\nCRF search complete: CRF %d -> %d kbps "
+                 "(VMAF p10=%.3f, XPSNR p10=%.2f dB, informational)%s\n",
+                 crf_res.recommended_crf, crf_bitrate, crf_res.predicted_p10,
+                 crf_res.xpsnr_p10, crf_res.saturated ? " [saturated]" : "");
         } else {
           fprintf(stderr,
                   "\nCRF search failed (err=%d), falling back to preset bitrate\n",

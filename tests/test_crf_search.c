@@ -38,7 +38,7 @@ int main(int argc, char **argv) {
   /* Blade Runner grain: user said value 8 is correct. */
   int film_grain = 8;
 
-  double target = (info.height >= 2160) ? 80.0 : 74.0;
+  double target = 93.0;
 
   CrfSearchConfig cfg = {
       .input_path = src,
@@ -51,8 +51,7 @@ int main(int argc, char **argv) {
       .target_p10 = target,
       .sample_count = 2,
       .sample_duration = 10,
-      .frame_stride = 1,
-      .crf_probes = {25, 35, 45, 55},
+      .max_probes = 8,
       .workdir = workdir,
   };
 
@@ -65,6 +64,8 @@ int main(int argc, char **argv) {
   printf("target p10     : %.2f\n", target);
   printf("probes ok      : %d\n", r.probes_succeeded);
   printf("recommended CRF: %d\n", r.recommended_crf);
-  printf("predicted p10  : %.3f\n", r.predicted_p10);
+  printf("predicted VMAF : %.3f\n", r.predicted_p10);
+  printf("XPSNR p10 (dB) : %.2f  (informational)\n", r.xpsnr_p10);
+  printf("saturated      : %s\n", r.saturated ? "yes" : "no");
   return 0;
 }
