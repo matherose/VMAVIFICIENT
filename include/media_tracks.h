@@ -58,12 +58,17 @@ void free_media_tracks(MediaTracks *tracks);
  * @brief Select the best audio track for each language present.
  *
  * Compares tracks by codec quality tier, then channel count, then bitrate.
+ * When @p split_french_variants is non-zero, French tracks are grouped by
+ * (language, VFF/VFQ/VFI) detected from the track title, so e.g. MULTi.VF2
+ * sources keep one VFF and one VFQ instead of collapsing to a single "fre".
  *
- * @param tracks     A populated MediaTracks (from @ref get_media_tracks).
- * @param out_count  Receives the number of selected tracks.
+ * @param tracks                 A populated MediaTracks (from @ref get_media_tracks).
+ * @param split_french_variants  1 to separate VFF/VFQ/VFI French tracks, 0 otherwise.
+ * @param out_count              Receives the number of selected tracks.
  * @return Heap-allocated array of TrackInfo (caller must @c free), or NULL.
  */
 TrackInfo *select_best_audio_per_language(const MediaTracks *tracks,
+                                          int split_french_variants,
                                           int *out_count);
 
 /**
@@ -75,6 +80,16 @@ typedef enum {
   FRENCH_AUDIO_VFI, /**< International */
   FRENCH_AUDIO_VO,  /**< Original (movie is French) */
 } FrenchAudioOrigin;
+
+/**
+ * @brief Detect VFF/VFQ/VFI from the track title (e.g. "VFF - DTS-HD...").
+ *
+ * Returns one of the FRENCH_VARIANT_* values from media_naming.h (kept as
+ * int here to avoid a circular include). Callers should cast to
+ * @c FrenchVariant. Returns @c FRENCH_VARIANT_UNKNOWN (0) when no variant
+ * marker is present.
+ */
+int detect_track_french_variant(const TrackInfo *track);
 
 /**
  * @brief Build a display name for an audio track in MKV.

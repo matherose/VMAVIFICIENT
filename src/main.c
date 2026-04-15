@@ -558,7 +558,9 @@ int main(int argc, char *argv[]) {
 
     /* ---- Best audio per language ---- */
     int best_count = 0;
-    TrackInfo *best = select_best_audio_per_language(&tracks, &best_count);
+    int split_fre = (cli_lang_tag == LANG_TAG_MULTI_VF2) ? 1 : 0;
+    TrackInfo *best =
+        select_best_audio_per_language(&tracks, split_fre, &best_count);
     if (best) {
       printf("\nBest audio per language (%d):\n", best_count);
       for (int i = 0; i < best_count; i++) {
@@ -604,6 +606,7 @@ int main(int argc, char *argv[]) {
   SourceType source = cli_source;
   FrenchVariant fv = FRENCH_VARIANT_UNKNOWN;
   FrenchAudioOrigin fr_audio_origin = FRENCH_AUDIO_VFF;
+  LanguageTag resolved_lang_tag = cli_lang_tag;
   bool naming_ok = false;
 
   if (blind) {
@@ -678,6 +681,7 @@ int main(int argc, char *argv[]) {
           lang_tag = ask_language_tag(&tracks);
         }
       }
+      resolved_lang_tag = lang_tag;
 
       build_output_filename(output_name, sizeof(output_name),
                             tmdb.original_title, tmdb.release_year, lang_tag,
@@ -756,8 +760,9 @@ int main(int argc, char *argv[]) {
     {
       /* ---- OPUS audio encoding ---- */
       int enc_best_count = 0;
-      TrackInfo *enc_best =
-          select_best_audio_per_language(&tracks, &enc_best_count);
+      int enc_split_fre = (resolved_lang_tag == LANG_TAG_MULTI_VF2) ? 1 : 0;
+      TrackInfo *enc_best = select_best_audio_per_language(
+          &tracks, enc_split_fre, &enc_best_count);
 
       /* Sort: French first, then English, then others */
       if (enc_best && enc_best_count > 1)
@@ -771,9 +776,28 @@ int main(int argc, char *argv[]) {
       if (enc_best && enc_best_count > 0) {
         printf("\nEncoding %d audio track(s) to OPUS...\n", enc_best_count);
         for (int i = 0; i < enc_best_count && i < 32; i++) {
+          /* In VF2 mode, each French track gets its own variant derived from
+             the track title ("VFF - DTS-HD…", "VFQ - E-AC3…") so VFF and VFQ
+             produce distinct .fre.fr.opus / .fre.ca.opus files. */
+          FrenchVariant track_fv = fv;
+          FrenchAudioOrigin track_origin = fr_audio_origin;
+          if (enc_split_fre &&
+              (strcmp(enc_best[i].language, "fre") == 0 ||
+               strcmp(enc_best[i].language, "fra") == 0)) {
+            FrenchVariant detected =
+                (FrenchVariant)detect_track_french_variant(&enc_best[i]);
+            if (detected != FRENCH_VARIANT_UNKNOWN) {
+              track_fv = detected;
+              track_origin = (detected == FRENCH_VARIANT_VFQ) ? FRENCH_AUDIO_VFQ
+                             : (detected == FRENCH_VARIANT_VFI)
+                                 ? FRENCH_AUDIO_VFI
+                                 : FRENCH_AUDIO_VFF;
+            }
+          }
+
           char opus_name[2048];
           build_opus_filename(opus_name, sizeof(opus_name), base_name,
-                              enc_best[i].language, fv);
+                              enc_best[i].language, track_fv);
 
           snprintf(opus_paths[i], sizeof(opus_paths[i]), "%s%s", output_dir,
                    opus_name);
@@ -781,7 +805,7 @@ int main(int argc, char *argv[]) {
           /* Build display name for MKV track */
           build_audio_track_name(audio_names[i], sizeof(audio_names[i]),
                                  enc_best[i].language, enc_best[i].channels,
-                                 fr_audio_origin);
+                                 track_origin);
 
           printf("  [%d/%d] %s (%s, %dch, %lld kbps) → \"%s\"...\n", i + 1,
                  enc_best_count, enc_best[i].language, enc_best[i].codec,
@@ -808,7 +832,9 @@ int main(int argc, char *argv[]) {
       char srt_langs[64][64];
       int srt_is_forced[64];
       int srt_is_sdh[64];
+      int srt_variant[64]; /* FrenchVariant per track (0 = unknown/non-French) */
       int srt_count = 0;
+      int sub_split_fre = (resolved_lang_tag == LANG_TAG_MULTI_VF2) ? 1 : 0;
 
       if (tracks.error == 0 && tracks.subtitle_count > 0) {
         printf("\nProcessing %d subtitle track(s)...\n", tracks.subtitle_count);
@@ -817,11 +843,30 @@ int main(int argc, char *argv[]) {
           TrackInfo *sub = &tracks.subtitles[i];
           const char *lang = sub->language[0] ? sub->language : "und";
 
+          /* Per-track French variant so VF2 sources keep VFF and VFQ
+             subtitles as separate .fre.fr.srt / .fre.ca.srt files. */
+          FrenchVariant track_fv = fv;
+          FrenchAudioOrigin track_origin = fr_audio_origin;
+          int track_variant_key = 0;
+          if (sub_split_fre &&
+              (strcmp(lang, "fre") == 0 || strcmp(lang, "fra") == 0)) {
+            FrenchVariant detected =
+                (FrenchVariant)detect_track_french_variant(sub);
+            if (detected != FRENCH_VARIANT_UNKNOWN) {
+              track_fv = detected;
+              track_variant_key = (int)detected;
+              track_origin = (detected == FRENCH_VARIANT_VFQ) ? FRENCH_AUDIO_VFQ
+                             : (detected == FRENCH_VARIANT_VFI)
+                                 ? FRENCH_AUDIO_VFI
+                                 : FRENCH_AUDIO_VFF;
+            }
+          }
+
           if (is_text_subtitle(sub)) {
             /* Text subtitle: extract directly to SRT via FFmpeg CLI */
             char srt_fname[2048];
             build_srt_filename(srt_fname, sizeof(srt_fname), base_name, lang,
-                               fv, sub->is_forced, sub->is_sdh);
+                               track_fv, sub->is_forced, sub->is_sdh);
 
             snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s%s",
                      output_dir, srt_fname);
@@ -829,10 +874,11 @@ int main(int argc, char *argv[]) {
             /* Build display name */
             build_subtitle_track_name(
                 srt_names[srt_count], sizeof(srt_names[0]), lang, 1,
-                sub->is_forced, sub->is_sdh, fr_audio_origin);
+                sub->is_forced, sub->is_sdh, track_origin);
             snprintf(srt_langs[srt_count], sizeof(srt_langs[0]), "%s", lang);
             srt_is_forced[srt_count] = sub->is_forced;
             srt_is_sdh[srt_count] = sub->is_sdh;
+            srt_variant[srt_count] = track_variant_key;
 
             /* Check if SRT already exists */
             struct stat srt_st;
@@ -866,10 +912,13 @@ int main(int argc, char *argv[]) {
           } else if (is_pgs_subtitle(sub)) {
             /* PGS bitmap subtitle: OCR with Tesseract */
 
-            /* Check if a text SRT already exists for this language */
+            /* Check if a text SRT already exists for this (lang, variant,
+               forced, sdh) — dedup is per variant so a VF2 source won't
+               drop a VFQ PGS when only a VFF SRT is present. */
             bool srt_exists_for_lang = false;
             for (int j = 0; j < srt_count; j++) {
               if (strcmp(srt_langs[j], lang) == 0 &&
+                  srt_variant[j] == track_variant_key &&
                   srt_is_forced[j] == sub->is_forced &&
                   srt_is_sdh[j] == sub->is_sdh) {
                 srt_exists_for_lang = true;
@@ -885,17 +934,18 @@ int main(int argc, char *argv[]) {
 
             char srt_fname[2048];
             build_srt_filename(srt_fname, sizeof(srt_fname), base_name, lang,
-                               fv, sub->is_forced, sub->is_sdh);
+                               track_fv, sub->is_forced, sub->is_sdh);
 
             snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s%s",
                      output_dir, srt_fname);
 
             build_subtitle_track_name(
                 srt_names[srt_count], sizeof(srt_names[0]), lang, 1,
-                sub->is_forced, sub->is_sdh, fr_audio_origin);
+                sub->is_forced, sub->is_sdh, track_origin);
             snprintf(srt_langs[srt_count], sizeof(srt_langs[0]), "%s", lang);
             srt_is_forced[srt_count] = sub->is_forced;
             srt_is_sdh[srt_count] = sub->is_sdh;
+            srt_variant[srt_count] = track_variant_key;
 
             printf("  OCR PGS #%d %s → \"%s\"...\n", sub->index, lang,
                    srt_names[srt_count]);
@@ -950,6 +1000,7 @@ int main(int argc, char *argv[]) {
         snprintf(srt_langs[srt_count], sizeof(srt_langs[0]), "%s", srt_lang);
         srt_is_forced[srt_count] = forced;
         srt_is_sdh[srt_count] = sdh;
+        srt_variant[srt_count] = 0;
 
         printf("  [SRT]  %s → \"%s\"\n", extra_srt_paths[i],
                srt_names[srt_count]);

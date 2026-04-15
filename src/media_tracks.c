@@ -465,7 +465,32 @@ static bool track_is_better(const TrackInfo *a, const TrackInfo *b) {
   return a->bitrate > b->bitrate;
 }
 
+/* Values must match FrenchVariant in media_naming.h (0=UNKNOWN, 1=VFF, 2=VFQ,
+   3=VFI). Kept numeric here to avoid a circular include. */
+int detect_track_french_variant(const TrackInfo *track) {
+  if (!track)
+    return 0; /* FRENCH_VARIANT_UNKNOWN */
+  const char *t = track->name;
+  if (!t || !t[0])
+    return 0;
+  /* Check VFQ/VFI before VFF so "VFF" doesn't shadow more specific tokens. */
+  if (str_contains_ci(t, "VFQ") || str_contains_ci(t, "qu\xc3\xa9"
+                                                      "becois") ||
+      str_contains_ci(t, "quebec"))
+    return 2; /* FRENCH_VARIANT_VFQ */
+  if (str_contains_ci(t, "VFI"))
+    return 3; /* FRENCH_VARIANT_VFI */
+  if (str_contains_ci(t, "VFF") || str_contains_ci(t, "VF "))
+    return 1; /* FRENCH_VARIANT_VFF */
+  return 0;
+}
+
+static int is_french_lang(const char *lang) {
+  return lang && (strcmp(lang, "fre") == 0 || strcmp(lang, "fra") == 0);
+}
+
 TrackInfo *select_best_audio_per_language(const MediaTracks *tracks,
+                                          int split_french_variants,
                                           int *out_count) {
   *out_count = 0;
   if (!tracks || tracks->audio_count == 0)
@@ -475,23 +500,34 @@ TrackInfo *select_best_audio_per_language(const MediaTracks *tracks,
   if (!best)
     return NULL;
 
+  /* Parallel array of French variant per kept slot (0 for non-French or when
+     splitting is disabled). */
+  int best_variant[tracks->audio_count];
+  for (int i = 0; i < tracks->audio_count; i++)
+    best_variant[i] = 0;
+
   int count = 0;
   for (int i = 0; i < tracks->audio_count; i++) {
     const TrackInfo *t = &tracks->audio[i];
     const char *lang = t->language[0] ? t->language : "und";
+    int variant = 0;
+    if (split_french_variants && is_french_lang(lang))
+      variant = detect_track_french_variant(t);
 
-    /* Check if we already have an entry for this language. */
+    /* Check if we already have an entry for this (language, variant). */
     int found = -1;
     for (int j = 0; j < count; j++) {
       const char *blang = best[j].language[0] ? best[j].language : "und";
-      if (strcmp(lang, blang) == 0) {
+      if (strcmp(lang, blang) == 0 && best_variant[j] == variant) {
         found = j;
         break;
       }
     }
 
     if (found < 0) {
-      best[count++] = *t;
+      best[count] = *t;
+      best_variant[count] = variant;
+      count++;
     } else if (track_is_better(t, &best[found])) {
       best[found] = *t;
     }
