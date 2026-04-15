@@ -1,34 +1,43 @@
 /**
  * @file crf_search.c
- * @brief Orchestrator: cut samples, encode at probe CRFs, score, solve.
+ * @brief Orchestrator: cut samples, encode at adaptive CRFs, score, converge.
  *
  * Strategy:
  *   1. Cut N short sample clips from the source at evenly spaced offsets
- *      using `ffmpeg -ss -t -c copy` (stream copy — fast, bit-exact, snaps
- *      to nearest keyframe).
- *   2. For each probe CRF, encode every sample with encode_video() in CRF
- *      rate-control mode and score the result against its source sample
- *      via VMAF (HD) or SSIMULACRA2 (4K).
- *   3. Aggregate per-CRF p10 scores across samples (mean), then linearly
- *      interpolate to solve for the target p10. Clamp to [20, 40].
+ *      (`ffmpeg -ss -t -c copy`, snaps to nearest keyframe), then transcode
+ *      each to lossless FFV1 so the encoder and scorer see identical pixels.
+ *   2. Probe an initial CRF (30), then a second CRF that brackets the target.
+ *      If both fall on the same side of target, extend the bracket (saturation
+ *      recovery). Then run interpolated bisection until the bracket is narrow
+ *      enough or the probe budget is exhausted.
+ *   3. VMAF is the search-driving metric (PCC ~0.90 vs MOS on AV1 4K per
+ *      arxiv 2511.00969). XPSNR is computed only on the chosen probe as an
+ *      informational sanity check.
  *
  * Dolby Vision RPU is intentionally NOT attached during the search: RPU is
- * metadata that does not affect AV1 coding quality, so calibration is
- * unaffected, and cutting a matching RPU sidecar for each sample would add
- * fragile tooling. The real encode run still uses the RPU.
+ * metadata that does not affect AV1 coding quality. The real encode uses RPU.
  */
 
 #include "crf_search.h"
 
-#include "media_ssimu2.h"
 #include "video_encode.h"
 
 #include <cJSON.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+
+/* ====================================================================== */
+/*  Constants                                                             */
+/* ====================================================================== */
+
+#define CRF_SEARCH_MIN 10
+#define CRF_SEARCH_MAX 60
+#define CRF_SEARCH_INITIAL 30
+#define CRF_SEARCH_BRACKET_MIN_WIDTH 2
 
 /* ====================================================================== */
 /*  Helpers                                                               */
@@ -39,35 +48,10 @@ static int file_exists_nonempty(const char *path) {
   return stat(path, &st) == 0 && st.st_size > 0;
 }
 
-/**
- * @brief Transcode an encoded AV1 file into a lossless FFV1 intermediate
- *        via the system ffmpeg binary.
- *
- * The project's vendored libav is built without libdav1d / libaom, so its
- * native "av1" decoder is hwaccel-only and can't decode AV1 in software.
- * Rather than bloat the vendored ffmpeg build, we use the system ffmpeg
- * (which has libdav1d) to round-trip the AV1 clip through FFV1 — a
- * mathematically lossless intra-only codec that our vendored libav reads
- * natively. This preserves per-pixel values exactly, so SSIMULACRA2 scores
- * are unaffected.
- */
-static int transcode_av1_to_ffv1(const char *src_av1, const char *dst_ffv1) {
-  if (file_exists_nonempty(dst_ffv1))
-    return 0;
-  char cmd[4096];
-  snprintf(cmd, sizeof(cmd),
-           "ffmpeg -y -loglevel error -nostdin -i \"%s\" "
-           "-map 0:v:0 -c:v ffv1 -level 3 -pix_fmt yuv420p10le "
-           "-an -sn -dn \"%s\"",
-           src_av1, dst_ffv1);
-  int rc = system(cmd);
-  if (rc != 0 || !file_exists_nonempty(dst_ffv1)) {
-    fprintf(stderr,
-            "  CRF search: ffv1 transcode failed (rc=%d) for %s\n", rc,
-            dst_ffv1);
-    return -1;
-  }
-  return 0;
+static int clamp_int(int v, int lo, int hi) {
+  if (v < lo) return lo;
+  if (v > hi) return hi;
+  return v;
 }
 
 /**
@@ -94,7 +78,6 @@ static double score_vmaf_p10(const char *ref_path, const char *dis_path,
     return -1.0;
   }
 
-  /* Read JSON file into memory. */
   FILE *fp = fopen(json_path, "rb");
   if (!fp) {
     fprintf(stderr, "  CRF search: cannot open VMAF log %s\n", json_path);
@@ -103,7 +86,7 @@ static double score_vmaf_p10(const char *ref_path, const char *dis_path,
   fseek(fp, 0, SEEK_END);
   long fsize = ftell(fp);
   fseek(fp, 0, SEEK_SET);
-  if (fsize <= 0 || fsize > 100 * 1024 * 1024) { /* sanity: max 100 MB */
+  if (fsize <= 0 || fsize > 100 * 1024 * 1024) {
     fclose(fp);
     return -1.0;
   }
@@ -116,7 +99,6 @@ static double score_vmaf_p10(const char *ref_path, const char *dis_path,
   json_buf[fsize] = '\0';
   fclose(fp);
 
-  /* Parse with cJSON. */
   cJSON *root = cJSON_Parse(json_buf);
   free(json_buf);
   if (!root) {
@@ -168,7 +150,115 @@ static double score_vmaf_p10(const char *ref_path, const char *dis_path,
         scores[j] = tmp;
       }
 
-  int p10_idx = count / 10; /* 10th percentile index */
+  int p10_idx = count / 10;
+  double p10 = scores[p10_idx];
+  free(scores);
+  return p10;
+}
+
+/**
+ * @brief Score a pair of files with XPSNR via system ffmpeg.
+ *
+ * Stats output is one line per frame:
+ *   `n:    1  XPSNR y: 38.50  XPSNR u: 41.10  XPSNR v: 40.55`
+ * (`inf` for identical frames). Returns the p10 of the per-frame composite
+ * `(4·Y + U + V) / 6` in dB — the community-standard weighting used by
+ * SVT-AV1-PSY tooling. Capped per-channel at 60 dB before combining (the
+ * `inf` case for identical blocks).
+ *
+ * Per ab-av1 issue #258, both inputs MUST be opened with explicit `-r <fps>`
+ * to prevent ffmpeg's filter graph from desyncing on VFR input — without
+ * this the score can swing by ~10 dB on identical content.
+ *
+ * @return p10 in dB on success, or -1.0 on failure.
+ */
+static double score_xpsnr_p10(const char *ref_path, const char *dis_path,
+                              const char *stats_path, double fps) {
+  if (fps <= 0.0)
+    fps = 24.0;
+
+  char cmd[4096];
+  snprintf(cmd, sizeof(cmd),
+           "ffmpeg -y -loglevel error -nostdin "
+           "-r %.6f -i \"%s\" -r %.6f -i \"%s\" "
+           "-lavfi \"[0:v][1:v]xpsnr=stats_file=%s\" "
+           "-f null -",
+           fps, dis_path, fps, ref_path, stats_path);
+  int rc = system(cmd);
+  if (rc != 0) {
+    fprintf(stderr, "  CRF search: XPSNR scoring failed (rc=%d)\n", rc);
+    return -1.0;
+  }
+
+  FILE *fp = fopen(stats_path, "r");
+  if (!fp) {
+    fprintf(stderr, "  CRF search: cannot open XPSNR stats %s\n", stats_path);
+    return -1.0;
+  }
+
+  /* First pass: count lines for allocation. */
+  int cap = 256;
+  double *scores = (double *)malloc((size_t)cap * sizeof(double));
+  if (!scores) {
+    fclose(fp);
+    return -1.0;
+  }
+  int count = 0;
+
+  char line[1024];
+  while (fgets(line, sizeof(line), fp)) {
+    /* Locate the three "XPSNR <ch>:" tokens; each may be a float or "inf". */
+    double y = -1.0, u = -1.0, v = -1.0;
+    const char *ty = strstr(line, "XPSNR y:");
+    const char *tu = strstr(line, "XPSNR u:");
+    const char *tv = strstr(line, "XPSNR v:");
+    if (!ty || !tu || !tv)
+      continue;
+    if (sscanf(ty + 8, " %lf", &y) != 1) {
+      if (strstr(ty + 8, "inf")) y = 60.0; else continue;
+    }
+    if (sscanf(tu + 8, " %lf", &u) != 1) {
+      if (strstr(tu + 8, "inf")) u = 60.0; else continue;
+    }
+    if (sscanf(tv + 8, " %lf", &v) != 1) {
+      if (strstr(tv + 8, "inf")) v = 60.0; else continue;
+    }
+    /* Cap each channel at 60 dB to keep "inf" frames from dominating. */
+    if (y > 60.0 || !isfinite(y)) y = 60.0;
+    if (u > 60.0 || !isfinite(u)) u = 60.0;
+    if (v > 60.0 || !isfinite(v)) v = 60.0;
+
+    /* Community-standard weighted composite: (4Y + U + V) / 6. */
+    double composite = (4.0 * y + u + v) / 6.0;
+
+    if (count == cap) {
+      cap *= 2;
+      double *grown = (double *)realloc(scores, (size_t)cap * sizeof(double));
+      if (!grown) {
+        free(scores);
+        fclose(fp);
+        return -1.0;
+      }
+      scores = grown;
+    }
+    scores[count++] = composite;
+  }
+  fclose(fp);
+
+  if (count == 0) {
+    free(scores);
+    return -1.0;
+  }
+
+  for (int i = 0; i < count - 1; i++)
+    for (int j = i + 1; j < count; j++)
+      if (scores[j] < scores[i]) {
+        double tmp = scores[i];
+        scores[i] = scores[j];
+        scores[j] = tmp;
+      }
+
+  int p10_idx = count / 10;
   double p10 = scores[p10_idx];
   free(scores);
   return p10;
@@ -226,9 +316,9 @@ static int encode_sample_at_crf(const CrfSearchConfig *cfg,
       .preset = cfg->preset,
       .film_grain = 0, /* disable grain synthesis for scoring accuracy:
                          * SVT-AV1 film-grain denoises then resynthesises
-                         * a *different* grain pattern; SSIMULACRA2 sees the
+                         * a *different* grain pattern; the metric sees the
                          * pattern mismatch as distortion → artificially low
-                         * scores.  With fg=0, the encoder preserves grain
+                         * scores. With fg=0, the encoder preserves grain
                          * as-is and the metric compares like with like.
                          * The final encode still uses cfg->film_grain. */
       .target_bitrate = 0,
@@ -250,40 +340,103 @@ static int encode_sample_at_crf(const CrfSearchConfig *cfg,
   return 0;
 }
 
-/**
- * @brief Linearly interpolate @p probes (CRF → p10) to solve for @p target.
- *
- * `crfs` is a sorted-ascending array of CRF values; `scores` is the matching
- * p10 for each. As CRF rises, p10 drops, so the relationship is monotonic
- * decreasing. We find the bracketing segment and interpolate.
- *
- * If the target lies outside the probed range we clamp to the closest
- * endpoint (better than extrapolating off a 3-point fit).
- */
-static int solve_crf(const int *crfs, const double *scores, int n,
-                     double target) {
-  if (n <= 0)
-    return -1;
-  if (n == 1)
-    return crfs[0];
+/* ====================================================================== */
+/*  Probe machinery                                                       */
+/* ====================================================================== */
 
-  /* Scores are monotonic-decreasing in CRF. Walk to find bracket. */
-  for (int i = 0; i < n - 1; i++) {
-    double s_hi = scores[i];     /* higher score (lower CRF) */
-    double s_lo = scores[i + 1]; /* lower score (higher CRF) */
-    if (target <= s_hi && target >= s_lo) {
-      double span = s_hi - s_lo;
-      if (span < 1e-6)
-        return crfs[i];
-      double t = (s_hi - target) / span;
-      double crf = crfs[i] + t * (crfs[i + 1] - crfs[i]);
-      return (int)(crf + 0.5);
-    }
+typedef struct {
+  int crf;
+  double p10;        /**< Mean across samples of per-sample VMAF p10. */
+  double kbps;       /**< Mean across samples of per-sample bitrate. */
+  int valid;         /**< Non-zero if this entry was successfully scored. */
+} ProbePoint;
+
+/**
+ * @brief Encode every sample at @p crf, score with VMAF, aggregate to one point.
+ *
+ * Re-uses existing encoded-sample files on disk (deterministic naming), so
+ * a CRF probed earlier in the run is essentially free to re-query.
+ *
+ * @return 0 on success (any sample scored), negative if no sample scored.
+ */
+static int probe_at_crf(const CrfSearchConfig *cfg,
+                        char sample_paths[][1024],
+                        char ref_paths[][1024],
+                        int n_samples, int dur, int crf,
+                        ProbePoint *out) {
+  double sum_p10 = 0.0;
+  double sum_kbps = 0.0;
+  int scored = 0;
+
+  for (int i = 0; i < n_samples; i++) {
+    char enc_path[1024];
+    snprintf(enc_path, sizeof(enc_path), "%s/crfsearch_sample_%d_crf%d.mkv",
+             cfg->workdir, i, crf);
+
+    if (encode_sample_at_crf(cfg, sample_paths[i], enc_path, crf) < 0)
+      continue;
+
+    struct stat enc_st;
+    double this_kbps = 0.0;
+    if (stat(enc_path, &enc_st) == 0 && enc_st.st_size > 0 && dur > 0)
+      this_kbps = (double)enc_st.st_size * 8.0 / 1000.0 / (double)dur;
+
+    char vmaf_json[1024];
+    snprintf(vmaf_json, sizeof(vmaf_json),
+             "%s/crfsearch_sample_%d_crf%d_vmaf.json",
+             cfg->workdir, i, crf);
+    double this_p10 = score_vmaf_p10(ref_paths[i], enc_path, vmaf_json);
+    if (this_p10 < 0.0)
+      continue;
+
+    sum_p10 += this_p10;
+    sum_kbps += this_kbps;
+    scored++;
   }
-  /* Out of range: clamp to the endpoint closest in score. */
-  if (target > scores[0])
-    return crfs[0];
-  return crfs[n - 1];
+
+  if (scored == 0) {
+    out->valid = 0;
+    return -1;
+  }
+  out->crf = crf;
+  out->p10 = sum_p10 / scored;
+  out->kbps = sum_kbps / scored;
+  out->valid = 1;
+  return 0;
+}
+
+/**
+ * @brief Score XPSNR on the first sample of @p crf as an informational check.
+ */
+static double xpsnr_for_crf(const CrfSearchConfig *cfg,
+                            char ref_paths[][1024],
+                            int crf, double fps) {
+  char enc_path[1024];
+  snprintf(enc_path, sizeof(enc_path), "%s/crfsearch_sample_%d_crf%d.mkv",
+           cfg->workdir, 0, crf);
+  if (!file_exists_nonempty(enc_path))
+    return -1.0;
+  char stats_path[1024];
+  snprintf(stats_path, sizeof(stats_path),
+           "%s/crfsearch_sample_%d_crf%d_xpsnr.log", cfg->workdir, 0, crf);
+  return score_xpsnr_p10(ref_paths[0], enc_path, stats_path, fps);
+}
+
+static void print_probe_row(const ProbePoint *p, int probe_idx, int max_probes,
+                            time_t search_start) {
+  int probe_sec = (int)difftime(time(NULL), search_start);
+  char eta_str[32] = "";
+  if (probe_idx > 0 && probe_idx < max_probes) {
+    int avg_per_probe = probe_sec / probe_idx;
+    int eta_sec = avg_per_probe * (max_probes - probe_idx);
+    if (eta_sec > 0)
+      snprintf(eta_str, sizeof(eta_str), "ETA %02d:%02d",
+               eta_sec / 60, eta_sec % 60);
+  }
+  printf("  CRF %-3d  %7.2f  %9.0f  %3d:%02d  %s\n",
+         p->crf, p->p10, p->kbps,
+         probe_sec / 60, probe_sec % 60, eta_str);
+  fflush(stdout);
 }
 
 /* ====================================================================== */
@@ -298,22 +451,11 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
     return result;
   }
 
-  /* Count probes (0-terminated). */
-  int n_probes = 0;
-  while (n_probes < 4 && cfg->crf_probes[n_probes] > 0)
-    n_probes++;
-  if (n_probes == 0) {
-    fprintf(stderr, "  CRF search: no probes configured\n");
-    result.error = -1;
-    return result;
-  }
-
   int n_samples = cfg->sample_count > 0 ? cfg->sample_count : 2;
   int dur = cfg->sample_duration > 0 ? cfg->sample_duration : 10;
-  int stride = cfg->frame_stride > 0 ? cfg->frame_stride : 1;
+  int max_probes = cfg->max_probes > 0 ? cfg->max_probes : 8;
+  if (max_probes > 16) max_probes = 16;
 
-  /* Source duration determines sample placement. Space samples evenly at
-   * 25%, 50%, 75% ... of the timeline; skip the first and last 5%. */
   double src_dur = cfg->info->duration;
   if (src_dur < (double)(dur * 2)) {
     fprintf(stderr,
@@ -323,10 +465,9 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
     return result;
   }
 
-  /* Sample offsets */
+  /* Sample offsets — evenly spaced, skipping first/last 5%. */
   int offsets[8] = {0};
-  if (n_samples > 8)
-    n_samples = 8;
+  if (n_samples > 8) n_samples = 8;
   double usable_start = src_dur * 0.05;
   double usable_end = src_dur * 0.95 - dur;
   if (usable_end <= usable_start)
@@ -336,14 +477,11 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
     offsets[i] = (int)(usable_start + frac * (usable_end - usable_start));
   }
 
-  /* ---- Cut samples ---- */
   char sample_paths[8][1024];
-  char ref_paths[8][1024]; /* scoring reference: cropped FFV1 if crop active */
+  char ref_paths[8][1024];
 
-  const char *metric_name =
-      (cfg->metric == CRF_METRIC_VMAF) ? "VMAF" : "SSIMULACRA2";
-  printf("\nOptimal bitrate search (target %s p10 >= %.2f)\n",
-         metric_name, cfg->target_p10);
+  printf("\nOptimal bitrate search (target VMAF p10 >= %.2f, max %d probes)\n",
+         cfg->target_p10, max_probes);
   printf("  Preparing %d samples (%ds each)...\n", n_samples, dur);
 
   /* Build crop filter string if crop is active. encode_video() applies crop
@@ -372,11 +510,8 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
     }
 
     /* Transcode the stream-copied sample to lossless FFV1. This decodes
-     * the source codec (e.g. H.264) exactly once, eliminating non-
-     * deterministic error concealment on broken reference frames (the
-     * "mmco: unref short failure" problem with AVC stream copies).
-     * The FFV1 is used as encoder input so both encode and score paths
-     * see identical decoded pixels. */
+     * the source codec exactly once, eliminating non-deterministic error
+     * concealment on broken reference frames. */
     snprintf(sample_paths[i], sizeof(sample_paths[i]),
              "%s/crfsearch_sample_%d.ffv1.mkv", cfg->workdir, i);
     if (!file_exists_nonempty(sample_paths[i])) {
@@ -395,8 +530,6 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
       }
     }
 
-    /* Scoring reference: cropped FFV1 if crop is active, otherwise the
-     * uncropped FFV1 sample directly. */
     if (has_crop) {
       snprintf(ref_paths[i], sizeof(ref_paths[i]),
                "%s/crfsearch_sample_%d_ref.ffv1.mkv", cfg->workdir, i);
@@ -426,165 +559,223 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
          "-------", "-------", "---------", "-------");
   fflush(stdout);
 
-  /* ---- Probe each CRF ---- */
-  double probe_p10[4] = {0};
-  double probe_kbps[4] = {0};
-  int probe_ok[4] = {0};
+  /* ---- Adaptive search ---- */
+  ProbePoint probes[16] = {0};
+  int n_probes = 0;
   time_t search_start = time(NULL);
 
-  for (int p = 0; p < n_probes; p++) {
-    int crf = cfg->crf_probes[p];
-    double sum_p10 = 0.0;
-    double sum_kbps = 0.0;
-    int scored = 0;
-    time_t probe_start = time(NULL);
-
-    /* Print in-progress indicator on stderr (overwritten by final result) */
-    fprintf(stderr, "\r  CRF %-3d  probing...                                   ",
-            crf);
-    fflush(stderr);
-
-    for (int i = 0; i < n_samples; i++) {
-      char enc_path[1024];
-      snprintf(enc_path, sizeof(enc_path), "%s/crfsearch_sample_%d_crf%d.mkv",
-               cfg->workdir, i, crf);
-
-      if (encode_sample_at_crf(cfg, sample_paths[i], enc_path, crf) < 0)
-        continue;
-
-      /* Measure encoded bitrate — file size / requested duration. */
-      struct stat enc_st;
-      double this_kbps = 0.0;
-      if (stat(enc_path, &enc_st) == 0 && enc_st.st_size > 0 && dur > 0) {
-        this_kbps = (double)enc_st.st_size * 8.0 / 1000.0 / (double)dur;
-      }
-
-      double this_p10 = -1.0;
-
-      if (cfg->metric == CRF_METRIC_VMAF) {
-        /* VMAF: score via system ffmpeg — it can decode AV1 natively. */
-        char vmaf_json[1024];
-        snprintf(vmaf_json, sizeof(vmaf_json),
-                 "%s/crfsearch_sample_%d_crf%d_vmaf.json", cfg->workdir, i, crf);
-        this_p10 = score_vmaf_p10(ref_paths[i], enc_path, vmaf_json);
-      } else {
-        /* SSIMULACRA2: transcode AV1 → FFV1 (our libav lacks dav1d). */
-        char ffv1_path[1024];
-        snprintf(ffv1_path, sizeof(ffv1_path),
-                 "%s/crfsearch_sample_%d_crf%d.ffv1.mkv", cfg->workdir, i, crf);
-        if (transcode_av1_to_ffv1(enc_path, ffv1_path) < 0)
-          continue;
-
-        Ssimu2Result sr =
-            ssimu2_score_files(ref_paths[i], ffv1_path, stride);
-        if (sr.error < 0) {
-          fprintf(stderr,
-                  "\r  CRF %-3d  score failed (err=%d)                       \n",
-                  crf, sr.error);
-          continue;
-        }
-        this_p10 = sr.p10;
-      }
-
-      if (this_p10 < 0.0)
-        continue;
-
-      sum_p10 += this_p10;
-      sum_kbps += this_kbps;
-      scored++;
-    }
-
-    time_t probe_end = time(NULL);
-    int probe_sec = (int)difftime(probe_end, probe_start);
-
-    if (scored == 0) {
-      fprintf(stderr,
-              "\r  CRF %-3d  failed                                       \n",
-              crf);
-      continue;
-    }
-    probe_p10[p] = sum_p10 / scored;
-    probe_kbps[p] = sum_kbps / scored;
-    probe_ok[p] = 1;
-    result.probes_succeeded++;
-
-    /* ETA: average time per completed probe × remaining probes */
-    int probes_done = p + 1;
-    int probes_left = n_probes - probes_done;
-    int elapsed_total = (int)difftime(probe_end, search_start);
-    char eta_str[32] = "";
-    if (probes_left > 0 && probes_done > 0) {
-      int avg_per_probe = elapsed_total / probes_done;
-      int eta_sec = avg_per_probe * probes_left;
-      snprintf(eta_str, sizeof(eta_str), "ETA %02d:%02d",
-               eta_sec / 60, eta_sec % 60);
-    }
-
-    /* Clear the in-progress line and print final result for this probe */
-    fprintf(stderr, "\r");
-    printf("  CRF %-3d  %7.2f  %9.0f  %3d:%02d  %s\n",
-           crf, probe_p10[p], probe_kbps[p],
-           probe_sec / 60, probe_sec % 60, eta_str);
-    fflush(stdout);
-  }
-
-  if (result.probes_succeeded < 1) {
+  /* Phase A: probe initial CRF, then a second to bracket the target. */
+  ProbePoint p0;
+  if (probe_at_crf(cfg, sample_paths, ref_paths, n_samples, dur,
+                   CRF_SEARCH_INITIAL, &p0) < 0) {
     result.error = -1;
     return result;
   }
+  probes[n_probes++] = p0;
+  result.probes_succeeded++;
+  print_probe_row(&p0, n_probes, max_probes, search_start);
 
-  /* Compact ok probes into a dense array for the solver. */
-  int crfs_ok[4];
-  double scores_ok[4];
-  double kbps_ok[4];
-  int n_ok = 0;
-  for (int p = 0; p < n_probes; p++) {
-    if (probe_ok[p]) {
-      crfs_ok[n_ok] = cfg->crf_probes[p];
-      scores_ok[n_ok] = probe_p10[p];
-      kbps_ok[n_ok] = probe_kbps[p];
-      n_ok++;
+  int second_crf = (p0.p10 >= cfg->target_p10) ? 45 : 20;
+  ProbePoint p1;
+  if (probe_at_crf(cfg, sample_paths, ref_paths, n_samples, dur, second_crf,
+                   &p1) == 0) {
+    probes[n_probes++] = p1;
+    result.probes_succeeded++;
+    print_probe_row(&p1, n_probes, max_probes, search_start);
+  }
+
+  /* Sort probes by CRF ascending (so lower index = lower CRF = higher p10). */
+  for (int i = 0; i < n_probes - 1; i++)
+    for (int j = i + 1; j < n_probes; j++)
+      if (probes[j].crf < probes[i].crf) {
+        ProbePoint t = probes[i]; probes[i] = probes[j]; probes[j] = t;
+      }
+
+  /* Phase C: saturation recovery — extend bracket until target is bracketed
+   * or we hit search-range edges / probe budget. */
+  while (n_probes < max_probes) {
+    int lo_crf = probes[0].crf;
+    int hi_crf = probes[n_probes - 1].crf;
+    double lo_p10 = probes[0].p10;
+    double hi_p10 = probes[n_probes - 1].p10;
+
+    int next_crf = -1;
+    if (lo_p10 < cfg->target_p10 && lo_crf > CRF_SEARCH_MIN) {
+      /* Even the lowest CRF probe falls short — go lower. */
+      next_crf = clamp_int(lo_crf - 5, CRF_SEARCH_MIN, lo_crf - 1);
+    } else if (hi_p10 >= cfg->target_p10 && hi_crf < CRF_SEARCH_MAX) {
+      /* Even the highest CRF probe still meets target — go higher. */
+      next_crf = clamp_int(hi_crf + 10, hi_crf + 1, CRF_SEARCH_MAX);
+    } else {
+      break; /* either bracketed or saturated at search edge */
+    }
+
+    ProbePoint pp;
+    if (probe_at_crf(cfg, sample_paths, ref_paths, n_samples, dur, next_crf,
+                     &pp) == 0) {
+      /* Insert keeping CRF-sorted order. */
+      int ins = n_probes;
+      while (ins > 0 && probes[ins - 1].crf > pp.crf) {
+        probes[ins] = probes[ins - 1];
+        ins--;
+      }
+      probes[ins] = pp;
+      n_probes++;
+      result.probes_succeeded++;
+      print_probe_row(&pp, n_probes, max_probes, search_start);
+    } else {
+      break;
     }
   }
 
-  int rec = solve_crf(crfs_ok, scores_ok, n_ok, cfg->target_p10);
-  if (rec < 20)
-    rec = 20;
-  if (rec > 55)
-    rec = 55;
-
-  result.recommended_crf = rec;
-
-  /* Predicted p10 and kbps at `rec`: linear-interp. Out-of-range clamps to
-   * the nearest endpoint. */
-  double pred = scores_ok[0];
-  double pred_kbps = kbps_ok[0];
-  if (rec <= crfs_ok[0]) {
-    pred = scores_ok[0];
-    pred_kbps = kbps_ok[0];
-  } else if (rec >= crfs_ok[n_ok - 1]) {
-    pred = scores_ok[n_ok - 1];
-    pred_kbps = kbps_ok[n_ok - 1];
-  } else {
-    for (int i = 0; i < n_ok - 1; i++) {
-      if (rec >= crfs_ok[i] && rec <= crfs_ok[i + 1]) {
-        double t =
-            (double)(rec - crfs_ok[i]) / (double)(crfs_ok[i + 1] - crfs_ok[i]);
-        pred = scores_ok[i] + t * (scores_ok[i + 1] - scores_ok[i]);
-        pred_kbps = kbps_ok[i] + t * (kbps_ok[i + 1] - kbps_ok[i]);
+  /* Phase B: interpolated bisection within the bracket. */
+  while (n_probes < max_probes) {
+    /* Find the bracketing pair (probes are CRF-sorted, p10 monotone-decreasing). */
+    int lo_idx = -1, hi_idx = -1;
+    for (int i = 0; i < n_probes - 1; i++) {
+      if (probes[i].p10 >= cfg->target_p10 &&
+          probes[i + 1].p10 < cfg->target_p10) {
+        lo_idx = i;
+        hi_idx = i + 1;
         break;
       }
     }
+    if (lo_idx < 0)
+      break; /* No bracket — saturation case, handled in solve below. */
+
+    int lo_crf = probes[lo_idx].crf;
+    int hi_crf = probes[hi_idx].crf;
+    if (hi_crf - lo_crf <= CRF_SEARCH_BRACKET_MIN_WIDTH)
+      break;
+
+    double span = probes[lo_idx].p10 - probes[hi_idx].p10;
+    int next_crf;
+    if (span < 0.1) {
+      next_crf = (lo_crf + hi_crf) / 2;
+    } else {
+      double t = (probes[lo_idx].p10 - cfg->target_p10) / span;
+      next_crf = lo_crf + (int)(t * (hi_crf - lo_crf) + 0.5);
+    }
+    /* Keep the probe strictly inside the bracket. */
+    if (next_crf <= lo_crf) next_crf = lo_crf + 1;
+    if (next_crf >= hi_crf) next_crf = hi_crf - 1;
+
+    /* Skip if already probed (shouldn't happen given the strict-inside guard,
+     * but defend against pathological cases). */
+    int dup = 0;
+    for (int i = 0; i < n_probes; i++)
+      if (probes[i].crf == next_crf) { dup = 1; break; }
+    if (dup) break;
+
+    ProbePoint pp;
+    if (probe_at_crf(cfg, sample_paths, ref_paths, n_samples, dur, next_crf,
+                     &pp) < 0)
+      break;
+
+    int ins = n_probes;
+    while (ins > 0 && probes[ins - 1].crf > pp.crf) {
+      probes[ins] = probes[ins - 1];
+      ins--;
+    }
+    probes[ins] = pp;
+    n_probes++;
+    result.probes_succeeded++;
+    print_probe_row(&pp, n_probes, max_probes, search_start);
   }
-  result.predicted_p10 = pred;
-  result.measured_bitrate_kbps = (int)(pred_kbps + 0.5);
+
+  /* ---- Solve for recommended CRF ---- */
+  int rec_crf = -1;
+  double rec_p10 = 0.0;
+  double rec_kbps = 0.0;
+  int saturated = 0;
+
+  /* Find bracket. */
+  int lo_idx = -1, hi_idx = -1;
+  for (int i = 0; i < n_probes - 1; i++) {
+    if (probes[i].p10 >= cfg->target_p10 &&
+        probes[i + 1].p10 < cfg->target_p10) {
+      lo_idx = i;
+      hi_idx = i + 1;
+      break;
+    }
+  }
+
+  if (lo_idx >= 0) {
+    /* Interpolate within bracket. */
+    int lo_crf = probes[lo_idx].crf;
+    int hi_crf = probes[hi_idx].crf;
+    double span = probes[lo_idx].p10 - probes[hi_idx].p10;
+    if (span < 0.1) {
+      rec_crf = lo_crf;
+      rec_p10 = probes[lo_idx].p10;
+      rec_kbps = probes[lo_idx].kbps;
+    } else {
+      double t = (probes[lo_idx].p10 - cfg->target_p10) / span;
+      rec_crf = lo_crf + (int)(t * (hi_crf - lo_crf) + 0.5);
+      rec_p10 = probes[lo_idx].p10 +
+                t * (probes[hi_idx].p10 - probes[lo_idx].p10);
+      rec_kbps = probes[lo_idx].kbps +
+                 ((double)(rec_crf - lo_crf) / (double)(hi_crf - lo_crf)) *
+                     (probes[hi_idx].kbps - probes[lo_idx].kbps);
+    }
+  } else {
+    /* No bracket: target is outside the probed range. Clamp. */
+    saturated = 1;
+    if (probes[0].p10 < cfg->target_p10) {
+      /* Target unreachable — even lowest CRF can't meet it. */
+      rec_crf = probes[0].crf;
+      rec_p10 = probes[0].p10;
+      rec_kbps = probes[0].kbps;
+      fprintf(stderr,
+              "\n  WARNING: target VMAF %.2f exceeds encoder capability on "
+              "this content (best probe = %.2f at CRF %d). Using lowest CRF.\n",
+              cfg->target_p10, probes[0].p10, probes[0].crf);
+    } else {
+      /* Content is easy — even highest CRF beats target. */
+      rec_crf = probes[n_probes - 1].crf;
+      rec_p10 = probes[n_probes - 1].p10;
+      rec_kbps = probes[n_probes - 1].kbps;
+      printf(
+          "\n  Note: content was easy to encode — even CRF %d still scores "
+          "%.2f (above target %.2f). Using highest CRF.\n",
+          probes[n_probes - 1].crf, probes[n_probes - 1].p10,
+          cfg->target_p10);
+    }
+  }
+
+  /* ---- Informational XPSNR on closest probe ---- */
+  int closest_idx = 0;
+  int best_diff = 100;
+  for (int i = 0; i < n_probes; i++) {
+    int d = abs(probes[i].crf - rec_crf);
+    if (d < best_diff) {
+      best_diff = d;
+      closest_idx = i;
+    }
+  }
+  double xpsnr_p10 = xpsnr_for_crf(cfg, ref_paths, probes[closest_idx].crf,
+                                   cfg->info->framerate);
+
+  result.recommended_crf = rec_crf;
+  result.predicted_p10 = rec_p10;
+  result.measured_bitrate_kbps = (int)(rec_kbps + 0.5);
+  result.xpsnr_p10 = xpsnr_p10;
+  result.saturated = saturated;
 
   int total_sec = (int)difftime(time(NULL), search_start);
   printf("  %-7s  %7s  %9s  %7s\n",
          "-------", "-------", "---------", "-------");
-  printf("\n  Result: CRF %d -> %d kbps (predicted p10 = %.2f) in %02d:%02d\n",
-         rec, result.measured_bitrate_kbps, pred,
-         total_sec / 60, total_sec % 60);
+  if (xpsnr_p10 > 0.0) {
+    printf("\n  Result: CRF %d -> %d kbps (VMAF p10=%.2f, XPSNR p10=%.2f dB) "
+           "in %02d:%02d, %d probes\n",
+           rec_crf, result.measured_bitrate_kbps, rec_p10, xpsnr_p10,
+           total_sec / 60, total_sec % 60, n_probes);
+  } else {
+    printf("\n  Result: CRF %d -> %d kbps (VMAF p10=%.2f) in %02d:%02d, "
+           "%d probes\n",
+           rec_crf, result.measured_bitrate_kbps, rec_p10,
+           total_sec / 60, total_sec % 60, n_probes);
+  }
 
   return result;
 }

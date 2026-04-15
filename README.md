@@ -7,8 +7,8 @@ Built for the scene-release workflow: automated naming, language tagging, crop d
 ## Features
 
 - **SVT-AV1-HDR encoding** — Uses the [svt-av1-hdr](https://github.com/juliobbv-p/svt-av1-hdr) fork (v4.0.1) with full Dolby Vision RPU passthrough and HDR10+ dynamic metadata
-- **SSIMULACRA2 perceptual quality targeting** — Embedded Rust staticlib wrapping the [ssimulacra2](https://crates.io/crates/ssimulacra2) crate; scores HDR content natively in XYB colorspace without tonemapping
-- **Automatic bitrate calibration** — Cuts sample clips, encodes at multiple CRF probe points, scores with SSIMULACRA2, and interpolates the optimal VBR bitrate for a target perceptual quality (p10 >= 92)
+- **VMAF-driven CRF search** — Cuts sample clips, encodes at adaptively chosen CRF values using interpolated binary search, and converges on the lowest CRF that meets a target VMAF p10 (default 93)
+- **XPSNR sanity-check** — Reports XPSNR p10 (dB) on the chosen probe as informational cross-metric output
 - **Film grain synthesis** — Analyzes source grain characteristics and applies matching SVT-AV1 grain synthesis for transparent encoding of grainy content
 - **Dolby Vision & HDR10+** — RPU extraction via [libdovi](https://github.com/quietvoid/dovi_tool), HDR10+ metadata via [libhdr10plus](https://github.com/quietvoid/hdr10plus_tool), full passthrough to AV1
 - **Opus audio** — Full VBR at 56 kbps/channel, compression level 10, multichannel mapping for 5.1/7.1
@@ -28,9 +28,9 @@ Source MKV/REMUX
   [media_analysis] Grain score analysis
        |
        v
-  [crf_search]     Cut samples -> encode at CRF {25,35,45,55}
-       |            -> score with SSIMULACRA2 (p10 metric)
-       |            -> interpolate optimal VBR bitrate
+  [crf_search]     Cut samples -> adaptive CRF probes (interpolated bisection)
+       |            -> score with VMAF (p10 metric) + XPSNR (informational)
+       |            -> derive optimal VBR bitrate at target VMAF
        v
   [video_encode]   SVT-AV1-HDR encode (VBR, preset 4, 10-bit)
        |            + DV RPU injection per-frame
@@ -56,12 +56,13 @@ All major dependencies are built from source via CMake `ExternalProject`:
 | [libdovi](https://github.com/quietvoid/dovi_tool) | 3.3.2 | Dolby Vision RPU parsing |
 | [libhdr10plus](https://github.com/quietvoid/hdr10plus_tool) | 2.1.5 | HDR10+ metadata |
 | [Opus](https://opus-codec.org/) | 1.5.2 | Audio codec |
-| [cJSON](https://github.com/DaveGamble/cJSON) | 1.7.18 | JSON parsing (TMDB) |
-| [ssimulacra2](https://crates.io/crates/ssimulacra2) | 0.5.1 | Perceptual quality metric (Rust) |
-| [yuvxyb](https://crates.io/crates/yuvxyb) | 0.4.2 | YUV-to-XYB conversion (Rust) |
+| [cJSON](https://github.com/DaveGamble/cJSON) | 1.7.18 | JSON parsing (TMDB / VMAF) |
+
+Perceptual scoring uses FFmpeg's built-in `libvmaf` and `xpsnr` filters (bundled in the FFmpeg build).
 
 System requirements:
-- **Rust** toolchain (for vmav_ssimu2 staticlib)
+
+- **Rust** toolchain (for libdovi / libhdr10plus via cargo-c)
 - **Tesseract** + **Leptonica** (for OCR subtitle extraction)
 - **pkg-config**, **CMake** >= 3.20, **Ninja**
 - **curl** (for TMDB API)
@@ -85,7 +86,7 @@ The build fetches and compiles all dependencies automatically. First build takes
 # With TMDB naming
 ./build/vmavificient --tmdb 335984 input.mkv
 
-# Override bitrate (skips SSIMULACRA2 search)
+# Override bitrate (skips CRF search)
 ./build/vmavificient --bitrate 2500 input.mkv
 
 # Quality preset for specific content types
@@ -118,12 +119,12 @@ release_group = MyGroup
 When no `--bitrate` is specified, VMAVIFICIENT runs an automatic quality calibration:
 
 1. **Sample** — Cuts 2 x 10s clips from the source at different points in the timeline
-2. **Encode** — Encodes each sample at 4 CRF probe values (25, 35, 45, 55) using the full SVT-AV1-HDR pipeline with the same preset and film grain settings
-3. **Score** — Measures perceptual quality of each encoded sample against its reference using SSIMULACRA2 (10th percentile per-frame score)
-4. **Solve** — Interpolates the CRF-to-quality curve, finds the CRF matching the target quality (p10 >= 92), and derives the corresponding VBR bitrate
+2. **Bracket** — Encodes at CRF 30, then CRF 45 or 20 depending on score, to bracket the target VMAF p10
+3. **Bisect** — Linearly interpolates the next probe CRF from the current bracket, encodes, and tightens the bracket — stops when width <= 2 CRF units or probe budget is hit
+4. **Report** — Emits the recommended CRF + predicted VBR bitrate, plus an informational XPSNR p10 reading on the chosen probe for cross-metric sanity
 5. **Encode** — Runs the final full encode at the derived bitrate
 
-SSIMULACRA2 operates natively in XYB colorspace, handling HDR/PQ content without tonemapping — unlike VMAF which requires conversion to SDR for HDR sources.
+VMAF is the best-correlated full-reference metric for AV1 at 4K ([arxiv 2511.00969](https://arxiv.org/html/2511.00969) measures PCC 0.902 vs subjective MOS). For HDR/PQ sources, VMAF operates on the luma plane which preserves its correlation with perceived quality in practice.
 
 ## License
 
@@ -139,9 +140,7 @@ This means you can use, modify, and distribute this software freely, including i
 - [libhdr10plus](https://github.com/quietvoid/hdr10plus_tool): MIT
 - [Opus](https://opus-codec.org/): BSD-3-Clause
 - [cJSON](https://github.com/DaveGamble/cJSON): MIT
-- [ssimulacra2](https://crates.io/crates/ssimulacra2) (Rust crate): BSD-3-Clause
-- [yuvxyb](https://crates.io/crates/yuvxyb) (Rust crate): BSD-2-Clause
 
 ## Credits
 
-Built with significant help from [Claude](https://claude.ai) (Anthropic) — SSIMULACRA2 integration, CRF search orchestrator, Rust FFI layer, and encoding pipeline.
+Built with significant help from [Claude](https://claude.ai) (Anthropic) — VMAF CRF search orchestrator and encoding pipeline.
