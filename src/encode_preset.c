@@ -678,16 +678,22 @@ static int lerp_grain(double score, double lo_score, double hi_score,
 }
 
 int get_film_grain_from_score(double grain_score) {
+  /* Calibrated against grav1synth multi-sample-max output (src/media_analysis.c).
+   * Reference points:
+   *   Blade Runner 2049 REMUX  -> 0.108
+   *   Frozen II REMUX          -> 0.136
+   * Thresholds are lower and denser than a naive 0..1 mapping because
+   * grav1synth rarely produces >0.25 even for heavily-grained sources. */
   if (grain_score <= 0.05)
     return 0;
+  if (grain_score <= 0.10)
+    return lerp_grain(grain_score, 0.05, 0.10, 4, 10);
   if (grain_score <= 0.15)
-    return lerp_grain(grain_score, 0.05, 0.15, 4, 8);
-  if (grain_score <= 0.30)
-    return lerp_grain(grain_score, 0.15, 0.30, 10, 18);
-  if (grain_score <= 0.50)
-    return lerp_grain(grain_score, 0.30, 0.50, 20, 28);
+    return lerp_grain(grain_score, 0.10, 0.15, 10, 20);
+  if (grain_score <= 0.25)
+    return lerp_grain(grain_score, 0.15, 0.25, 20, 28);
   if (grain_score <= 1.0)
-    return lerp_grain(grain_score, 0.50, 1.0, 30, 35);
+    return lerp_grain(grain_score, 0.25, 1.0, 30, 35);
   return 35;
 }
 

@@ -150,6 +150,7 @@ set(JPEG_INSTALL    "${DEPS_PREFIX}/libjpeg")
 set(TIFF_INSTALL    "${DEPS_PREFIX}/libtiff")
 set(LEPT_INSTALL    "${DEPS_PREFIX}/leptonica")
 set(TESS_INSTALL    "${DEPS_PREFIX}/tesseract")
+set(GRAV1SYNTH_INSTALL "${DEPS_PREFIX}/grav1synth")
 
 # CMake validates INTERFACE_INCLUDE_DIRECTORIES at configure time,
 # so the directories must already exist even though headers arrive later.
@@ -189,6 +190,7 @@ set(LIBJPEG_GIT_TAG         "3.1.0")
 set(LIBTIFF_GIT_TAG         "v4.7.0")
 set(LEPTONICA_GIT_TAG       "1.85.0")
 set(TESSERACT_GIT_TAG       "5.5.0")
+set(GRAV1SYNTH_GIT_REV      "7443e16dad97cc1f47fd7abcd0554e92978b935d")
 
 # ===========================================================================
 # cJSON  (lightweight JSON parser – fetched via FetchContent)
@@ -664,6 +666,32 @@ ExternalProject_Add(ep_svtav1
 )
 
 # ===========================================================================
+# grav1synth  (AV1 film grain analyzer – Rust, installed as a bundled binary)
+# The binary is invoked as a subprocess from our C code for accurate per-source
+# grain measurement (see src/media_analysis.c). Only the binary is shipped;
+# there is no library interface.
+# ===========================================================================
+set(GRAV1SYNTH_BIN "${GRAV1SYNTH_INSTALL}/bin/grav1synth")
+ExternalProject_Add(ep_grav1synth
+    DOWNLOAD_COMMAND  ""
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND     ""
+    PREFIX            "${DEPS_PREFIX}/build/grav1synth"
+    INSTALL_COMMAND
+        ${CMAKE_COMMAND} -E env
+            "PKG_CONFIG_PATH=${FF_INSTALL}/lib/pkgconfig"
+        ${CARGO} install
+            --git https://github.com/rust-av/grav1synth.git
+            --rev ${GRAV1SYNTH_GIT_REV}
+            --locked
+            --root ${GRAV1SYNTH_INSTALL}
+            grav1synth
+    BUILD_BYPRODUCTS "${GRAV1SYNTH_BIN}"
+    LOG_INSTALL     TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE
+)
+
+# ===========================================================================
 # IMPORTED targets – FFmpeg libraries
 # ===========================================================================
 set(_ff_libs avutil avcodec avformat avfilter swscale swresample)
@@ -797,6 +825,12 @@ add_executable(vmavificient
 
 target_compile_options(vmavificient PRIVATE ${VMAV_OPT_FLAGS})
 target_link_options(vmavificient PRIVATE ${VMAV_LINK_FLAGS})
+
+# grav1synth is invoked as a subprocess from src/media_analysis.c;
+# expose its absolute install path via a build-time define.
+target_compile_definitions(vmavificient PRIVATE
+    "VMAV_GRAV1SYNTH_BIN=\"${GRAV1SYNTH_BIN}\"")
+add_dependencies(vmavificient ep_grav1synth)
 
 # tesseract is C++; use the C++ linker driver so libc++/libstdc++ is pulled in.
 set_target_properties(vmavificient PROPERTIES LINKER_LANGUAGE CXX)
