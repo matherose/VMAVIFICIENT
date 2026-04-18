@@ -27,9 +27,11 @@
 #include "crf_search.h"
 #include "video_encode.h"
 
-/* Target VMAF p10 for CRF search — "wow at 6 ft" perceptual transparency.
- * 93 matches ab-av1 community defaults and falls in the "high quality at
- * normal viewing distance" band. Tune after subjective verification. */
+/* Target VMAF p10 for CRF search — streaming-grade quality at 6–9 ft
+ * viewing distance.  93 is the perceptual saturation floor for most
+ * viewers on a living-room TV; beyond this, extra bitrate buys
+ * diminishing returns.  The target is further adjusted per-preset
+ * and grain level in crf_search.c. */
 #define VMAF_TARGET_P10 93.0
 
 static void print_usage(const char *prog) {
@@ -593,7 +595,13 @@ int main(int argc, char *argv[]) {
     printf("  Frames analyzed: %d\n", grain.frames_analyzed);
     printf("  Avg noise:       %.4f\n", grain.avg_noise);
     printf("  Grain score:     %.4f\n", grain.grain_score);
-    film_grain = get_film_grain_from_score(grain.grain_score);
+    printf("  Per-window:      ");
+    for (int i = 0; i < GRAIN_NUM_WINDOWS; i++)
+      printf("%.4f%s", grain.per_window_scores[i],
+             i < GRAIN_NUM_WINDOWS - 1 ? "  " : "\n");
+    printf("  Grain variance:  %.6f\n", grain.grain_variance);
+    printf("  Chroma grain:    %.4f\n", grain.chroma_grain_score);
+    film_grain = get_film_grain_from_score(grain.grain_score, cli_quality);
     printf("  Film grain:      %d\n", film_grain);
   }
 
@@ -1082,6 +1090,8 @@ int main(int argc, char *argv[]) {
             .crop = (crop.error == 0) ? &crop : NULL,
             .hdr = &hdr,
             .film_grain = film_grain,
+            .grain_score = grain.error == 0 ? grain.grain_score : 0.0,
+            .quality = cli_quality,
             .target_p10 = VMAF_TARGET_P10,
             .sample_count = 2,
             .sample_duration = 10,
@@ -1115,8 +1125,10 @@ int main(int argc, char *argv[]) {
                 : crf_bitrate > 0
                     ? crf_bitrate
                     : get_target_bitrate(
-                          info.height,
-                          grain.error == 0 ? grain.grain_score : 0.0);
+                          info.width, info.height, info.framerate,
+                          grain.error == 0 ? grain.grain_score : 0.0,
+                          hdr.has_hdr10 || hdr.has_dolby_vision,
+                          cli_quality);
         printf("\nEncoding video to AV1 (%d kbps, %s, %s)...\n", bitrate,
                quality_type_to_string(cli_quality),
                info.height >= 2160 ? "4K" : "HD");
@@ -1127,6 +1139,7 @@ int main(int argc, char *argv[]) {
             .rpu_path = rpu_path[0] ? rpu_path : NULL,
             .preset = enc_preset,
             .film_grain = film_grain,
+            .grain_score = grain.error == 0 ? grain.grain_score : 0.0,
             .target_bitrate = bitrate,
             .info = &info,
             .crop = (crop.error == 0) ? &crop : NULL,

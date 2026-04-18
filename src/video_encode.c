@@ -519,6 +519,78 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
       svt_config.qp_scale_compress_strength += 0.5;
   }
 
+  /* ---- Grain-adaptive encoder tuning ----
+   *
+   * Adjusts multiple encoder knobs based on the measured grain score to
+   * extract the most quality at the target bitrate.  The preset provides
+   * the baseline; these overrides fine-tune for the actual content.
+   *
+   * Bands:
+   *   Low  (<0.08): clean digital — keep preset defaults, let CDEF and
+   *                  restoration do their job.
+   *   Med  (0.08–0.15): moderate noise/texture — ease off filters that
+   *                  would blur grain, gently boost texture preservation.
+   *   High (>0.15): heavy grain — aggressively preserve texture, disable
+   *                  restoration, minimize temporal filtering smear.
+   */
+  double gs = config->grain_score;
+
+  if (gs > 0.15) {
+    /* --- High grain --- */
+
+    /* CDEF: strong reduction — grain IS the texture, don't blur it. */
+    int cd = (int)svt_config.cdef_scaling - 6;
+    svt_config.cdef_scaling = (uint8_t)(cd < 4 ? 4 : cd);
+
+    /* Temporal filter: disable or minimize — TF smears grain into mush. */
+    if (svt_config.enable_tf && svt_config.tf_strength > 0)
+      svt_config.tf_strength = 0;
+    if (svt_config.kf_tf_strength > 0)
+      svt_config.kf_tf_strength = 0;
+
+    /* Restoration filter: OFF — Wiener/self-guided filters destroy grain. */
+    svt_config.enable_restoration_filtering = 0;
+
+    /* Noise normalization: boost to preserve AC detail in RD decisions. */
+    if (svt_config.noise_norm_strength < 4)
+      svt_config.noise_norm_strength++;
+
+    /* AC bias: boost to weight RD toward preserving high-frequency texture. */
+    svt_config.ac_bias = fmin(svt_config.ac_bias + 1.0, 8.0);
+
+    /* Noise-adaptive filtering: CDEF-only mode (skip restoration). */
+    svt_config.noise_adaptive_filtering = 3;
+
+    /* QP compression: tighten for temporal consistency on grainy content. */
+    svt_config.qp_scale_compress_strength =
+        fmin(svt_config.qp_scale_compress_strength + 0.5, 8.0);
+
+  } else if (gs > 0.08) {
+    /* --- Medium grain --- */
+
+    /* CDEF: moderate reduction. */
+    int cd = (int)svt_config.cdef_scaling - 3;
+    svt_config.cdef_scaling = (uint8_t)(cd < 4 ? 4 : cd);
+
+    /* Temporal filter: reduce by one step if active. */
+    if (svt_config.enable_tf && svt_config.tf_strength > 0)
+      svt_config.tf_strength--;
+    if (svt_config.kf_tf_strength > 1)
+      svt_config.kf_tf_strength--;
+
+    /* Noise normalization: slight boost. */
+    if (svt_config.noise_norm_strength < 3)
+      svt_config.noise_norm_strength++;
+
+    /* AC bias: gentle boost. */
+    svt_config.ac_bias = fmin(svt_config.ac_bias + 0.5, 8.0);
+
+    /* QP compression: slight tighten. */
+    svt_config.qp_scale_compress_strength =
+        fmin(svt_config.qp_scale_compress_strength + 0.3, 8.0);
+  }
+  /* Low grain (<0.08): keep preset defaults — no adjustments needed. */
+
   ret = svt_av1_enc_set_parameter(svt_handle, &svt_config);
   if (ret != EB_ErrorNone) {
     fprintf(stderr, "  Video Error: svt_av1_enc_set_parameter failed (%d)\n",

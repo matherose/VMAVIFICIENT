@@ -95,32 +95,38 @@ typedef struct {
 const EncodePreset *get_encode_preset(QualityType quality, int video_height);
 
 /**
- * @brief Compute target bitrate (kbps) from resolution and grain score.
+ * @brief Compute target bitrate (kbps) using a preset-aware BPP model.
  *
- * HD:  1500 kbps (low grain) to 2000 kbps (high grain).
- * 4K:  3000 kbps (low grain) to 3500 kbps (high grain).
- * Heavy grain (score > 0.5) adds 500 kbps.
+ * Base BPP varies by content type: animation compresses efficiently (0.010),
+ * digital live-action needs moderate headroom (0.0125), and analog film
+ * needs more bits to preserve grain texture (0.015–0.020).  Grain sensitivity
+ * and HDR overhead are also preset-dependent.
  *
- * @param video_height  Video height in pixels.
+ * This is only used when CRF search fails or is skipped.
+ *
+ * @param width         Video width in pixels.
+ * @param height        Video height in pixels.
+ * @param framerate     Frame rate (fps); defaults to 24 if <= 0.
  * @param grain_score   Composite grain score in [0, 1].
+ * @param is_hdr        Non-zero if HDR content.
+ * @param quality       Content quality type.
  * @return Target bitrate in kbps.
  */
-int get_target_bitrate(int video_height, double grain_score);
+int get_target_bitrate(int width, int height, double framerate,
+                       double grain_score, int is_hdr, QualityType quality);
 
 /**
  * @brief Compute film grain synthesis level from a grain analysis score.
  *
- * Mapping (benchmarked):
- *   - Score 0.00–0.05 → 0  (clean digital)
- *   - Score 0.05–0.15 → 4–8
- *   - Score 0.15–0.30 → 10–18
- *   - Score 0.30–0.50 → 20–28
- *   - Score > 0.50    → 30–35 (heavy analog grain)
+ * The mapping is preset-aware: analog film presets trust the measured grain
+ * and map it aggressively, digital/live-action presets are moderate, and
+ * animation clamps to near-zero (the detector sees texture, not grain).
  *
  * @param grain_score  Composite grain score in [0, 1].
+ * @param quality      Content quality type (affects the mapping curve).
  * @return Film grain synthesis level (0–50).
  */
-int get_film_grain_from_score(double grain_score);
+int get_film_grain_from_score(double grain_score, QualityType quality);
 
 /**
  * @brief Convert a quality type enum to its display string.
