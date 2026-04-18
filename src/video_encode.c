@@ -261,6 +261,36 @@ static void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg,
       cfg->chroma_qindex_offsets[i] =
           (int32_t)p->temporal_layer_chroma_qindex_offset;
 
+  /* Keyframe QP offsets — require use_fixed_qindex_offsets to take effect.
+   * Mode 2 applies offsets on top of auto-derived QP (compatible with CRF). */
+  if (p->key_frame_qindex_offset != 0 ||
+      p->key_frame_chroma_qindex_offset != 0) {
+    cfg->use_fixed_qindex_offsets = 2;
+    cfg->key_frame_qindex_offset = (int32_t)p->key_frame_qindex_offset;
+    cfg->key_frame_chroma_qindex_offset =
+        (int32_t)p->key_frame_chroma_qindex_offset;
+  }
+
+  /* DC coefficient QP offsets are NOT set — they apply to every frame as
+   * delta_q_dc which creates a large DC/AC quality mismatch, destabilizing
+   * the RD optimizer and causing high bitrate with poor VMAF. */
+
+  /* VBR rate shaping — only meaningful in VBR mode */
+  if (crf <= 0) {
+    if (p->vbr_max_section_pct > 0)
+      cfg->vbr_max_section_pct = (uint32_t)p->vbr_max_section_pct;
+    /* gop_constraint_rc is intentionally NOT set — the feature is flagged
+     * as work-in-progress in SVT-AV1-HDR and not ready for production. */
+  }
+
+  /* Startup mini-GOP tuning — CRF/CQP mode only */
+  if (crf > 0) {
+    if (p->startup_mg_size > 0)
+      cfg->startup_mg_size = (uint8_t)p->startup_mg_size;
+    if (p->startup_qp_offset != 0)
+      cfg->startup_qp_offset = (int8_t)p->startup_qp_offset;
+  }
+
   /* Film grain from grain score analysis */
   cfg->film_grain_denoise_strength = (uint32_t)film_grain;
 }

@@ -79,6 +79,23 @@ typedef struct {
   int temporal_layer_chroma_qindex_offset; /**< Chroma QIndex offset applied to
                                               all temporal layers (0–6,
                                               -1=default). */
+
+  /* Keyframe QP offsets — negative gives I-frames more bits. */
+  int key_frame_qindex_offset;        /**< Luma QP offset for keyframes (-64 to 63, 0=default). */
+  int key_frame_chroma_qindex_offset;  /**< Chroma QP offset for keyframes (-64 to 63, 0=default). */
+
+  /* DC coefficient QP offsets — affect luminance/color smoothness. */
+  int luma_y_dc_qindex_offset;   /**< Luma DC offset (-64 to 63, 0=default). */
+  int chroma_u_dc_qindex_offset; /**< Cb DC offset (-64 to 63, 0=default). */
+  int chroma_v_dc_qindex_offset; /**< Cr DC offset (-64 to 63, 0=default). */
+
+  /* VBR rate shaping */
+  int vbr_max_section_pct; /**< Max GOP bitrate as % of target (0–10000, -1=default 2000). */
+  int gop_constraint_rc;   /**< Per-GOP rate matching (0–1, -1=default). */
+
+  /* Startup mini-GOP tuning */
+  int startup_mg_size;   /**< First mini-GOP size after KF: 0=off, 2/3/4 (0=default). */
+  int startup_qp_offset; /**< QP offset for startup mini-GOP (-63 to 63, 0=default). */
 } EncodePreset;
 
 /**
