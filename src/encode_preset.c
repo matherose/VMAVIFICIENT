@@ -642,26 +642,69 @@ const EncodePreset *get_encode_preset(QualityType quality, int video_height) {
 /*  Target bitrate from resolution and grain score                        */
 /* ====================================================================== */
 
-int get_target_bitrate(int video_height, double grain_score) {
-  int is_4k = (video_height >= 2160);
-  int base_lo = is_4k ? 3000 : 1500;
-  int base_hi = is_4k ? 3500 : 2000;
+int get_target_bitrate(int width, int height, double framerate,
+                       double grain_score, int is_hdr, QualityType quality) {
+  double fps = framerate > 0.0 ? framerate : 24.0;
+  double pixels = (double)width * (double)height;
 
-  /* Interpolate between lo and hi based on grain score (0..0.5 range) */
-  double t = grain_score;
-  if (t < 0.0)
-    t = 0.0;
-  if (t > 0.5)
-    t = 0.5;
-  t = t / 0.5; /* normalize to 0..1 */
+  double bpp;
+  double grain_weight; /* How much grain_score adds to BPP. */
+  double hdr_mult;     /* Multiplier for HDR overhead. */
 
-  int bitrate = base_lo + (int)(t * (base_hi - base_lo) + 0.5);
+  /* BPP calibrated against real CRF search results at preset 4 / VMAF p10 93.
+   * Reference targets at 4K 24fps:
+   *   Animation       ~2000 kbps  (0.010 bpp)
+   *   Live-action     ~2500 kbps  (0.0125 bpp)
+   *   Super35 digital ~2500 kbps  (0.0125 bpp)
+   *   Super35 analog  ~3000 kbps  (0.015 bpp)
+   *   IMAX digital    ~3000 kbps  (0.015 bpp)
+   *   IMAX analog     ~4000 kbps  (0.020 bpp) */
+  switch (quality) {
+  case QUALITY_ANIMATION:
+    bpp = 0.010;
+    grain_weight = 0.0;   /* grain score is texture, not noise */
+    hdr_mult = 1.10;
+    break;
 
-  /* Heavy grain bonus */
-  if (grain_score > 0.5)
-    bitrate += 500;
+  case QUALITY_SUPER35_ANALOG:
+    bpp = 0.015;
+    grain_weight = 0.02;
+    hdr_mult = 1.15;
+    break;
 
-  return bitrate;
+  case QUALITY_IMAX_ANALOG:
+    bpp = 0.020;
+    grain_weight = 0.02;
+    hdr_mult = 1.15;
+    break;
+
+  case QUALITY_IMAX_DIGITAL:
+    bpp = 0.015;
+    grain_weight = 0.01;
+    hdr_mult = 1.15;
+    break;
+
+  case QUALITY_LIVEACTION:
+  case QUALITY_SUPER35_DIGITAL:
+  default:
+    bpp = 0.0125;
+    grain_weight = 0.01;
+    hdr_mult = 1.15;
+    break;
+  }
+
+  bpp += grain_score * grain_weight;
+
+  if (is_hdr)
+    bpp *= hdr_mult;
+
+  double bitrate = pixels * fps * bpp / 1000.0; /* kbps */
+
+  /* Sanity floor: never recommend less than 1000 kbps. */
+  if (bitrate < 1000.0)
+    bitrate = 1000.0;
+
+  return (int)(bitrate + 0.5);
 }
 
 /* ====================================================================== */
@@ -677,24 +720,60 @@ static int lerp_grain(double score, double lo_score, double hi_score,
   return lo_val + (int)(t * (hi_val - lo_val) + 0.5);
 }
 
-int get_film_grain_from_score(double grain_score) {
-  /* Calibrated against grav1synth multi-sample-max output (src/media_analysis.c).
-   * Reference points:
-   *   Blade Runner 2049 REMUX  -> 0.108
-   *   Frozen II REMUX          -> 0.136
-   * Thresholds are lower and denser than a naive 0..1 mapping because
-   * grav1synth rarely produces >0.25 even for heavily-grained sources. */
-  if (grain_score <= 0.05)
-    return 0;
-  if (grain_score <= 0.10)
-    return lerp_grain(grain_score, 0.05, 0.10, 4, 10);
-  if (grain_score <= 0.15)
-    return lerp_grain(grain_score, 0.10, 0.15, 10, 20);
-  if (grain_score <= 0.25)
-    return lerp_grain(grain_score, 0.15, 0.25, 20, 28);
-  if (grain_score <= 1.0)
-    return lerp_grain(grain_score, 0.25, 1.0, 30, 35);
-  return 35;
+/**
+ * Analog film (Super 35 / IMAX shot on film): the grain is real and
+ * artistically intentional.  Map aggressively — the detector is measuring
+ * actual film stock noise.  Reference: Blade Runner 2049 REMUX -> 0.108.
+ */
+static int film_grain_analog(double s) {
+  if (s <= 0.04) return 0;
+  if (s <= 0.08) return lerp_grain(s, 0.04, 0.08, 4, 10);
+  if (s <= 0.12) return lerp_grain(s, 0.08, 0.12, 10, 20);
+  if (s <= 0.20) return lerp_grain(s, 0.12, 0.20, 20, 30);
+  if (s <= 1.00) return lerp_grain(s, 0.20, 1.00, 30, 40);
+  return 40;
+}
+
+/**
+ * Digital live-action / Super 35 digital / IMAX digital: minimal real grain,
+ * detector mostly sees sensor noise and compression artifacts.
+ * Moderate mapping — some synthesis helps mask banding, but don't overdo it.
+ */
+static int film_grain_digital(double s) {
+  if (s <= 0.05) return 0;
+  if (s <= 0.10) return lerp_grain(s, 0.05, 0.10, 2, 6);
+  if (s <= 0.15) return lerp_grain(s, 0.10, 0.15, 6, 10);
+  if (s <= 0.25) return lerp_grain(s, 0.15, 0.25, 10, 16);
+  if (s <= 1.00) return lerp_grain(s, 0.25, 1.00, 16, 22);
+  return 22;
+}
+
+/**
+ * Animation (CGI, hand-drawn, anime): zero real grain.  What the detector
+ * measures is texture detail, dithering, or compression artifacts — NOT noise.
+ * Film grain synthesis would degrade the clean look.  Cap very low.
+ */
+static int film_grain_animation(double s) {
+  if (s <= 0.10) return 0;
+  if (s <= 0.25) return lerp_grain(s, 0.10, 0.25, 0, 4);
+  return 4;
+}
+
+int get_film_grain_from_score(double grain_score, QualityType quality) {
+  switch (quality) {
+  case QUALITY_SUPER35_ANALOG:
+  case QUALITY_IMAX_ANALOG:
+    return film_grain_analog(grain_score);
+
+  case QUALITY_ANIMATION:
+    return film_grain_animation(grain_score);
+
+  case QUALITY_LIVEACTION:
+  case QUALITY_SUPER35_DIGITAL:
+  case QUALITY_IMAX_DIGITAL:
+  default:
+    return film_grain_digital(grain_score);
+  }
 }
 
 /* ====================================================================== */

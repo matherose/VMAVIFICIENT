@@ -33,6 +33,11 @@ typedef struct {
   const CropInfo *crop;       /**< Crop info (NULL if none). */
   const HdrInfo *hdr;         /**< HDR info. */
   int film_grain;             /**< Grain synthesis level (0–50). */
+  double grain_score;         /**< Normalized grain score 0..1 from media_analysis.
+                                   Used to soften the VMAF target for grainy content
+                                   (grain will be re-synthesized by film_grain). */
+  QualityType quality;        /**< Content quality type — controls how grain_score
+                                   influences the effective VMAF target. */
 
   double target_p10;          /**< Desired VMAF p10. */
   int sample_count;           /**< Number of sample clips to cut (>=1). */

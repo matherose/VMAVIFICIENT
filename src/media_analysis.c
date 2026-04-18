@@ -459,7 +459,62 @@ static int spawn_grav1synth(const char *src, const char *denoised,
 /* ------------------------------------------------------------------------- */
 
 /**
- * Parse a grav1synth grain table and return a 0..1 grain strength value.
+ * Parsed grain table scores for luma and chroma planes.
+ */
+typedef struct {
+  double y;  /**< Mean Y (luma) scaling, normalized 0..1. */
+  double cb; /**< Mean Cb scaling, normalized 0..1. */
+  double cr; /**< Mean Cr scaling, normalized 0..1. */
+} GrainTableScores;
+
+/**
+ * Parse scaling values for a single plane prefix ("sY", "sCb", or "sCr")
+ * from a grain table line.  Returns the sum and count of scaling values found.
+ */
+static void parse_plane_scalings(const char *line, const char *prefix,
+                                 double *sum, long *count) {
+  const char *p = line;
+  while (*p == '\t' || *p == ' ')
+    p++;
+  size_t plen = strlen(prefix);
+  if (strncmp(p, prefix, plen) != 0)
+    return;
+  if (p[plen] != ' ' && p[plen] != '\t')
+    return;
+  p += plen;
+
+  char *end;
+  long pt_count = strtol(p, &end, 10);
+  if (end == p || pt_count <= 0)
+    return;
+  p = end;
+  for (long i = 0; i < pt_count; i++) {
+    strtol(p, &end, 10); /* value */
+    if (end == p)
+      break;
+    p = end;
+    long scaling = strtol(p, &end, 10);
+    if (end == p)
+      break;
+    p = end;
+    *sum += (double)scaling;
+    (*count)++;
+  }
+}
+
+static double normalize_plane_score(double sum, long count) {
+  if (count == 0)
+    return 0.0;
+  double mean = sum / (double)count;
+  if (mean < 0.0)
+    mean = 0.0;
+  if (mean > 255.0)
+    mean = 255.0;
+  return mean / 255.0;
+}
+
+/**
+ * Parse a grav1synth grain table and return 0..1 grain strength per plane.
  *
  * Format (tab-indented under each "E" line):
  *   filmgrn1
@@ -471,58 +526,33 @@ static int spawn_grav1synth(const char *src, const char *denoised,
  *       cY <coeffs>
  *       ...
  *
- * We average the Y scaling values (s1, s2, ...) across all scenes.
+ * We average the scaling values (s1, s2, ...) across all scenes per plane.
  * Each scaling is in [0, 255]; the final score is mean / 255.
  */
-static double parse_grain_table(const char *path) {
+static GrainTableScores parse_grain_table(const char *path) {
+  GrainTableScores scores = {0};
   FILE *f = fopen(path, "r");
   if (!f)
-    return 0.0;
+    return scores;
 
-  double sum = 0.0;
-  long count = 0;
+  double sum_y = 0.0, sum_cb = 0.0, sum_cr = 0.0;
+  long count_y = 0, count_cb = 0, count_cr = 0;
   char *line = NULL;
   size_t cap = 0;
-  ssize_t n;
 
-  while ((n = getline(&line, &cap, f)) >= 0) {
-    char *p = line;
-    while (*p == '\t' || *p == ' ')
-      p++;
-    if (p[0] != 's' || p[1] != 'Y' || (p[2] != ' ' && p[2] != '\t'))
-      continue;
-    p += 2;
-    /* First integer after "sY" is the point count; skip it. */
-    char *end;
-    long pt_count = strtol(p, &end, 10);
-    if (end == p || pt_count <= 0)
-      continue;
-    p = end;
-    for (long i = 0; i < pt_count; i++) {
-      /* Each point is "value scaling". We want the scaling. */
-      strtol(p, &end, 10); /* value */
-      if (end == p)
-        break;
-      p = end;
-      long scaling = strtol(p, &end, 10);
-      if (end == p)
-        break;
-      p = end;
-      sum += (double)scaling;
-      count++;
-    }
+  while (getline(&line, &cap, f) >= 0) {
+    parse_plane_scalings(line, "sY", &sum_y, &count_y);
+    parse_plane_scalings(line, "sCb", &sum_cb, &count_cb);
+    parse_plane_scalings(line, "sCr", &sum_cr, &count_cr);
   }
 
   free(line);
   fclose(f);
-  if (count == 0)
-    return 0.0;
-  double mean = sum / (double)count;
-  if (mean < 0)
-    mean = 0;
-  if (mean > 255.0)
-    mean = 255.0;
-  return mean / 255.0;
+
+  scores.y = normalize_plane_score(sum_y, count_y);
+  scores.cb = normalize_plane_score(sum_cb, count_cb);
+  scores.cr = normalize_plane_score(sum_cr, count_cr);
+  return scores;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -534,6 +564,7 @@ GrainScore get_grain_score(const char *path) {
   const int keep_tmp = getenv("VMAV_KEEP_GRAIN_TMP") != NULL;
 
   double max_score = 0.0;
+  double max_chroma = 0.0;
   int windows_succeeded = 0;
   int first_error = 0;
 
@@ -552,9 +583,13 @@ GrainScore get_grain_score(const char *path) {
         struct stat st;
         if (stat(table_tmp, &st) == 0 && st.st_size > 0 &&
             st.st_size <= MAX_TABLE_BYTES) {
-          double s = parse_grain_table(table_tmp);
-          if (s > max_score)
-            max_score = s;
+          GrainTableScores scores = parse_grain_table(table_tmp);
+          result.per_window_scores[i] = scores.y;
+          if (scores.y > max_score)
+            max_score = scores.y;
+          double chroma_max = scores.cb > scores.cr ? scores.cb : scores.cr;
+          if (chroma_max > max_chroma)
+            max_chroma = chroma_max;
           windows_succeeded++;
         } else {
           ret = AVERROR(EIO);
@@ -582,5 +617,25 @@ GrainScore get_grain_score(const char *path) {
   result.grain_score = max_score;
   result.avg_noise = max_score * 255.0;
   result.frames_analyzed = windows_succeeded * SAMPLE_DURATION_SEC * 30;
+  result.windows_succeeded = windows_succeeded;
+  result.chroma_grain_score = max_chroma;
+
+  /* Compute variance of per-window Y scores across succeeded windows.
+   * A window that succeeded always has per_window_scores[i] set (even if 0.0
+   * for a perfectly clean source), while failed windows were never written.
+   * We use a separate succeeded-tracking array to be precise. */
+  if (windows_succeeded > 1) {
+    double mean = 0.0;
+    for (int i = 0; i < NUM_SAMPLES; i++)
+      mean += result.per_window_scores[i];
+    mean /= NUM_SAMPLES;
+    double var_sum = 0.0;
+    for (int i = 0; i < NUM_SAMPLES; i++) {
+      double d = result.per_window_scores[i] - mean;
+      var_sum += d * d;
+    }
+    result.grain_variance = var_sum / NUM_SAMPLES;
+  }
+
   return result;
 }

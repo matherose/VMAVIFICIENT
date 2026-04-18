@@ -321,6 +321,7 @@ static int encode_sample_at_crf(const CrfSearchConfig *cfg,
                          * scores. With fg=0, the encoder preserves grain
                          * as-is and the metric compares like with like.
                          * The final encode still uses cfg->film_grain. */
+      .grain_score = cfg->grain_score,
       .target_bitrate = 0,
       .crf = crf,
       .info = cfg->info,
@@ -456,6 +457,38 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
   int max_probes = cfg->max_probes > 0 ? cfg->max_probes : 8;
   if (max_probes > 16) max_probes = 16;
 
+  /* Grain-aware VMAF target — preset-dependent:
+   *
+   * Digital/live-action: film_grain synthesis will re-add grain in the final
+   *   encode, so VMAF overestimates the perceptual gap → soften the target.
+   *
+   * Analog (Super 35 / IMAX film): the grain IS the artistic content.
+   *   film_grain synthesis preserves it faithfully, but VMAF still needs
+   *   to see the grain held accurately → don't soften (or soften less).
+   *
+   * Animation: zero real grain, high scores are texture/dithering artifacts.
+   *   No grain will be re-synthesized → never soften the target. */
+  double effective_target = cfg->target_p10;
+  switch (cfg->quality) {
+  case QUALITY_LIVEACTION:
+  case QUALITY_SUPER35_DIGITAL:
+  case QUALITY_IMAX_DIGITAL:
+    if (cfg->grain_score > 0.20)
+      effective_target -= 2.0; /* heavy grain: e.g. 93 -> 91 */
+    else if (cfg->grain_score > 0.10)
+      effective_target -= 1.0; /* moderate grain: e.g. 93 -> 92 */
+    break;
+  case QUALITY_SUPER35_ANALOG:
+  case QUALITY_IMAX_ANALOG:
+    if (cfg->grain_score > 0.20)
+      effective_target -= 1.0; /* real film grain — soften gently */
+    break;
+  case QUALITY_ANIMATION:
+  default:
+    /* No softening — detector sees texture, not grain. */
+    break;
+  }
+
   double src_dur = cfg->info->duration;
   if (src_dur < (double)(dur * 2)) {
     fprintf(stderr,
@@ -480,8 +513,11 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
   char sample_paths[8][1024];
   char ref_paths[8][1024];
 
-  printf("\nOptimal bitrate search (target VMAF p10 >= %.2f, max %d probes)\n",
-         cfg->target_p10, max_probes);
+  printf("\nOptimal bitrate search (target VMAF p10 >= %.2f", cfg->target_p10);
+  if (effective_target != cfg->target_p10)
+    printf(", adjusted to %.2f for grain=%.3f", effective_target,
+           cfg->grain_score);
+  printf(", max %d probes)\n", max_probes);
   printf("  Preparing %d samples (%ds each)...\n", n_samples, dur);
 
   /* Build crop filter string if crop is active. encode_video() applies crop
@@ -575,7 +611,7 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
   result.probes_succeeded++;
   print_probe_row(&p0, n_probes, max_probes, search_start);
 
-  int second_crf = (p0.p10 >= cfg->target_p10) ? 45 : 20;
+  int second_crf = (p0.p10 >= effective_target) ? 45 : 20;
   ProbePoint p1;
   if (probe_at_crf(cfg, sample_paths, ref_paths, n_samples, dur, second_crf,
                    &p1) == 0) {
@@ -600,10 +636,10 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
     double hi_p10 = probes[n_probes - 1].p10;
 
     int next_crf = -1;
-    if (lo_p10 < cfg->target_p10 && lo_crf > CRF_SEARCH_MIN) {
+    if (lo_p10 < effective_target && lo_crf > CRF_SEARCH_MIN) {
       /* Even the lowest CRF probe falls short — go lower. */
       next_crf = clamp_int(lo_crf - 5, CRF_SEARCH_MIN, lo_crf - 1);
-    } else if (hi_p10 >= cfg->target_p10 && hi_crf < CRF_SEARCH_MAX) {
+    } else if (hi_p10 >= effective_target && hi_crf < CRF_SEARCH_MAX) {
       /* Even the highest CRF probe still meets target — go higher. */
       next_crf = clamp_int(hi_crf + 10, hi_crf + 1, CRF_SEARCH_MAX);
     } else {
@@ -633,8 +669,8 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
     /* Find the bracketing pair (probes are CRF-sorted, p10 monotone-decreasing). */
     int lo_idx = -1, hi_idx = -1;
     for (int i = 0; i < n_probes - 1; i++) {
-      if (probes[i].p10 >= cfg->target_p10 &&
-          probes[i + 1].p10 < cfg->target_p10) {
+      if (probes[i].p10 >= effective_target &&
+          probes[i + 1].p10 < effective_target) {
         lo_idx = i;
         hi_idx = i + 1;
         break;
@@ -653,7 +689,7 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
     if (span < 0.1) {
       next_crf = (lo_crf + hi_crf) / 2;
     } else {
-      double t = (probes[lo_idx].p10 - cfg->target_p10) / span;
+      double t = (probes[lo_idx].p10 - effective_target) / span;
       next_crf = lo_crf + (int)(t * (hi_crf - lo_crf) + 0.5);
     }
     /* Keep the probe strictly inside the bracket. */
@@ -692,8 +728,8 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
   /* Find bracket. */
   int lo_idx = -1, hi_idx = -1;
   for (int i = 0; i < n_probes - 1; i++) {
-    if (probes[i].p10 >= cfg->target_p10 &&
-        probes[i + 1].p10 < cfg->target_p10) {
+    if (probes[i].p10 >= effective_target &&
+        probes[i + 1].p10 < effective_target) {
       lo_idx = i;
       hi_idx = i + 1;
       break;
@@ -710,7 +746,7 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
       rec_p10 = probes[lo_idx].p10;
       rec_kbps = probes[lo_idx].kbps;
     } else {
-      double t = (probes[lo_idx].p10 - cfg->target_p10) / span;
+      double t = (probes[lo_idx].p10 - effective_target) / span;
       rec_crf = lo_crf + (int)(t * (hi_crf - lo_crf) + 0.5);
       rec_p10 = probes[lo_idx].p10 +
                 t * (probes[hi_idx].p10 - probes[lo_idx].p10);
@@ -721,7 +757,7 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
   } else {
     /* No bracket: target is outside the probed range. Clamp. */
     saturated = 1;
-    if (probes[0].p10 < cfg->target_p10) {
+    if (probes[0].p10 < effective_target) {
       /* Target unreachable — even lowest CRF can't meet it. */
       rec_crf = probes[0].crf;
       rec_p10 = probes[0].p10;
@@ -729,7 +765,7 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
       fprintf(stderr,
               "\n  WARNING: target VMAF %.2f exceeds encoder capability on "
               "this content (best probe = %.2f at CRF %d). Using lowest CRF.\n",
-              cfg->target_p10, probes[0].p10, probes[0].crf);
+              effective_target, probes[0].p10, probes[0].crf);
     } else {
       /* Content is easy — even highest CRF beats target. */
       rec_crf = probes[n_probes - 1].crf;
@@ -739,7 +775,7 @@ CrfSearchResult crf_search_run(const CrfSearchConfig *cfg) {
           "\n  Note: content was easy to encode — even CRF %d still scores "
           "%.2f (above target %.2f). Using highest CRF.\n",
           probes[n_probes - 1].crf, probes[n_probes - 1].p10,
-          cfg->target_p10);
+          effective_target);
     }
   }
 
