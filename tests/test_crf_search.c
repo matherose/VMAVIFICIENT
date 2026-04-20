@@ -48,10 +48,10 @@ int main(int argc, char **argv) {
       .crop = NULL,
       .hdr = &hdr,
       .film_grain = film_grain,
-      .target_p10 = target,
-      .sample_count = 2,
-      .sample_duration = 10,
-      .max_probes = 8,
+      .target_vmaf_mean = target,
+      .sample_count = 3,
+      .sample_duration = 15,
+      .max_probes = 6,
       .workdir = workdir,
   };
 
@@ -61,11 +61,10 @@ int main(int argc, char **argv) {
     return 1;
   }
   printf("\n=== RESULT ===\n");
-  printf("target p10     : %.2f\n", target);
+  printf("target VMAF    : %.2f\n", target);
   printf("probes ok      : %d\n", r.probes_succeeded);
   printf("recommended CRF: %d\n", r.recommended_crf);
-  printf("predicted VMAF : %.3f\n", r.predicted_p10);
-  printf("XPSNR p10 (dB) : %.2f  (informational)\n", r.xpsnr_p10);
-  printf("saturated      : %s\n", r.saturated ? "yes" : "no");
+  printf("mean VMAF      : %.3f\n", r.measured_vmaf_mean);
+  printf("bitrate (kbps) : %d\n", r.measured_bitrate_kbps);
   return 0;
 }

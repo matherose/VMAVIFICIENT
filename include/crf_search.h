@@ -1,14 +1,13 @@
 /**
  * @file crf_search.h
- * @brief VMAF-driven CRF search via interpolated binary search.
+ * @brief Mean-VMAF-driven CRF search via interpolated binary search.
  *
  * Cuts short sample clips from a source, encodes each at adaptively chosen
- * CRF values, scores against the reference with VMAF, and converges on the
- * lowest CRF that meets the target VMAF p10. XPSNR is computed on the chosen
- * probe purely as informational sanity-check output.
- *
- * The target metric is the 10th-percentile per-frame VMAF score (p10) — bounds
- * worst-case quality rather than the arithmetic mean.
+ * CRF values (using the same film_grain and preset the real encode will use),
+ * scores against the reference with VMAF, and converges on the lowest CRF
+ * that meets the target mean VMAF. The measured per-sample bitrate at that
+ * CRF is fed to the real encode as the VBR target — because probe and real
+ * encoder settings match, the number is directly usable.
  */
 #ifndef VMAVIFICIENT_CRF_SEARCH_H
 #define VMAVIFICIENT_CRF_SEARCH_H
@@ -32,17 +31,16 @@ typedef struct {
   const MediaInfo *info;      /**< Source media info. */
   const CropInfo *crop;       /**< Crop info (NULL if none). */
   const HdrInfo *hdr;         /**< HDR info. */
-  int film_grain;             /**< Grain synthesis level (0–50). */
-  double grain_score;         /**< Normalized grain score 0..1 from media_analysis.
-                                   Used to soften the VMAF target for grainy content
-                                   (grain will be re-synthesized by film_grain). */
-  QualityType quality;        /**< Content quality type — controls how grain_score
-                                   influences the effective VMAF target. */
+  int film_grain;             /**< Grain synthesis level (0–50) — applied to
+                                   probes as well as the real encode. */
+  double grain_score;         /**< Normalized grain score 0..1 from media_analysis. */
+  QualityType quality;        /**< Content quality type (unused by the search
+                                   but retained for encoder parameter symmetry). */
 
-  double target_p10;          /**< Desired VMAF p10. */
+  double target_vmaf_mean;    /**< Desired mean VMAF. */
   int sample_count;           /**< Number of sample clips to cut (>=1). */
   int sample_duration;        /**< Seconds per sample clip (>=2). */
-  int max_probes;             /**< Hard cap on probe encodes (default 8). */
+  int max_probes;             /**< Hard cap on probe encodes (default 6). */
 
   const char *workdir;        /**< Writable directory for sample/encoded files. */
 } CrfSearchConfig;
@@ -51,13 +49,12 @@ typedef struct {
  * @brief Output of a CRF search run.
  */
 typedef struct {
-  int recommended_crf;        /**< Final CRF suggestion. */
-  double predicted_p10;       /**< Predicted VMAF p10 at recommended CRF. */
-  double xpsnr_p10;           /**< XPSNR p10 (dB) on closest probe — informational. */
-  int measured_bitrate_kbps;  /**< Predicted bitrate at recommended CRF. */
-  int probes_succeeded;       /**< Number of probe points that scored cleanly. */
-  int saturated;              /**< Non-zero if search hit CRF range edge. */
-  int error;                  /**< 0 on success, negative on failure. */
+  int recommended_crf;         /**< CRF that meets target mean VMAF. */
+  int measured_bitrate_kbps;   /**< Per-sample bitrate at recommended_crf.
+                                    Fed directly to the final VBR encode. */
+  double measured_vmaf_mean;   /**< Mean VMAF at recommended_crf (interpolated). */
+  int probes_succeeded;        /**< Number of probe points that scored cleanly. */
+  int error;                   /**< 0 on success, negative on failure. */
 } CrfSearchResult;
 
 /**
