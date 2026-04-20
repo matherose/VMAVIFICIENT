@@ -27,12 +27,10 @@
 #include "crf_search.h"
 #include "video_encode.h"
 
-/* Target VMAF p10 for CRF search — streaming-grade quality at 6–9 ft
- * viewing distance.  93 is the perceptual saturation floor for most
- * viewers on a living-room TV; beyond this, extra bitrate buys
- * diminishing returns.  The target is further adjusted per-preset
- * and grain level in crf_search.c. */
-#define VMAF_TARGET_P10 93.0
+/* Target mean VMAF for CRF search — transparent quality at 6 ft couch
+ * viewing distance on a living-room TV.  Matches ab-av1's default and
+ * sits at the knee of the grain-film rate/quality curve. */
+#define VMAF_TARGET_MEAN 90.0
 
 static void print_usage(const char *prog) {
   fprintf(
@@ -1092,10 +1090,10 @@ int main(int argc, char *argv[]) {
             .film_grain = film_grain,
             .grain_score = grain.error == 0 ? grain.grain_score : 0.0,
             .quality = cli_quality,
-            .target_p10 = VMAF_TARGET_P10,
-            .sample_count = 2,
-            .sample_duration = 10,
-            .max_probes = 8,
+            .target_vmaf_mean = VMAF_TARGET_MEAN,
+            .sample_count = 3,
+            .sample_duration = 15,
+            .max_probes = 6,
             .workdir = crfsearch_dir,
         };
 
@@ -1103,9 +1101,9 @@ int main(int argc, char *argv[]) {
         if (crf_res.error == 0 && crf_res.measured_bitrate_kbps > 0) {
           crf_bitrate = crf_res.measured_bitrate_kbps;
           printf("\nCRF search complete: CRF %d -> %d kbps "
-                 "(VMAF p10=%.3f, XPSNR p10=%.2f dB, informational)%s\n",
-                 crf_res.recommended_crf, crf_bitrate, crf_res.predicted_p10,
-                 crf_res.xpsnr_p10, crf_res.saturated ? " [saturated]" : "");
+                 "(mean VMAF %.2f)\n",
+                 crf_res.recommended_crf, crf_bitrate,
+                 crf_res.measured_vmaf_mean);
         } else {
           fprintf(stderr,
                   "\nCRF search failed (err=%d), falling back to preset bitrate\n",
