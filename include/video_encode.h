@@ -25,6 +25,8 @@ typedef struct {
   int film_grain;             /**< Film grain synthesis level (0–50). */
   double grain_score;         /**< Normalized grain score 0..1 from media_analysis.
                                    Used for grain-adaptive CDEF scaling. */
+  double grain_variance;      /**< Per-window Y-score variance from media_analysis
+                                   (high = inconsistent grain across the film). */
   int target_bitrate;         /**< Target bitrate in kbps (VBR mode, ignored if crf > 0). */
   int crf;                    /**< CRF value 1–63 for CRF mode, or 0 to use VBR @ target_bitrate. */
   const MediaInfo *info;      /**< Source media info. */

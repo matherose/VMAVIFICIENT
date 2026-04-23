@@ -43,16 +43,25 @@ extern char **environ;
 
 /** Duration (seconds) of each sample window. */
 #define SAMPLE_DURATION_SEC 15
-/** Number of windows sampled across the film. */
+/** Number of windows sampled across the film in the initial pass. */
 #define NUM_SAMPLES 4
+/** Upper bound on total windows including any adaptive refinement pass. */
+#define MAX_SAMPLE_WINDOWS 7
+/** Initial-pass per-window Y-score variance above which we add refinement
+ *  samples between the original positions. Variance is in the same units as
+ *  the Y score (0..1), so std-dev ~0.05 across windows clears the bar. */
+#define GRAIN_VARIANCE_REFINE_THRESHOLD 0.0025
 /** Centered crop dimensions applied to the sample to bound temp-file size. */
 #define CROP_W 1920
 #define CROP_H 1080
 /** Max bytes of the grain-table file we'll parse (safety bound). */
 #define MAX_TABLE_BYTES (4 * 1024 * 1024)
 
-/** Positions (0..1) through the file at which to extract windows. */
+/** Positions (0..1) through the file at which to extract the initial windows. */
 static const double SAMPLE_POSITIONS[NUM_SAMPLES] = {0.20, 0.40, 0.60, 0.80};
+/** Midpoints between the initial positions, used when refinement is triggered. */
+static const double REFINE_SAMPLE_POSITIONS[MAX_SAMPLE_WINDOWS - NUM_SAMPLES] = {
+    0.30, 0.50, 0.70};
 
 /* ------------------------------------------------------------------------- */
 /*  Sample-extraction pipeline                                               */
@@ -559,6 +568,61 @@ static GrainTableScores parse_grain_table(const char *path) {
 /*  Public entry point                                                       */
 /* ------------------------------------------------------------------------- */
 
+/** Extract one sample window and parse its grain table.
+ *  Returns 0 on success (scores filled), or negative AVERROR on failure.
+ *  The tmp-file naming is keyed by @p window_idx so concurrent passes do not
+ *  collide. */
+static int sample_grain_window(const char *path, int window_idx, double position,
+                               int keep_tmp, GrainTableScores *out_scores) {
+  char src_tmp[4096], denoised_tmp[4096], table_tmp[4096];
+  snprintf(src_tmp, sizeof(src_tmp), "%s.grav1_src_%d.mkv", path, window_idx);
+  snprintf(denoised_tmp, sizeof(denoised_tmp), "%s.grav1_denoised_%d.mkv",
+           path, window_idx);
+  snprintf(table_tmp, sizeof(table_tmp), "%s.grav1_table_%d.txt", path,
+           window_idx);
+
+  int ret = extract_samples(path, src_tmp, denoised_tmp, position,
+                            SAMPLE_DURATION_SEC);
+  if (ret >= 0) {
+    ret = spawn_grav1synth(src_tmp, denoised_tmp, table_tmp);
+    if (ret >= 0) {
+      struct stat st;
+      if (stat(table_tmp, &st) == 0 && st.st_size > 0 &&
+          st.st_size <= MAX_TABLE_BYTES) {
+        *out_scores = parse_grain_table(table_tmp);
+      } else {
+        ret = AVERROR(EIO);
+      }
+    }
+  }
+
+  if (!keep_tmp) {
+    unlink(src_tmp);
+    unlink(denoised_tmp);
+    unlink(table_tmp);
+  } else {
+    fprintf(stderr, "[grain] window %d (pos %.2f): kept %s\n", window_idx,
+            position, table_tmp);
+  }
+  return ret;
+}
+
+/** Population variance of the first @p n entries of @p values. */
+static double score_variance(const double *values, int n) {
+  if (n <= 1)
+    return 0.0;
+  double mean = 0.0;
+  for (int i = 0; i < n; i++)
+    mean += values[i];
+  mean /= n;
+  double var_sum = 0.0;
+  for (int i = 0; i < n; i++) {
+    double d = values[i] - mean;
+    var_sum += d * d;
+  }
+  return var_sum / n;
+}
+
 GrainScore get_grain_score(const char *path) {
   GrainScore result = {0};
   const int keep_tmp = getenv("VMAV_KEEP_GRAIN_TMP") != NULL;
@@ -568,44 +632,27 @@ GrainScore get_grain_score(const char *path) {
   int windows_succeeded = 0;
   int first_error = 0;
 
-  for (int i = 0; i < NUM_SAMPLES; i++) {
-    char src_tmp[4096], denoised_tmp[4096], table_tmp[4096];
-    snprintf(src_tmp, sizeof(src_tmp), "%s.grav1_src_%d.mkv", path, i);
-    snprintf(denoised_tmp, sizeof(denoised_tmp), "%s.grav1_denoised_%d.mkv",
-             path, i);
-    snprintf(table_tmp, sizeof(table_tmp), "%s.grav1_table_%d.txt", path, i);
+  /* Holds Y scores for every window attempted (initial + refine). Failed
+   * windows leave the slot at its zero init, matching the prior variance
+   * behavior where failed windows contributed 0.0 to the distribution. */
+  double y_scores[MAX_SAMPLE_WINDOWS] = {0};
+  int total_attempts = 0;
 
-    int ret = extract_samples(path, src_tmp, denoised_tmp,
-                              SAMPLE_POSITIONS[i], SAMPLE_DURATION_SEC);
+  for (int i = 0; i < NUM_SAMPLES; i++, total_attempts++) {
+    GrainTableScores scores = {0};
+    int ret = sample_grain_window(path, total_attempts, SAMPLE_POSITIONS[i],
+                                  keep_tmp, &scores);
     if (ret >= 0) {
-      ret = spawn_grav1synth(src_tmp, denoised_tmp, table_tmp);
-      if (ret >= 0) {
-        struct stat st;
-        if (stat(table_tmp, &st) == 0 && st.st_size > 0 &&
-            st.st_size <= MAX_TABLE_BYTES) {
-          GrainTableScores scores = parse_grain_table(table_tmp);
-          result.per_window_scores[i] = scores.y;
-          if (scores.y > max_score)
-            max_score = scores.y;
-          double chroma_max = scores.cb > scores.cr ? scores.cb : scores.cr;
-          if (chroma_max > max_chroma)
-            max_chroma = chroma_max;
-          windows_succeeded++;
-        } else {
-          ret = AVERROR(EIO);
-        }
-      }
-    }
-    if (ret < 0 && first_error == 0)
+      result.per_window_scores[i] = scores.y;
+      y_scores[total_attempts] = scores.y;
+      if (scores.y > max_score)
+        max_score = scores.y;
+      double chroma_max = scores.cb > scores.cr ? scores.cb : scores.cr;
+      if (chroma_max > max_chroma)
+        max_chroma = chroma_max;
+      windows_succeeded++;
+    } else if (first_error == 0) {
       first_error = ret;
-
-    if (!keep_tmp) {
-      unlink(src_tmp);
-      unlink(denoised_tmp);
-      unlink(table_tmp);
-    } else {
-      fprintf(stderr, "[grain] window %d (pos %.2f): kept %s\n", i,
-              SAMPLE_POSITIONS[i], table_tmp);
     }
   }
 
@@ -614,28 +661,48 @@ GrainScore get_grain_score(const char *path) {
     return result;
   }
 
+  /* Initial-pass variance gates the refinement decision. Computed over the
+   * full NUM_SAMPLES slot set (failed windows as 0.0) to match the signal
+   * previously reported to callers. */
+  double initial_variance = score_variance(y_scores, NUM_SAMPLES);
+
+  /* Adaptive refinement: if the initial pass shows inconsistent grain across
+   * the film, sample at midpoints between the original positions so the final
+   * max aggregation sees any grainier passage lurking between them. */
+  int refined = 0;
+  if (initial_variance > GRAIN_VARIANCE_REFINE_THRESHOLD) {
+    const int refine_count =
+        (int)(sizeof(REFINE_SAMPLE_POSITIONS) / sizeof(REFINE_SAMPLE_POSITIONS[0]));
+    for (int j = 0; j < refine_count && total_attempts < MAX_SAMPLE_WINDOWS;
+         j++, total_attempts++) {
+      GrainTableScores scores = {0};
+      int ret = sample_grain_window(path, total_attempts,
+                                    REFINE_SAMPLE_POSITIONS[j], keep_tmp,
+                                    &scores);
+      if (ret >= 0) {
+        y_scores[total_attempts] = scores.y;
+        if (scores.y > max_score)
+          max_score = scores.y;
+        double chroma_max = scores.cb > scores.cr ? scores.cb : scores.cr;
+        if (chroma_max > max_chroma)
+          max_chroma = chroma_max;
+        windows_succeeded++;
+        refined = 1;
+      } else if (first_error == 0) {
+        first_error = ret;
+      }
+    }
+  }
+
   result.grain_score = max_score;
   result.avg_noise = max_score * 255.0;
   result.frames_analyzed = windows_succeeded * SAMPLE_DURATION_SEC * 30;
   result.windows_succeeded = windows_succeeded;
   result.chroma_grain_score = max_chroma;
-
-  /* Compute variance of per-window Y scores across succeeded windows.
-   * A window that succeeded always has per_window_scores[i] set (even if 0.0
-   * for a perfectly clean source), while failed windows were never written.
-   * We use a separate succeeded-tracking array to be precise. */
-  if (windows_succeeded > 1) {
-    double mean = 0.0;
-    for (int i = 0; i < NUM_SAMPLES; i++)
-      mean += result.per_window_scores[i];
-    mean /= NUM_SAMPLES;
-    double var_sum = 0.0;
-    for (int i = 0; i < NUM_SAMPLES; i++) {
-      double d = result.per_window_scores[i] - mean;
-      var_sum += d * d;
-    }
-    result.grain_variance = var_sum / NUM_SAMPLES;
-  }
+  /* When refinement ran, report variance over the combined sample set so the
+   * signal reflects the full picture; otherwise keep the initial-pass value. */
+  result.grain_variance =
+      refined ? score_variance(y_scores, total_attempts) : initial_variance;
 
   return result;
 }

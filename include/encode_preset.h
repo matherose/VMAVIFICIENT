@@ -121,16 +121,29 @@ const EncodePreset *get_encode_preset(QualityType quality, int video_height);
  *
  * This is only used when CRF search fails or is skipped.
  *
- * @param width         Video width in pixels.
- * @param height        Video height in pixels.
- * @param framerate     Frame rate (fps); defaults to 24 if <= 0.
- * @param grain_score   Composite grain score in [0, 1].
- * @param is_hdr        Non-zero if HDR content.
- * @param quality       Content quality type.
+ * @param width          Video width in pixels.
+ * @param height         Video height in pixels.
+ * @param framerate      Frame rate (fps); defaults to 24 if <= 0.
+ * @param grain_score    Composite grain score in [0, 1].
+ * @param grain_variance Per-window Y-score variance from media_analysis.
+ *                       Scales BPP upward when grain is heterogeneous.
+ * @param is_hdr         Non-zero if HDR content.
+ * @param quality        Content quality type.
  * @return Target bitrate in kbps.
  */
 int get_target_bitrate(int width, int height, double framerate,
-                       double grain_score, int is_hdr, QualityType quality);
+                       double grain_score, double grain_variance, int is_hdr,
+                       QualityType quality);
+
+/**
+ * @brief BPP scale factor applied by @ref get_target_bitrate for a given
+ *        grain variance. Exposed so display code can report the factor
+ *        without duplicating the ramp.
+ *
+ * @param grain_variance Per-window Y-score variance from media_analysis.
+ * @return Multiplier in [1.0, GRAIN_VARIANCE_HIGH_BOOST].
+ */
+double grain_variance_bpp_multiplier(double grain_variance);
 
 /**
  * @brief Compute film grain synthesis level from a grain analysis score.
@@ -139,11 +152,15 @@ int get_target_bitrate(int width, int height, double framerate,
  * and map it aggressively, digital/live-action presets are moderate, and
  * animation clamps to near-zero (the detector sees texture, not grain).
  *
- * @param grain_score  Composite grain score in [0, 1].
- * @param quality      Content quality type (affects the mapping curve).
+ * @param grain_score    Composite grain score in [0, 1].
+ * @param grain_variance Per-window Y-score variance from media_analysis.
+ *                       When high, rounds up at bracket boundaries toward
+ *                       the grainier synthesis level (ignored for animation).
+ * @param quality        Content quality type (affects the mapping curve).
  * @return Film grain synthesis level (0–50).
  */
-int get_film_grain_from_score(double grain_score, QualityType quality);
+int get_film_grain_from_score(double grain_score, double grain_variance,
+                              QualityType quality);
 
 /**
  * @brief Convert a quality type enum to its display string.

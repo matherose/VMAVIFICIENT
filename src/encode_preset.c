@@ -9,6 +9,27 @@
 #define UNSET (-1)
 
 /* ====================================================================== */
+/*  Grain-variance adaptation tunables                                    */
+/* ====================================================================== */
+
+/* When per-window Y-score variance is high, the film has passages visibly
+ * grainier than the mean. Even with a good film-grain-table those peaks
+ * cost more bits, and the bracket boundaries in film_grain_* can round a
+ * borderline score down to a noticeably lighter synthesis level. These
+ * constants tune how we compensate. Kept at file scope for easy tuning. */
+
+/** Below this, variance is within sampling noise — no BPP adjustment. */
+#define GRAIN_VARIANCE_LOW_THRESHOLD  0.0010
+/** Above this, variance signals genuinely heterogeneous grain — full boost,
+ *  and grain-synthesis bracket selection rounds up at boundaries. */
+#define GRAIN_VARIANCE_HIGH_THRESHOLD 0.0040
+/** BPP multiplier reached at (and held above) GRAIN_VARIANCE_HIGH_THRESHOLD. */
+#define GRAIN_VARIANCE_HIGH_BOOST     1.13
+/** Fraction of a bracket's own width near its upper edge that triggers the
+ *  upward nudge. A score in (upper - width * proximity, upper] rounds up. */
+#define GRAIN_BRACKET_BOUNDARY_PROXIMITY 0.10
+
+/* ====================================================================== */
 /*  Preset tables — index 0 = 4K (height >= 2160), index 1 = HD          */
 /* ====================================================================== */
 
@@ -750,8 +771,23 @@ const EncodePreset *get_encode_preset(QualityType quality, int video_height) {
 /*  Target bitrate from resolution and grain score                        */
 /* ====================================================================== */
 
+/** Scale factor applied to BPP as a function of grain_variance:
+ *  - below LOW threshold: 1.0 (no boost)
+ *  - LOW..HIGH: linear ramp 1.0 → HIGH_BOOST
+ *  - at/above HIGH: HIGH_BOOST (capped) */
+double grain_variance_bpp_multiplier(double variance) {
+  if (variance <= GRAIN_VARIANCE_LOW_THRESHOLD)
+    return 1.0;
+  if (variance >= GRAIN_VARIANCE_HIGH_THRESHOLD)
+    return GRAIN_VARIANCE_HIGH_BOOST;
+  double t = (variance - GRAIN_VARIANCE_LOW_THRESHOLD) /
+             (GRAIN_VARIANCE_HIGH_THRESHOLD - GRAIN_VARIANCE_LOW_THRESHOLD);
+  return 1.0 + t * (GRAIN_VARIANCE_HIGH_BOOST - 1.0);
+}
+
 int get_target_bitrate(int width, int height, double framerate,
-                       double grain_score, int is_hdr, QualityType quality) {
+                       double grain_score, double grain_variance, int is_hdr,
+                       QualityType quality) {
   double fps = framerate > 0.0 ? framerate : 24.0;
   double pixels = (double)width * (double)height;
 
@@ -805,6 +841,11 @@ int get_target_bitrate(int width, int height, double framerate,
 
   if (is_hdr)
     bpp *= hdr_mult;
+
+  /* Variance-adaptive scaling sits atop the base curve so the reference
+   * targets above stay interpretable — heterogeneous-grain films get a
+   * headroom bump, homogeneous ones are unaffected. */
+  bpp *= grain_variance_bpp_multiplier(grain_variance);
 
   double bitrate = pixels * fps * bpp / 1000.0; /* kbps */
 
@@ -867,19 +908,56 @@ static int film_grain_animation(double s) {
   return 4;
 }
 
-int get_film_grain_from_score(double grain_score, QualityType quality) {
+/* Upper edges of each bracket in film_grain_analog and film_grain_digital.
+ * Lower edge of bracket i is boundaries[i-1] (or 0 for bracket 0). Keep in
+ * sync with the curves above. */
+static const double ANALOG_BRACKETS[] = {0.04, 0.08, 0.12, 0.20, 1.00};
+static const double DIGITAL_BRACKETS[] = {0.05, 0.10, 0.15, 0.25, 1.00};
+
+/** If @p score sits within the top GRAIN_BRACKET_BOUNDARY_PROXIMITY of its
+ *  bracket's width, return a score just past the upper edge so the curve
+ *  dispatches into the next (grainier) bracket. Otherwise return @p score.
+ *  Scores already above the last boundary are left alone (already at cap). */
+static double nudge_to_higher_bracket(double score, const double *boundaries,
+                                      int n) {
+  for (int i = 0; i < n; i++) {
+    if (score <= boundaries[i]) {
+      double lower = (i == 0) ? 0.0 : boundaries[i - 1];
+      double width = boundaries[i] - lower;
+      double proximity = width * GRAIN_BRACKET_BOUNDARY_PROXIMITY;
+      if (score > boundaries[i] - proximity)
+        return boundaries[i] + 1e-6;
+      return score;
+    }
+  }
+  return score;
+}
+
+int get_film_grain_from_score(double grain_score, double grain_variance,
+                              QualityType quality) {
+  int nudge = grain_variance > GRAIN_VARIANCE_HIGH_THRESHOLD;
   switch (quality) {
   case QUALITY_SUPER35_ANALOG:
   case QUALITY_IMAX_ANALOG:
+    if (nudge)
+      grain_score = nudge_to_higher_bracket(
+          grain_score, ANALOG_BRACKETS,
+          sizeof(ANALOG_BRACKETS) / sizeof(ANALOG_BRACKETS[0]));
     return film_grain_analog(grain_score);
 
   case QUALITY_ANIMATION:
+    /* Skip variance nudge: high variance on animation indicates scene cuts
+     * and texture shifts, not real grain. */
     return film_grain_animation(grain_score);
 
   case QUALITY_LIVEACTION:
   case QUALITY_SUPER35_DIGITAL:
   case QUALITY_IMAX_DIGITAL:
   default:
+    if (nudge)
+      grain_score = nudge_to_higher_bracket(
+          grain_score, DIGITAL_BRACKETS,
+          sizeof(DIGITAL_BRACKETS) / sizeof(DIGITAL_BRACKETS[0]));
     return film_grain_digital(grain_score);
   }
 }
