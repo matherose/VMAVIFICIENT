@@ -34,6 +34,8 @@ typedef struct {
   int film_grain;             /**< Grain synthesis level (0–50) — applied to
                                    probes as well as the real encode. */
   double grain_score;         /**< Normalized grain score 0..1 from media_analysis. */
+  double grain_variance;      /**< Per-window Y-score variance from media_analysis
+                                   (high = inconsistent grain across the film). */
   QualityType quality;        /**< Content quality type (unused by the search
                                    but retained for encoder parameter symmetry). */
 

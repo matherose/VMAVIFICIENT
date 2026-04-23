@@ -590,17 +590,17 @@ int main(int argc, char *argv[]) {
   GrainScore grain = get_grain_score(filepath);
   int film_grain = 0;
   if (grain.error == 0) {
-    printf("  Frames analyzed: %d\n", grain.frames_analyzed);
-    printf("  Avg noise:       %.4f\n", grain.avg_noise);
-    printf("  Grain score:     %.4f\n", grain.grain_score);
-    printf("  Per-window:      ");
-    for (int i = 0; i < GRAIN_NUM_WINDOWS; i++)
-      printf("%.4f%s", grain.per_window_scores[i],
-             i < GRAIN_NUM_WINDOWS - 1 ? "  " : "\n");
-    printf("  Grain variance:  %.6f\n", grain.grain_variance);
-    printf("  Chroma grain:    %.4f\n", grain.chroma_grain_score);
-    film_grain = get_film_grain_from_score(grain.grain_score, cli_quality);
-    printf("  Film grain:      %d\n", film_grain);
+    film_grain = get_film_grain_from_score(grain.grain_score,
+                                            grain.grain_variance, cli_quality);
+    printf("Grain analysis complete:\n");
+    printf("  Windows sampled:    %d%s\n", grain.windows_succeeded,
+           grain.windows_succeeded > 4 ? " (refined)" : "");
+    printf("  Luma grain score:   %.6f\n", grain.grain_score);
+    printf("  Chroma grain score: %.4f\n", grain.chroma_grain_score);
+    printf("  Grain variance:     %.4f\n", grain.grain_variance);
+    printf("  BPP multiplier:     %.2fx\n",
+           grain_variance_bpp_multiplier(grain.grain_variance));
+    printf("  Film grain level:   %d\n", film_grain);
   }
 
   /* ---- Naming setup (TMDB or --blind) ---- */
@@ -1089,6 +1089,7 @@ int main(int argc, char *argv[]) {
             .hdr = &hdr,
             .film_grain = film_grain,
             .grain_score = grain.error == 0 ? grain.grain_score : 0.0,
+            .grain_variance = grain.error == 0 ? grain.grain_variance : 0.0,
             .quality = cli_quality,
             .target_vmaf_mean = VMAF_TARGET_MEAN,
             .sample_count = 3,
@@ -1125,6 +1126,7 @@ int main(int argc, char *argv[]) {
                     : get_target_bitrate(
                           info.width, info.height, info.framerate,
                           grain.error == 0 ? grain.grain_score : 0.0,
+                          grain.error == 0 ? grain.grain_variance : 0.0,
                           hdr.has_hdr10 || hdr.has_dolby_vision,
                           cli_quality);
         printf("\nEncoding video to AV1 (%d kbps, %s, %s)...\n", bitrate,
@@ -1138,6 +1140,7 @@ int main(int argc, char *argv[]) {
             .preset = enc_preset,
             .film_grain = film_grain,
             .grain_score = grain.error == 0 ? grain.grain_score : 0.0,
+            .grain_variance = grain.error == 0 ? grain.grain_variance : 0.0,
             .target_bitrate = bitrate,
             .info = &info,
             .crop = (crop.error == 0) ? &crop : NULL,
