@@ -816,7 +816,6 @@ add_executable(vmavificient
     src/encode_preset.c
     src/rpu_extract.c
     src/video_encode.c
-    src/crf_search.c
     src/subtitle_convert.c
     src/final_mux.c
     src/tmdb.c
@@ -879,49 +878,6 @@ if(APPLE)
 else()
     # OpenSSL's engine layer references dlopen on Linux.
     target_link_libraries(vmavificient PRIVATE dl)
-endif()
-
-# ===========================================================================
-# Integration test: crf_search_run (end-to-end probe on a real source)
-# ===========================================================================
-add_executable(test_crf_search
-    tests/test_crf_search.c
-    src/crf_search.c
-    src/video_encode.c
-    src/media_info.c
-    src/media_hdr.c
-    src/media_crop.c
-    src/encode_preset.c
-)
-target_include_directories(test_crf_search PRIVATE
-    "${CMAKE_SOURCE_DIR}/include"
-    "${cjson_SOURCE_DIR}"
-    "${FF_INSTALL}/include"
-    "${SVTAV1_INSTALL}/include"
-)
-set_target_properties(test_crf_search PROPERTIES LINKER_LANGUAGE CXX)
-target_link_libraries(test_crf_search PRIVATE
-    FFmpeg::avformat
-    FFmpeg::avfilter
-    FFmpeg::avcodec
-    FFmpeg::swresample
-    FFmpeg::swscale
-    FFmpeg::avutil
-    SvtAv1::Enc
-    Dovi::dovi
-    Hdr10Plus::hdr10plus
-    "${OPUS_INSTALL}/lib/libopus.a"
-    Vmav::zlib
-    cjson
-    Threads::Threads
-    m
-)
-if(APPLE)
-    target_link_libraries(test_crf_search PRIVATE
-        iconv
-        "-framework CoreFoundation"
-        "-framework Security"
-    )
 endif()
 
 # ===========================================================================

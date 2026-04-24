@@ -291,8 +291,15 @@ static void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg,
       cfg->startup_qp_offset = (int8_t)p->startup_qp_offset;
   }
 
-  /* Film grain from grain score analysis */
+  /* Film grain from grain score analysis.
+   *
+   * Default for film_grain_denoise_apply is 0 — SVT-AV1 *analyzes* noise and
+   * stores a grain table but does NOT denoise the source, so the encoder
+   * pays for both the noisy residual AND the synthesis table. Forcing
+   * apply=1 denoises before coding, letting the bitrate actually land at
+   * the target. */
   cfg->film_grain_denoise_strength = (uint32_t)film_grain;
+  cfg->film_grain_denoise_apply = (film_grain > 0) ? 1 : 0;
 }
 
 /* ====================================================================== */

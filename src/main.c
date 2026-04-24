@@ -24,13 +24,7 @@
 #include "subtitle_convert.h"
 #include "tmdb.h"
 #include "utils.h"
-#include "crf_search.h"
 #include "video_encode.h"
-
-/* Target mean VMAF for CRF search — transparent quality at 6 ft couch
- * viewing distance on a living-room TV.  Matches ab-av1's default and
- * sits at the knee of the grain-film rate/quality curve. */
-#define VMAF_TARGET_MEAN 90.0
 
 static void print_usage(const char *prog) {
   fprintf(
@@ -598,8 +592,6 @@ int main(int argc, char *argv[]) {
     printf("  Luma grain score:   %.6f\n", grain.grain_score);
     printf("  Chroma grain score: %.4f\n", grain.chroma_grain_score);
     printf("  Grain variance:     %.4f\n", grain.grain_variance);
-    printf("  BPP multiplier:     %.2fx\n",
-           grain_variance_bpp_multiplier(grain.grain_variance));
     printf("  Film grain level:   %d\n", film_grain);
   }
 
@@ -1073,45 +1065,6 @@ int main(int argc, char *argv[]) {
         }
       }
 
-      /* ---- VMAF CRF search (if no manual bitrate override) ---- */
-      int crf_bitrate = 0;
-      if (cli_bitrate <= 0) {
-        char crfsearch_dir[4096];
-        snprintf(crfsearch_dir, sizeof(crfsearch_dir), "%scrfsearch", output_dir);
-        mkdir(crfsearch_dir, 0755);
-
-        CrfSearchConfig crf_cfg = {
-            .input_path = filepath,
-            .rpu_path = NULL, /* RPU is metadata, doesn't affect AV1 quality */
-            .preset = enc_preset,
-            .info = &info,
-            .crop = (crop.error == 0) ? &crop : NULL,
-            .hdr = &hdr,
-            .film_grain = film_grain,
-            .grain_score = grain.error == 0 ? grain.grain_score : 0.0,
-            .grain_variance = grain.error == 0 ? grain.grain_variance : 0.0,
-            .quality = cli_quality,
-            .target_vmaf_mean = VMAF_TARGET_MEAN,
-            .sample_count = 3,
-            .sample_duration = 15,
-            .max_probes = 6,
-            .workdir = crfsearch_dir,
-        };
-
-        CrfSearchResult crf_res = crf_search_run(&crf_cfg);
-        if (crf_res.error == 0 && crf_res.measured_bitrate_kbps > 0) {
-          crf_bitrate = crf_res.measured_bitrate_kbps;
-          printf("\nCRF search complete: CRF %d -> %d kbps "
-                 "(mean VMAF %.2f)\n",
-                 crf_res.recommended_crf, crf_bitrate,
-                 crf_res.measured_vmaf_mean);
-        } else {
-          fprintf(stderr,
-                  "\nCRF search failed (err=%d), falling back to preset bitrate\n",
-                  crf_res.error);
-        }
-      }
-
       /* ---- AV1 video encoding ---- */
       char av1_video_path[4096];
       snprintf(av1_video_path, sizeof(av1_video_path), "%s%s.video.mkv",
@@ -1121,14 +1074,9 @@ int main(int argc, char *argv[]) {
         int bitrate =
             cli_bitrate > 0
                 ? cli_bitrate
-                : crf_bitrate > 0
-                    ? crf_bitrate
-                    : get_target_bitrate(
-                          info.width, info.height, info.framerate,
-                          grain.error == 0 ? grain.grain_score : 0.0,
-                          grain.error == 0 ? grain.grain_variance : 0.0,
-                          hdr.has_hdr10 || hdr.has_dolby_vision,
-                          cli_quality);
+                : get_target_bitrate(info.height,
+                                     grain.error == 0 ? grain.grain_score
+                                                      : 0.0);
         printf("\nEncoding video to AV1 (%d kbps, %s, %s)...\n", bitrate,
                quality_type_to_string(cli_quality),
                info.height >= 2160 ? "4K" : "HD");
