@@ -820,6 +820,7 @@ add_executable(vmavificient
     src/subtitle_convert.c
     src/final_mux.c
     src/tmdb.c
+    src/ui.c
     src/utils.c
 )
 
