@@ -33,6 +33,8 @@
 
 #include <libdovi/rpu_parser.h>
 
+#include "film_grain.h"
+
 /* ====================================================================== */
 /*  Suppress SVT-AV1 log output (we show our own progress)               */
 /* ====================================================================== */
@@ -291,8 +293,15 @@ static void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg,
       cfg->startup_qp_offset = (int8_t)p->startup_qp_offset;
   }
 
-  /* Film grain from grain score analysis */
+  /* Film grain from grain score analysis.
+   *
+   * Default for film_grain_denoise_apply is 0 — SVT-AV1 *analyzes* noise and
+   * stores a grain table but does NOT denoise the source, so the encoder
+   * pays for both the noisy residual AND the synthesis table. Forcing
+   * apply=1 denoises before coding, letting the bitrate actually land at
+   * the target. */
   cfg->film_grain_denoise_strength = (uint32_t)film_grain;
+  cfg->film_grain_denoise_apply = (film_grain > 0) ? 1 : 0;
 }
 
 /* ====================================================================== */
@@ -388,6 +397,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   struct SwsContext *sws_ctx = NULL;
   EbComponentType *svt_handle = NULL;
   EbSvtAv1EncConfiguration svt_config;
+  AomFilmGrain *parsed_grain = NULL;
   AVFrame *frame = NULL;
   AVFrame *cropped_frame = NULL;
   AVPacket *pkt = NULL;
@@ -526,6 +536,21 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   /* Apply quality preset */
   apply_preset_to_config(&svt_config, config->preset, config->film_grain,
                          config->target_bitrate, config->crf);
+
+  /* Measured grain table from media_analysis (grainiest window). Replaces
+   * SVT-AV1's own grain analysis with grav1synth's parameters; denoising
+   * (film_grain_denoise_apply=1) still runs so the bitrate target is met. */
+  if (config->grain_table_path && config->grain_table_path[0]) {
+    parsed_grain = parse_filmgrn1_table(config->grain_table_path);
+    if (parsed_grain) {
+      svt_config.fgs_table = parsed_grain;
+    } else {
+      fprintf(stderr,
+              "  Video Warning: failed to parse grain table %s — falling "
+              "back to encoder's internal grain analysis\n",
+              config->grain_table_path);
+    }
+  }
 
   /* PQ content adjustments (HDR10 / HDR10+ / Dolby Vision) */
   if (in_stream->codecpar->color_trc == AVCOL_TRC_SMPTE2084) {
@@ -1081,6 +1106,8 @@ cleanup:
     svt_av1_enc_deinit(svt_handle);
     svt_av1_enc_deinit_handle(svt_handle);
   }
+
+  free_film_grain(parsed_grain);
 
   if (sws_ctx)
     sws_freeContext(sws_ctx);

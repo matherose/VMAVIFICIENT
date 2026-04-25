@@ -112,38 +112,22 @@ typedef struct {
 const EncodePreset *get_encode_preset(QualityType quality, int video_height);
 
 /**
- * @brief Compute target bitrate (kbps) using a preset-aware BPP model.
+ * @brief Compute target bitrate (kbps) from resolution and grain.
  *
- * Base BPP varies by content type: animation compresses efficiently (0.010),
- * digital live-action needs moderate headroom (0.0125), and analog film
- * needs more bits to preserve grain texture (0.015–0.020).  Grain sensitivity
- * and HDR overhead are also preset-dependent.
+ * Release-style flat targets — scene encoders pin bitrate by tier and grain,
+ * not by perceptual score. Values calibrated for SVT-AV1-HDR @ preset 4 with
+ * grain denoising (film_grain_denoise_apply=1) on:
  *
- * This is only used when CRF search fails or is skipped.
+ *   4K grainy   → 4000 kbps   (height >= 2160 && grain_score >= GRAIN_THRESHOLD)
+ *   4K low-grain→ 3500 kbps
+ *   HD grainy   → 2500 kbps
+ *   HD low-grain→ 2000 kbps
  *
- * @param width          Video width in pixels.
- * @param height         Video height in pixels.
- * @param framerate      Frame rate (fps); defaults to 24 if <= 0.
- * @param grain_score    Composite grain score in [0, 1].
- * @param grain_variance Per-window Y-score variance from media_analysis.
- *                       Scales BPP upward when grain is heterogeneous.
- * @param is_hdr         Non-zero if HDR content.
- * @param quality        Content quality type.
+ * @param height      Video height in pixels (>= 2160 selects 4K).
+ * @param grain_score Composite grain score in [0, 1].
  * @return Target bitrate in kbps.
  */
-int get_target_bitrate(int width, int height, double framerate,
-                       double grain_score, double grain_variance, int is_hdr,
-                       QualityType quality);
-
-/**
- * @brief BPP scale factor applied by @ref get_target_bitrate for a given
- *        grain variance. Exposed so display code can report the factor
- *        without duplicating the ramp.
- *
- * @param grain_variance Per-window Y-score variance from media_analysis.
- * @return Multiplier in [1.0, GRAIN_VARIANCE_HIGH_BOOST].
- */
-double grain_variance_bpp_multiplier(double grain_variance);
+int get_target_bitrate(int height, double grain_score);
 
 /**
  * @brief Compute film grain synthesis level from a grain analysis score.
