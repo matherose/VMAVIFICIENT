@@ -19,9 +19,13 @@
 #define ANSI_RED    "\x1b[31m"
 #define ANSI_GREEN  "\x1b[32m"
 
-/* ---- Color enable state ----------------------------------------------- */
+/* ---- Color + quiet state ---------------------------------------------- */
 
 static int g_color = 0;
+static int g_quiet = 0;
+
+void ui_set_quiet(int quiet) { g_quiet = quiet ? 1 : 0; }
+int ui_is_quiet(void) { return g_quiet; }
 
 void ui_init(void) {
   static int initialized = 0;
@@ -44,6 +48,9 @@ static const char *c(const char *code) { return g_color ? code : ""; }
 /* ---- Section header --------------------------------------------------- */
 
 void ui_section(const char *title) {
+  if (g_quiet)
+    return;
+
   size_t title_len = strlen(title);
   /* Layout: "─── " (4 cols) + title + " " (1) + N×"─" */
   size_t used = 4 + title_len + 1;
@@ -58,6 +65,9 @@ void ui_section(const char *title) {
 /* ---- Key/value rows --------------------------------------------------- */
 
 void ui_kv(const char *label, const char *fmt, ...) {
+  if (g_quiet)
+    return;
+
   printf("  %-*s  ", UI_LABEL_W, label);
   va_list ap;
   va_start(ap, fmt);
@@ -67,6 +77,9 @@ void ui_kv(const char *label, const char *fmt, ...) {
 }
 
 void ui_row(const char *fmt, ...) {
+  if (g_quiet)
+    return;
+
   printf("  ");
   va_list ap;
   va_start(ap, fmt);

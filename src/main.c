@@ -41,6 +41,8 @@ static void print_usage(const char *prog) {
       "  --srt <path>     Additional SRT subtitle file (can be repeated)\n"
       "  --dry-run        Run analysis + naming, print the encoding plan,\n"
       "                   then exit. No audio/RPU/video work, no files written.\n"
+      "  --quiet          Compact output: hide informational sections, keep\n"
+      "                   only stage status lines + the Plan / Done blocks.\n"
       "  --help           Show this help\n"
       "\n"
       "Language flags (override auto-detection):\n"
@@ -269,6 +271,7 @@ int main(int argc, char *argv[]) {
   int tmdb_id = 0;
   int cli_bitrate = 0; /* 0 = auto-compute from resolution/grain */
   bool dry_run = false;
+  bool quiet = false;
   LanguageTag cli_lang_tag = LANG_TAG_NONE;
   SourceType cli_source = SOURCE_UNKNOWN;
   QualityType cli_quality = QUALITY_LIVEACTION;
@@ -321,6 +324,7 @@ int main(int argc, char *argv[]) {
        sequential value without colliding with the explicit OPT_MULTI=256
        anchor above. */
     OPT_DRY_RUN,
+    OPT_QUIET,
   };
 
   static struct option long_options[] = {
@@ -330,6 +334,7 @@ int main(int argc, char *argv[]) {
       {"help", no_argument, 0, OPT_HELP},
       {"blind", no_argument, 0, OPT_BLIND},
       {"dry-run", no_argument, 0, OPT_DRY_RUN},
+      {"quiet", no_argument, 0, OPT_QUIET},
       /* Language flags. */
       {"multi", no_argument, 0, OPT_MULTI},
       {"multivfi", no_argument, 0, OPT_MULTIVFI},
@@ -397,6 +402,9 @@ int main(int argc, char *argv[]) {
       break;
     case OPT_DRY_RUN:
       dry_run = true;
+      break;
+    case OPT_QUIET:
+      quiet = true;
       break;
     /* Language flags. */
     case OPT_MULTI:
@@ -505,6 +513,12 @@ int main(int argc, char *argv[]) {
       return 1;
     }
   }
+
+  /* Apply --quiet now that all flags are parsed. Sections that should
+     always render (Encoding plan, Done) bracket themselves with
+     ui_set_quiet(0) / ui_set_quiet(1). */
+  if (quiet)
+    ui_set_quiet(1);
 
   const char *filepath = NULL;
   if (optind < argc)
@@ -774,6 +788,10 @@ int main(int argc, char *argv[]) {
             : get_target_bitrate(info.height,
                                  grain.error == 0 ? grain.grain_score : 0.0);
 
+    /* Plan + Dry-run notice always render — the user needs them to decide
+       whether to let the encode proceed. */
+    int saved_quiet = ui_is_quiet();
+    ui_set_quiet(0);
     ui_section("Encoding plan");
     ui_kv("Preset", "%s  (%s)", quality_type_to_string(cli_quality),
           info.height >= 2160 ? "4K" : "HD");
@@ -802,6 +820,7 @@ int main(int argc, char *argv[]) {
         free_media_tracks(&tracks);
       return 0;
     }
+    ui_set_quiet(saved_quiet);
 
     {
       /* ---- OPUS audio encoding ---- */
@@ -1299,6 +1318,9 @@ int main(int argc, char *argv[]) {
               bitrate > 0 ? (avg_kbps - bitrate) / bitrate * 100.0 : 0.0;
           double speed = elapsed > 0.5 ? info.duration / elapsed : 0.0;
 
+          /* Done receipt always renders — it's the headline result. */
+          int saved_quiet_done = ui_is_quiet();
+          ui_set_quiet(0);
           ui_section("Done");
           ui_kv("Output", "%s", final_path);
           ui_kv("Size", "%s", ui_fmt_bytes(final_bytes));
@@ -1308,6 +1330,7 @@ int main(int argc, char *argv[]) {
           ui_kv("Duration", "%s  encoded in %s  (%.2f× realtime)",
                 ui_fmt_duration(info.duration), ui_fmt_duration(elapsed),
                 speed);
+          ui_set_quiet(saved_quiet_done);
         }
       }
 
