@@ -571,9 +571,15 @@ static GrainTableScores parse_grain_table(const char *path) {
 /** Extract one sample window and parse its grain table.
  *  Returns 0 on success (scores filled), or negative AVERROR on failure.
  *  The tmp-file naming is keyed by @p window_idx so concurrent passes do not
- *  collide. */
+ *  collide.
+ *
+ *  Leaves the grain table on disk on success (caller unlinks the losers and
+ *  preserves the winner). Src/denoised intermediates are always unlinked
+ *  unless @p keep_tmp is set. @p out_table_path receives the table path on
+ *  success, or an empty string on failure. */
 static int sample_grain_window(const char *path, int window_idx, double position,
-                               int keep_tmp, GrainTableScores *out_scores) {
+                               int keep_tmp, GrainTableScores *out_scores,
+                               char *out_table_path, size_t table_path_size) {
   char src_tmp[4096], denoised_tmp[4096], table_tmp[4096];
   snprintf(src_tmp, sizeof(src_tmp), "%s.grav1_src_%d.mkv", path, window_idx);
   snprintf(denoised_tmp, sizeof(denoised_tmp), "%s.grav1_denoised_%d.mkv",
@@ -583,6 +589,7 @@ static int sample_grain_window(const char *path, int window_idx, double position
 
   int ret = extract_samples(path, src_tmp, denoised_tmp, position,
                             SAMPLE_DURATION_SEC);
+  int table_ok = 0;
   if (ret >= 0) {
     ret = spawn_grav1synth(src_tmp, denoised_tmp, table_tmp);
     if (ret >= 0) {
@@ -590,19 +597,31 @@ static int sample_grain_window(const char *path, int window_idx, double position
       if (stat(table_tmp, &st) == 0 && st.st_size > 0 &&
           st.st_size <= MAX_TABLE_BYTES) {
         *out_scores = parse_grain_table(table_tmp);
+        table_ok = 1;
       } else {
         ret = AVERROR(EIO);
       }
     }
   }
 
+  /* Always remove the large intermediate video files; keep the (small) grain
+   * table so the caller can pick the grainiest window's table and feed it to
+   * SVT-AV1 via fgs_table. */
   if (!keep_tmp) {
     unlink(src_tmp);
     unlink(denoised_tmp);
-    unlink(table_tmp);
+    if (!table_ok)
+      unlink(table_tmp);
   } else {
     fprintf(stderr, "[grain] window %d (pos %.2f): kept %s\n", window_idx,
             position, table_tmp);
+  }
+
+  if (out_table_path && table_path_size > 0) {
+    if (table_ok)
+      snprintf(out_table_path, table_path_size, "%s", table_tmp);
+    else
+      out_table_path[0] = '\0';
   }
   return ret;
 }
@@ -631,22 +650,29 @@ GrainScore get_grain_score(const char *path) {
   double max_chroma = 0.0;
   int windows_succeeded = 0;
   int first_error = 0;
+  int best_window = -1;
 
   /* Holds Y scores for every window attempted (initial + refine). Failed
    * windows leave the slot at its zero init, matching the prior variance
    * behavior where failed windows contributed 0.0 to the distribution. */
   double y_scores[MAX_SAMPLE_WINDOWS] = {0};
+  /* Grain table path per attempted window; empty for failed windows. */
+  char window_tables[MAX_SAMPLE_WINDOWS][4096] = {{0}};
   int total_attempts = 0;
 
   for (int i = 0; i < NUM_SAMPLES; i++, total_attempts++) {
     GrainTableScores scores = {0};
     int ret = sample_grain_window(path, total_attempts, SAMPLE_POSITIONS[i],
-                                  keep_tmp, &scores);
+                                  keep_tmp, &scores,
+                                  window_tables[total_attempts],
+                                  sizeof(window_tables[total_attempts]));
     if (ret >= 0) {
       result.per_window_scores[i] = scores.y;
       y_scores[total_attempts] = scores.y;
-      if (scores.y > max_score)
+      if (scores.y > max_score || best_window < 0) {
         max_score = scores.y;
+        best_window = total_attempts;
+      }
       double chroma_max = scores.cb > scores.cr ? scores.cb : scores.cr;
       if (chroma_max > max_chroma)
         max_chroma = chroma_max;
@@ -678,11 +704,15 @@ GrainScore get_grain_score(const char *path) {
       GrainTableScores scores = {0};
       int ret = sample_grain_window(path, total_attempts,
                                     REFINE_SAMPLE_POSITIONS[j], keep_tmp,
-                                    &scores);
+                                    &scores,
+                                    window_tables[total_attempts],
+                                    sizeof(window_tables[total_attempts]));
       if (ret >= 0) {
         y_scores[total_attempts] = scores.y;
-        if (scores.y > max_score)
+        if (scores.y > max_score) {
           max_score = scores.y;
+          best_window = total_attempts;
+        }
         double chroma_max = scores.cb > scores.cr ? scores.cb : scores.cr;
         if (chroma_max > max_chroma)
           max_chroma = chroma_max;
@@ -703,6 +733,20 @@ GrainScore get_grain_score(const char *path) {
    * signal reflects the full picture; otherwise keep the initial-pass value. */
   result.grain_variance =
       refined ? score_variance(y_scores, total_attempts) : initial_variance;
+
+  /* Preserve the grainiest window's table (winner drives fgs_table in the
+   * encoder); unlink the losers unless VMAV_KEEP_GRAIN_TMP is set. */
+  for (int i = 0; i < MAX_SAMPLE_WINDOWS; i++) {
+    if (!window_tables[i][0])
+      continue;
+    if (i == best_window)
+      continue;
+    if (!keep_tmp)
+      unlink(window_tables[i]);
+  }
+  if (best_window >= 0 && window_tables[best_window][0])
+    snprintf(result.grain_table_path, sizeof(result.grain_table_path), "%s",
+             window_tables[best_window]);
 
   return result;
 }

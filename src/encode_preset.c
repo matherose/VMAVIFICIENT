@@ -12,19 +12,9 @@
 /*  Grain-variance adaptation tunables                                    */
 /* ====================================================================== */
 
-/* When per-window Y-score variance is high, the film has passages visibly
- * grainier than the mean. Even with a good film-grain-table those peaks
- * cost more bits, and the bracket boundaries in film_grain_* can round a
- * borderline score down to a noticeably lighter synthesis level. These
- * constants tune how we compensate. Kept at file scope for easy tuning. */
-
-/** Below this, variance is within sampling noise — no BPP adjustment. */
-#define GRAIN_VARIANCE_LOW_THRESHOLD  0.0010
-/** Above this, variance signals genuinely heterogeneous grain — full boost,
- *  and grain-synthesis bracket selection rounds up at boundaries. */
+/** Above this, per-window variance signals heterogeneous grain — grain
+ *  synthesis bracket selection rounds up at boundaries. */
 #define GRAIN_VARIANCE_HIGH_THRESHOLD 0.0040
-/** BPP multiplier reached at (and held above) GRAIN_VARIANCE_HIGH_THRESHOLD. */
-#define GRAIN_VARIANCE_HIGH_BOOST     1.13
 /** Fraction of a bracket's own width near its upper edge that triggers the
  *  upward nudge. A score in (upper - width * proximity, upper] rounds up. */
 #define GRAIN_BRACKET_BOUNDARY_PROXIMITY 0.10
@@ -771,89 +761,19 @@ const EncodePreset *get_encode_preset(QualityType quality, int video_height) {
 /*  Target bitrate from resolution and grain score                        */
 /* ====================================================================== */
 
-/** Scale factor applied to BPP as a function of grain_variance:
- *  - below LOW threshold: 1.0 (no boost)
- *  - LOW..HIGH: linear ramp 1.0 → HIGH_BOOST
- *  - at/above HIGH: HIGH_BOOST (capped) */
-double grain_variance_bpp_multiplier(double variance) {
-  if (variance <= GRAIN_VARIANCE_LOW_THRESHOLD)
-    return 1.0;
-  if (variance >= GRAIN_VARIANCE_HIGH_THRESHOLD)
-    return GRAIN_VARIANCE_HIGH_BOOST;
-  double t = (variance - GRAIN_VARIANCE_LOW_THRESHOLD) /
-             (GRAIN_VARIANCE_HIGH_THRESHOLD - GRAIN_VARIANCE_LOW_THRESHOLD);
-  return 1.0 + t * (GRAIN_VARIANCE_HIGH_BOOST - 1.0);
-}
+/* Release-style flat table. The encoder handles grain structure via its
+ * built-in denoise+synthesis path (film_grain_denoise_apply=1), so we do
+ * NOT pay extra bits to preserve noise — we pick the right tier and let
+ * the grain synthesizer rebuild texture on playback. */
+#define GRAIN_THRESHOLD 0.08 /* grain_score above this → "grainy" tier */
 
-int get_target_bitrate(int width, int height, double framerate,
-                       double grain_score, double grain_variance, int is_hdr,
-                       QualityType quality) {
-  double fps = framerate > 0.0 ? framerate : 24.0;
-  double pixels = (double)width * (double)height;
+int get_target_bitrate(int height, double grain_score) {
+  int is_4k = (height >= 2160);
+  int is_grainy = (grain_score >= GRAIN_THRESHOLD);
 
-  double bpp;
-  double grain_weight; /* How much grain_score adds to BPP. */
-  double hdr_mult;     /* Multiplier for HDR overhead. */
-
-  /* BPP calibrated against real CRF search results at preset 4 / VMAF p10 93.
-   * Reference targets at 4K 24fps:
-   *   Animation       ~2000 kbps  (0.010 bpp)
-   *   Live-action     ~2500 kbps  (0.0125 bpp)
-   *   Super35 digital ~2500 kbps  (0.0125 bpp)
-   *   Super35 analog  ~3000 kbps  (0.015 bpp)
-   *   IMAX digital    ~3000 kbps  (0.015 bpp)
-   *   IMAX analog     ~4000 kbps  (0.020 bpp) */
-  switch (quality) {
-  case QUALITY_ANIMATION:
-    bpp = 0.010;
-    grain_weight = 0.0;   /* grain score is texture, not noise */
-    hdr_mult = 1.10;
-    break;
-
-  case QUALITY_SUPER35_ANALOG:
-    bpp = 0.015;
-    grain_weight = 0.02;
-    hdr_mult = 1.15;
-    break;
-
-  case QUALITY_IMAX_ANALOG:
-    bpp = 0.020;
-    grain_weight = 0.02;
-    hdr_mult = 1.15;
-    break;
-
-  case QUALITY_IMAX_DIGITAL:
-    bpp = 0.015;
-    grain_weight = 0.01;
-    hdr_mult = 1.15;
-    break;
-
-  case QUALITY_LIVEACTION:
-  case QUALITY_SUPER35_DIGITAL:
-  default:
-    bpp = 0.0125;
-    grain_weight = 0.01;
-    hdr_mult = 1.15;
-    break;
-  }
-
-  bpp += grain_score * grain_weight;
-
-  if (is_hdr)
-    bpp *= hdr_mult;
-
-  /* Variance-adaptive scaling sits atop the base curve so the reference
-   * targets above stay interpretable — heterogeneous-grain films get a
-   * headroom bump, homogeneous ones are unaffected. */
-  bpp *= grain_variance_bpp_multiplier(grain_variance);
-
-  double bitrate = pixels * fps * bpp / 1000.0; /* kbps */
-
-  /* Sanity floor: never recommend less than 1000 kbps. */
-  if (bitrate < 1000.0)
-    bitrate = 1000.0;
-
-  return (int)(bitrate + 0.5);
+  if (is_4k)
+    return is_grainy ? 4000 : 3500;
+  return is_grainy ? 2500 : 2000;
 }
 
 /* ====================================================================== */
