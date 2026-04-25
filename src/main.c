@@ -43,6 +43,9 @@ static void print_usage(const char *prog) {
       "                   then exit. No audio/RPU/video work, no files written.\n"
       "  --quiet          Compact output: hide informational sections, keep\n"
       "                   only stage status lines + the Plan / Done blocks.\n"
+      "  --verbose        Forward SVT-AV1 encoder log messages to stderr\n"
+      "                   (rate control, GOP layout, warnings). Composes\n"
+      "                   with --quiet.\n"
       "  --help           Show this help\n"
       "\n"
       "Language flags (override auto-detection):\n"
@@ -272,6 +275,7 @@ int main(int argc, char *argv[]) {
   int cli_bitrate = 0; /* 0 = auto-compute from resolution/grain */
   bool dry_run = false;
   bool quiet = false;
+  bool verbose = false;
   LanguageTag cli_lang_tag = LANG_TAG_NONE;
   SourceType cli_source = SOURCE_UNKNOWN;
   QualityType cli_quality = QUALITY_LIVEACTION;
@@ -325,6 +329,7 @@ int main(int argc, char *argv[]) {
        anchor above. */
     OPT_DRY_RUN,
     OPT_QUIET,
+    OPT_VERBOSE,
   };
 
   static struct option long_options[] = {
@@ -335,6 +340,7 @@ int main(int argc, char *argv[]) {
       {"blind", no_argument, 0, OPT_BLIND},
       {"dry-run", no_argument, 0, OPT_DRY_RUN},
       {"quiet", no_argument, 0, OPT_QUIET},
+      {"verbose", no_argument, 0, OPT_VERBOSE},
       /* Language flags. */
       {"multi", no_argument, 0, OPT_MULTI},
       {"multivfi", no_argument, 0, OPT_MULTIVFI},
@@ -405,6 +411,9 @@ int main(int argc, char *argv[]) {
       break;
     case OPT_QUIET:
       quiet = true;
+      break;
+    case OPT_VERBOSE:
+      verbose = true;
       break;
     /* Language flags. */
     case OPT_MULTI:
@@ -519,6 +528,10 @@ int main(int argc, char *argv[]) {
      ui_set_quiet(0) / ui_set_quiet(1). */
   if (quiet)
     ui_set_quiet(1);
+  /* --verbose is orthogonal: it forwards SVT-AV1 chatter to stderr.
+     Compatible with --quiet (compact our-output, raw encoder log). */
+  if (verbose)
+    ui_set_verbose(1);
 
   const char *filepath = NULL;
   if (optind < argc)

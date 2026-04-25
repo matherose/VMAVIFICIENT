@@ -34,18 +34,41 @@
 #include <libdovi/rpu_parser.h>
 
 #include "film_grain.h"
+#include "ui.h"
 
 /* ====================================================================== */
-/*  Suppress SVT-AV1 log output (we show our own progress)               */
+/*  SVT-AV1 log routing                                                  */
+/*                                                                       */
+/* Default: silent — we render our own progress bar and don't want SVT's */
+/* per-frame chatter clobbering it. With --verbose (ui_is_verbose), we   */
+/* forward everything to stderr so the user sees the encoder's diagnostic*/
+/* output (rate control decisions, GOP layout, warnings, etc.).         */
 /* ====================================================================== */
 
-static void svt_silent_log(void *context, SvtAv1LogLevel level, const char *tag,
-                           const char *fmt, va_list args) {
+static void svt_log_callback(void *context, SvtAv1LogLevel level,
+                             const char *tag, const char *fmt, va_list args) {
   (void)context;
-  (void)level;
-  (void)tag;
-  (void)fmt;
-  (void)args;
+  if (!ui_is_verbose())
+    return;
+  /* SVT-AV1 levels: 0=fatal, 1=error, 2=warn, 3=info, 4=debug. We always
+     forward warn+ to stderr; info+ also gated by verbose (already checked
+     above, so this is effectively all levels when verbose is on). */
+  const char *level_str = "info";
+  switch (level) {
+  case SVT_AV1_LOG_FATAL: level_str = "fatal"; break;
+  case SVT_AV1_LOG_ERROR: level_str = "error"; break;
+  case SVT_AV1_LOG_WARN:  level_str = "warn";  break;
+  case SVT_AV1_LOG_INFO:  level_str = "info";  break;
+  case SVT_AV1_LOG_DEBUG: level_str = "debug"; break;
+  default: break;
+  }
+  fprintf(stderr, "[svt-av1 %s%s%s] ", level_str, tag ? " " : "",
+          tag ? tag : "");
+  vfprintf(stderr, fmt, args);
+  /* SVT messages may or may not end with \n; don't double up. */
+  size_t fmtlen = fmt ? strlen(fmt) : 0;
+  if (fmtlen == 0 || fmt[fmtlen - 1] != '\n')
+    fputc('\n', stderr);
 }
 
 /* ====================================================================== */
@@ -502,7 +525,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   int need_crop = (crop_top || crop_bottom || crop_left || crop_right);
 
   /* ---- Initialize SVT-AV1-HDR encoder ---- */
-  svt_av1_set_log_callback(svt_silent_log, NULL);
+  svt_av1_set_log_callback(svt_log_callback, NULL);
   ret = svt_av1_enc_init_handle(&svt_handle, &svt_config);
   if (ret != EB_ErrorNone) {
     fprintf(stderr, "  Video Error: svt_av1_enc_init_handle failed (%d)\n",
