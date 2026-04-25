@@ -814,6 +814,7 @@ add_executable(vmavificient
     src/audio_encode.c
     src/config.c
     src/encode_preset.c
+    src/film_grain.c
     src/rpu_extract.c
     src/video_encode.c
     src/subtitle_convert.c

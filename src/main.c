@@ -1086,6 +1086,10 @@ int main(int argc, char *argv[]) {
             .output_path = av1_video_path,
             .rpu_path = rpu_path[0] ? rpu_path : NULL,
             .preset = enc_preset,
+            .grain_table_path =
+                (grain.error == 0 && grain.grain_table_path[0])
+                    ? grain.grain_table_path
+                    : NULL,
             .film_grain = film_grain,
             .grain_score = grain.error == 0 ? grain.grain_score : 0.0,
             .grain_variance = grain.error == 0 ? grain.grain_variance : 0.0,
@@ -1104,6 +1108,11 @@ int main(int argc, char *argv[]) {
                  (long long)vr.frames_encoded, (long long)vr.bytes_written);
         else
           fprintf(stderr, "  [FAIL] video (error %d)\n", vr.error);
+
+        /* Grain table is no longer needed once the encode has consumed it. */
+        if (grain.error == 0 && grain.grain_table_path[0] &&
+            getenv("VMAV_KEEP_GRAIN_TMP") == NULL)
+          remove(grain.grain_table_path);
       }
 
       /* ---- Final MKV muxing ---- */
