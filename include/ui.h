@@ -86,6 +86,44 @@ void ui_stage_fail(const char *name, const char *reason);
  */
 void ui_hint(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
+/* ---- Progress bar ----------------------------------------------------- */
+
+/**
+ * @brief Per-call state for the progress bar. Stack-allocated by the caller.
+ *
+ * Initialize with ui_progress_start(); update with ui_progress_update();
+ * finish with ui_progress_done(). Updates render to stderr in-place
+ * (\r-prefixed) and are throttled to ~4 Hz so a per-frame call doesn't
+ * spam the terminal.
+ */
+typedef struct UiProgress {
+  long long total;        /**< Total work units. <=0 = bar is a no-op. */
+  long long start_time_s; /**< Wall-clock seconds at start. */
+  double last_draw_s;     /**< Last draw time (for throttling). */
+} UiProgress;
+
+/**
+ * @brief Initialize and clear the progress state. No draw.
+ *
+ * @p total may be <= 0 — subsequent updates / done become no-ops.
+ */
+void ui_progress_start(UiProgress *p, long long total);
+
+/**
+ * @brief Throttled update — draws "  [bar] PCT%  <middle>  ETA mm:ss"
+ * to stderr in-place, at most ~4 times per second.
+ *
+ * @p middle is a free-form caller-formatted string for the variable
+ * middle field (e.g. "12345 frames  3.2 fps", "248K RPUs", "12.5x").
+ * Pass NULL or "" to omit the middle field.
+ */
+void ui_progress_update(UiProgress *p, long long current, const char *middle);
+
+/**
+ * @brief Force a final draw at 100%, append "Done in mm:ss", end with \\n.
+ */
+void ui_progress_done(UiProgress *p, long long final_count, const char *middle);
+
 /**
  * @brief Format a duration into a rotating thread-unsafe buffer.
  *
