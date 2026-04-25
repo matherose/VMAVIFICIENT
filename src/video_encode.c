@@ -140,37 +140,12 @@ static size_t rpu_reader_next(RpuReader *r, uint8_t **out_data) {
 /*  Progress display                                                      */
 /* ====================================================================== */
 
-static void print_progress(int64_t frames_done, int64_t total_frames,
-                           time_t start_time) {
-  if (total_frames <= 0)
-    return;
-
-  double pct = (double)frames_done / total_frames;
-  if (pct > 1.0)
-    pct = 1.0;
-
-  int bar_width = 30;
-  int filled = (int)(pct * bar_width);
-  char bar[64];
-  for (int i = 0; i < bar_width; i++)
-    bar[i] = (i < filled) ? '=' : (i == filled) ? '>' : ' ';
-  bar[bar_width] = '\0';
-
-  time_t now = time(NULL);
-  double elapsed = difftime(now, start_time);
+/** Format the per-update middle string for the video progress bar. */
+static void fmt_video_middle(char *out, size_t cap, int64_t frames_done,
+                             time_t start_time) {
+  double elapsed = difftime(time(NULL), start_time);
   double fps = (elapsed > 0.5) ? frames_done / elapsed : 0;
-
-  char eta_str[32] = "";
-  if (pct > 0.01 && elapsed > 1.0) {
-    double remaining = elapsed * (1.0 - pct) / pct;
-    int eta_min = (int)(remaining / 60);
-    int eta_sec = (int)remaining % 60;
-    snprintf(eta_str, sizeof(eta_str), "ETA %02d:%02d", eta_min, eta_sec);
-  }
-
-  fprintf(stderr, "\r  [%s] %3d%%  %lld frames  %.1f fps  %s   ", bar,
-          (int)(pct * 100), (long long)frames_done, fps, eta_str);
-  fflush(stderr);
+  snprintf(out, cap, "%lld frames  %.1f fps", (long long)frames_done, fps);
 }
 
 /* ====================================================================== */
@@ -757,6 +732,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
     total_frames = (int64_t)(config->info->duration * config->info->framerate);
 
   time_t start_time = time(NULL);
+  UiProgress progress;
+  ui_progress_start(&progress, (long long)total_frames);
   time_t last_progress = 0;
   int64_t frame_number = 0;
   int pic_send_done = 0;
@@ -941,7 +918,9 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
       /* Progress */
       time_t now = time(NULL);
       if (now != last_progress) {
-        print_progress(frame_number, total_frames, start_time);
+        char middle[64];
+        fmt_video_middle(middle, sizeof(middle), frame_number, start_time);
+        ui_progress_update(&progress, (long long)frame_number, middle);
         last_progress = now;
       }
     }
@@ -1110,13 +1089,10 @@ flush_encoder:
 
   /* Final progress */
   {
-    time_t end_time = time(NULL);
-    int elapsed = (int)difftime(end_time, start_time);
-    fprintf(stderr, "\r  [");
-    for (int i = 0; i < 30; i++)
-      fprintf(stderr, "=");
-    fprintf(stderr, "] 100%%  %lld frames  Done in %02d:%02d          \n",
-            (long long)result.frames_encoded, elapsed / 60, elapsed % 60);
+    char middle[64];
+    snprintf(middle, sizeof(middle), "%lld frames",
+             (long long)result.frames_encoded);
+    ui_progress_done(&progress, (long long)result.frames_encoded, middle);
   }
 
 cleanup:

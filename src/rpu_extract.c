@@ -16,6 +16,8 @@
 
 #include <libdovi/rpu_parser.h>
 
+#include "ui.h"
+
 /** HEVC NAL unit type for Dolby Vision RPU (UNSPEC62). */
 #define HEVC_NAL_UNSPEC62 62
 
@@ -138,48 +140,6 @@ static int find_unspec62_annex_b(const uint8_t *pkt_data, int pkt_size,
   return 0;
 }
 
-/**
- * @brief Print a progress bar for RPU extraction.
- */
-static void print_extract_progress(int64_t current_pts, int64_t total_duration,
-                                   int rpu_count, time_t start_time) {
-  if (total_duration <= 0)
-    return;
-
-  double pct = (double)current_pts / total_duration;
-  if (pct > 1.0)
-    pct = 1.0;
-
-  int bar_width = 30;
-  int filled = (int)(pct * bar_width);
-
-  char bar[64];
-  for (int i = 0; i < bar_width; i++) {
-    if (i < filled)
-      bar[i] = '=';
-    else if (i == filled)
-      bar[i] = '>';
-    else
-      bar[i] = ' ';
-  }
-  bar[bar_width] = '\0';
-
-  time_t now = time(NULL);
-  double elapsed = difftime(now, start_time);
-
-  char eta_str[32] = "";
-  if (pct > 0.01 && elapsed > 1.0) {
-    double remaining = elapsed * (1.0 - pct) / pct;
-    int eta_min = (int)(remaining / 60);
-    int eta_sec = (int)remaining % 60;
-    snprintf(eta_str, sizeof(eta_str), "ETA %02d:%02d", eta_min, eta_sec);
-  }
-
-  fprintf(stderr, "\r  [%s] %3d%%  %d RPUs  %s   ", bar, (int)(pct * 100),
-          rpu_count, eta_str);
-  fflush(stderr);
-}
-
 void build_rpu_filename(char *buf, size_t bufsize, const char *base_name) {
   snprintf(buf, bufsize, "%s.rpu.bin", base_name);
 }
@@ -251,9 +211,10 @@ RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
     goto cleanup;
   }
 
-  /* Total duration for progress. */
+  /* Total duration for progress (in microseconds — matches packet PTS). */
   int64_t total_duration = fmt_ctx->duration > 0 ? fmt_ctx->duration : 0;
-  time_t start_time = time(NULL);
+  UiProgress progress;
+  ui_progress_start(&progress, (long long)total_duration);
   time_t last_progress = 0;
 
   /* Iterate through all packets in the video stream. */
@@ -310,8 +271,9 @@ RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
     if (now != last_progress && total_duration > 0) {
       int64_t current_us = av_rescale_q(pkt->pts, video_stream->time_base,
                                         (AVRational){1, AV_TIME_BASE});
-      print_extract_progress(current_us, total_duration, result.rpu_count,
-                             start_time);
+      char middle[32];
+      snprintf(middle, sizeof(middle), "%d RPUs", result.rpu_count);
+      ui_progress_update(&progress, (long long)current_us, middle);
       last_progress = now;
     }
 
@@ -320,15 +282,9 @@ RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
 
   /* Final progress. */
   if (total_duration > 0) {
-    print_extract_progress(total_duration, total_duration, result.rpu_count,
-                           start_time);
-    time_t end_time = time(NULL);
-    int elapsed = (int)difftime(end_time, start_time);
-    fprintf(stderr, "\r  [");
-    for (int i = 0; i < 30; i++)
-      fprintf(stderr, "=");
-    fprintf(stderr, "] 100%%  %d RPUs  Done in %02d:%02d          \n",
-            result.rpu_count, elapsed / 60, elapsed % 60);
+    char middle[32];
+    snprintf(middle, sizeof(middle), "%d RPUs", result.rpu_count);
+    ui_progress_done(&progress, (long long)total_duration, middle);
   }
 
   if (result.rpu_count == 0) {
