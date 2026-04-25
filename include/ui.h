@@ -40,6 +40,22 @@ void ui_set_quiet(int quiet);
 /** @brief Return current quiet state (0 = normal, non-zero = quiet). */
 int ui_is_quiet(void);
 
+/**
+ * @brief Enable / disable verbose mode.
+ *
+ * Verbose mode does NOT change ui_* output (it's already at full
+ * verbosity by default). Other modules query ui_is_verbose() to decide
+ * whether to forward third-party library chatter — currently SVT-AV1's
+ * own log callback in video_encode.c, which is silent unless verbose.
+ *
+ * Orthogonal to ui_set_quiet: --quiet --verbose is valid (compact ui_*
+ * output, but encoder chatter forwarded to stderr).
+ */
+void ui_set_verbose(int verbose);
+
+/** @brief Return current verbose state (0 = normal, non-zero = verbose). */
+int ui_is_verbose(void);
+
 /** Print "─── Title ────...─" filling UI_WIDTH visible columns. */
 void ui_section(const char *title);
 

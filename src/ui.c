@@ -19,13 +19,17 @@
 #define ANSI_RED    "\x1b[31m"
 #define ANSI_GREEN  "\x1b[32m"
 
-/* ---- Color + quiet state ---------------------------------------------- */
+/* ---- Color + quiet + verbose state ------------------------------------ */
 
 static int g_color = 0;
 static int g_quiet = 0;
+static int g_verbose = 0;
 
 void ui_set_quiet(int quiet) { g_quiet = quiet ? 1 : 0; }
 int ui_is_quiet(void) { return g_quiet; }
+
+void ui_set_verbose(int verbose) { g_verbose = verbose ? 1 : 0; }
+int ui_is_verbose(void) { return g_verbose; }
 
 void ui_init(void) {
   static int initialized = 0;
