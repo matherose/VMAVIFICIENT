@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include "audio_encode.h"
 #include "config.h"
@@ -23,6 +24,7 @@
 #include "rpu_extract.h"
 #include "subtitle_convert.h"
 #include "tmdb.h"
+#include "ui.h"
 #include "utils.h"
 #include "video_encode.h"
 
@@ -235,6 +237,9 @@ static int sub_sort_key(const char *lang, int is_forced) {
 
 int main(int argc, char *argv[]) {
   init_logging();
+  ui_init();
+  time_t encode_start_time = time(NULL);
+  printf("vmavificient — SVT-AV1-HDR %s\n", get_svt_av1_version());
 
   /* Handle --help / -h before config_init so users can discover the CLI
    * without having to provision a config.ini first. Likewise, --blind
@@ -496,83 +501,77 @@ int main(int argc, char *argv[]) {
   else
     filepath = DEFAULT_TEST_FILE;
 
-  printf("File: %s\n\n", filepath);
-
-  /* ---- Core info ---- */
+  /* ---- Source ---- */
   MediaInfo info = get_media_info(filepath);
   if (info.error != 0) {
     fprintf(stderr, "Failed to analyze file (error %d).\n", info.error);
     return 1;
   }
-  printf("Video dimensions: %dx%d\n", info.width, info.height);
-  printf("Duration:         %.2f s\n", info.duration);
-  printf("Framerate:        %.3f fps\n", info.framerate);
+  ui_section("Source");
+  ui_kv("File", "%s", filepath);
+  ui_kv("Resolution", "%d×%d", info.width, info.height);
+  ui_kv("Duration", "%s", ui_fmt_duration(info.duration));
+  ui_kv("Framerate", "%.3f fps", info.framerate);
 
-  /* ---- Encode preset ---- */
-  const EncodePreset *enc_preset = get_encode_preset(cli_quality, info.height);
-  printf("\nQuality preset:   %s (%s)\n", quality_type_to_string(cli_quality),
-         info.height >= 2160 ? "4K" : "HD");
-  printf("  SVT-AV1: preset=%d keyint=%d tune=%d ac-bias=%.1f\n",
-         enc_preset->preset, enc_preset->keyint, enc_preset->tune,
-         enc_preset->ac_bias);
-  printf("  variance-boost=%d variance-octile=%d variance-curve=%d\n",
-         enc_preset->variance_boost, enc_preset->variance_octile,
-         enc_preset->variance_curve);
-  printf("  sharpness=%d luminance-bias=%d tf=%d kf-tf=%d\n",
-         enc_preset->sharpness, enc_preset->luminance_bias,
-         enc_preset->tf_strength, enc_preset->kf_tf_strength);
-
-  /* ---- Crop detection ---- */
-  CropInfo crop = get_crop_info(filepath);
-  if (crop.error == 0) {
-    printf("\nCrop (T/B/L/R):   %d/%d/%d/%d\n", crop.top, crop.bottom,
-           crop.left, crop.right);
-  }
-
-  /* ---- HDR ---- */
+  /* ---- Color (HDR) ---- */
   HdrInfo hdr = get_hdr_info(filepath);
   if (hdr.error == 0) {
-    printf("\nHDR10:            %s\n", hdr.has_hdr10 ? "yes" : "no");
-    printf("Dolby Vision:     %s", hdr.has_dolby_vision ? "yes" : "no");
+    ui_section("Color");
+    ui_kv("HDR10", "%s", hdr.has_hdr10 ? "yes" : "no");
     if (hdr.has_dolby_vision)
-      printf(" (profile %d, level %d)", hdr.dv_profile, hdr.dv_level);
-    printf("\nHDR10+:           %s\n", hdr.has_hdr10plus ? "yes" : "no");
+      ui_kv("Dolby Vision", "yes  (profile %d, level %d)", hdr.dv_profile,
+            hdr.dv_level);
+    else
+      ui_kv("Dolby Vision", "no");
+    ui_kv("HDR10+", "%s", hdr.has_hdr10plus ? "yes" : "no");
   }
 
-  /* ---- Audio tracks ---- */
+  /* ---- Crop ---- */
+  CropInfo crop = get_crop_info(filepath);
+  if (crop.error == 0 &&
+      (crop.top || crop.bottom || crop.left || crop.right)) {
+    ui_section("Crop");
+    ui_kv("Detected", "T/B %d/%d   L/R %d/%d", crop.top, crop.bottom,
+          crop.left, crop.right);
+  }
+
+  /* ---- Tracks ---- */
   MediaTracks tracks = get_media_tracks(filepath);
+  TrackInfo *best = NULL;
+  int best_count = 0;
   if (tracks.error == 0) {
-    printf("\nAudio tracks (%d):\n", tracks.audio_count);
+    ui_section("Tracks");
+    ui_kv("Audio", "%d source track%s", tracks.audio_count,
+          tracks.audio_count == 1 ? "" : "s");
     for (int i = 0; i < tracks.audio_count; i++) {
-      printf("  #%d  %-6s  %-8s  %dch  %lld kbps  %s\n", tracks.audio[i].index,
-             tracks.audio[i].language, tracks.audio[i].codec,
-             tracks.audio[i].channels,
-             (long long)(tracks.audio[i].bitrate / 1000), tracks.audio[i].name);
+      ui_row("    #%-2d  %-4s  %-6s  %dch  %lld kbps  %s",
+             tracks.audio[i].index, tracks.audio[i].language,
+             tracks.audio[i].codec, tracks.audio[i].channels,
+             (long long)(tracks.audio[i].bitrate / 1000),
+             tracks.audio[i].name);
     }
 
-    /* ---- Best audio per language ---- */
-    int best_count = 0;
     int split_fre = (cli_lang_tag == LANG_TAG_MULTI_VF2) ? 1 : 0;
-    TrackInfo *best =
-        select_best_audio_per_language(&tracks, split_fre, &best_count);
-    if (best) {
-      printf("\nBest audio per language (%d):\n", best_count);
+    best = select_best_audio_per_language(&tracks, split_fre, &best_count);
+    if (best && best_count > 0) {
+      ui_kv("Selected", "%d track%s for encode", best_count,
+            best_count == 1 ? "" : "s");
       for (int i = 0; i < best_count; i++) {
-        printf("  #%d  %-6s  %-8s  %dch  %lld kbps  %s\n", best[i].index,
+        ui_row("    #%-2d  %-4s  %-6s  %dch  %s", best[i].index,
                best[i].language, best[i].codec, best[i].channels,
-               (long long)(best[i].bitrate / 1000), best[i].name);
+               best[i].name);
       }
-      free(best);
     }
 
-    printf("\nSubtitle tracks (%d):\n", tracks.subtitle_count);
+    ui_kv("Subtitles", "%d source track%s", tracks.subtitle_count,
+          tracks.subtitle_count == 1 ? "" : "s");
     for (int i = 0; i < tracks.subtitle_count; i++) {
       const char *type = "full";
       if (tracks.subtitles[i].is_forced)
         type = "forced";
       else if (tracks.subtitles[i].is_sdh)
         type = "sdh";
-      printf("  #%d  %-6s  %-18s  [%-6s]  %s\n", tracks.subtitles[i].index,
+      ui_row("    #%-2d  %-4s  %-7s  %-6s  %s", tracks.subtitles[i].index,
              tracks.subtitles[i].language[0] ? tracks.subtitles[i].language
                                              : "und",
              tracks.subtitles[i].codec, type, tracks.subtitles[i].name);
@@ -580,20 +579,24 @@ int main(int argc, char *argv[]) {
   }
 
   /* ---- Grain analysis ---- */
-  printf("\nAnalyzing grain (this may take a moment)...\n");
+  ui_section("Grain analysis");
+  ui_row("Sampling windows from source... (this may take a few minutes)");
   GrainScore grain = get_grain_score(filepath);
   int film_grain = 0;
   if (grain.error == 0) {
     film_grain = get_film_grain_from_score(grain.grain_score,
-                                            grain.grain_variance, cli_quality);
-    printf("Grain analysis complete:\n");
-    printf("  Windows sampled:    %d%s\n", grain.windows_succeeded,
-           grain.windows_succeeded > 4 ? " (refined)" : "");
-    printf("  Luma grain score:   %.6f\n", grain.grain_score);
-    printf("  Chroma grain score: %.4f\n", grain.chroma_grain_score);
-    printf("  Grain variance:     %.4f\n", grain.grain_variance);
-    printf("  Film grain level:   %d\n", film_grain);
+                                           grain.grain_variance, cli_quality);
+    ui_kv("Windows", "%d%s", grain.windows_succeeded,
+          grain.windows_succeeded > 4 ? "  (refined)" : "");
+    ui_kv("Luma score", "%.4f", grain.grain_score);
+    ui_kv("Chroma score", "%.4f", grain.chroma_grain_score);
+    ui_kv("Variance", "%.4f", grain.grain_variance);
+    ui_kv("Synth level", "%d  (0–50)", film_grain);
+  } else {
+    ui_stage_fail("Grain analysis", "fell back to defaults");
   }
+
+  const EncodePreset *enc_preset = get_encode_preset(cli_quality, info.height);
 
   /* ---- Naming setup (TMDB or --blind) ---- */
   char output_name[1024] = "";
@@ -631,17 +634,17 @@ int main(int argc, char *argv[]) {
         tracks.audio[0].language[0])
       video_language = tracks.audio[0].language;
 
-    printf("\nBlind mode — output filename:\n  %s\n", output_name);
     naming_ok = true;
   } else if (tmdb_id > 0) {
-    printf("\nFetching TMDB info for ID %d...\n", tmdb_id);
+    ui_section("TMDB lookup");
+    ui_kv("Movie ID", "%d", tmdb_id);
     TmdbMovieInfo tmdb = tmdb_fetch_movie(tmdb_id);
     if (tmdb.error != 0) {
-      fprintf(stderr, "Failed to fetch TMDB info.\n");
+      ui_stage_fail("TMDB fetch", "could not fetch movie info");
     } else {
-      printf("  Title:    %s\n", tmdb.original_title);
-      printf("  Year:     %d\n", tmdb.release_year);
-      printf("  Language: %s\n", tmdb.original_language);
+      ui_kv("Title", "%s", tmdb.original_title);
+      ui_kv("Year", "%d", tmdb.release_year);
+      ui_kv("Language", "%s", tmdb.original_language);
 
       /* Source: CLI flag > filename detection > interactive prompt. */
       if (source == SOURCE_UNKNOWN)
@@ -684,8 +687,6 @@ int main(int argc, char *argv[]) {
       build_output_filename(output_name, sizeof(output_name),
                             tmdb.original_title, tmdb.release_year, lang_tag,
                             &info, &hdr, source);
-
-      printf("\nOutput filename:\n  %s\n", output_name);
 
       /* Strip .mkv to get base name. */
       snprintf(base_name, sizeof(base_name), "%s", output_name);
@@ -772,7 +773,9 @@ int main(int argc, char *argv[]) {
       int opus_count = 0;
 
       if (enc_best && enc_best_count > 0) {
-        printf("\nEncoding %d audio track(s) to OPUS...\n", enc_best_count);
+        ui_section("Audio");
+        ui_kv("Encode", "%d track%s → OPUS", enc_best_count,
+              enc_best_count == 1 ? "" : "s");
         for (int i = 0; i < enc_best_count && i < 32; i++) {
           /* In VF2 mode, each French track gets its own variant derived from
              the track title ("VFF - DTS-HD…", "VFQ - E-AC3…") so VFF and VFQ
@@ -805,20 +808,27 @@ int main(int argc, char *argv[]) {
                                  enc_best[i].language, enc_best[i].channels,
                                  track_origin);
 
-          printf("  [%d/%d] %s (%s, %dch, %lld kbps) → \"%s\"...\n", i + 1,
+          ui_row("[%d/%d] %s  %s  %dch  %lld kbps  →  \"%s\"", i + 1,
                  enc_best_count, enc_best[i].language, enc_best[i].codec,
-                 enc_best[i].channels, (long long)(enc_best[i].bitrate / 1000),
-                 audio_names[i]);
+                 enc_best[i].channels,
+                 (long long)(enc_best[i].bitrate / 1000), audio_names[i]);
 
+          time_t track_t0 = time(NULL);
           OpusEncodeResult r =
               encode_track_to_opus(filepath, &enc_best[i], opus_paths[i]);
 
-          if (r.skipped)
-            printf("  [SKIP] %s (already exists)\n", opus_name);
-          else if (r.error == 0)
-            printf("  [OK]   %s\n", opus_name);
-          else
-            fprintf(stderr, "  [FAIL] %s (error %d)\n", opus_name, r.error);
+          if (r.skipped) {
+            ui_stage_skip(opus_name, "already exists");
+          } else if (r.error == 0) {
+            char detail[64];
+            snprintf(detail, sizeof(detail), "%s",
+                     ui_fmt_duration(difftime(time(NULL), track_t0)));
+            ui_stage_ok(opus_name, detail);
+          } else {
+            char err[64];
+            snprintf(err, sizeof(err), "error %d", r.error);
+            ui_stage_fail(opus_name, err);
+          }
 
           opus_count++;
         }
@@ -835,7 +845,9 @@ int main(int argc, char *argv[]) {
       int sub_split_fre = (resolved_lang_tag == LANG_TAG_MULTI_VF2) ? 1 : 0;
 
       if (tracks.error == 0 && tracks.subtitle_count > 0) {
-        printf("\nProcessing %d subtitle track(s)...\n", tracks.subtitle_count);
+        ui_section("Subtitles");
+        ui_kv("Process", "%d source track%s", tracks.subtitle_count,
+              tracks.subtitle_count == 1 ? "" : "s");
 
         for (int i = 0; i < tracks.subtitle_count && srt_count < 48; i++) {
           TrackInfo *sub = &tracks.subtitles[i];
@@ -882,8 +894,7 @@ int main(int argc, char *argv[]) {
             struct stat srt_st;
             if (stat(srt_paths[srt_count], &srt_st) == 0 &&
                 srt_st.st_size > 0) {
-              printf("  [SKIP] %s (already exists) → \"%s\"\n", srt_fname,
-                     srt_names[srt_count]);
+              ui_stage_skip(srt_fname, "already exists");
               srt_count++;
             } else {
               /* Extract text subtitle using ffmpeg command */
@@ -896,15 +907,17 @@ int main(int argc, char *argv[]) {
                        "-c:s %s \"%s\"",
                        filepath, sub->index, codec_arg, srt_paths[srt_count]);
 
-              printf("  Extracting #%d %s (%s) → \"%s\"...\n", sub->index, lang,
+              ui_row("Extract  #%-2d  %s  %s  →  \"%s\"", sub->index, lang,
                      sub->codec, srt_names[srt_count]);
 
               int rc = system(cmd);
               if (rc == 0) {
-                printf("  [OK]   %s\n", srt_fname);
+                ui_stage_ok(srt_fname, NULL);
                 srt_count++;
               } else {
-                fprintf(stderr, "  [FAIL] extraction failed (rc=%d)\n", rc);
+                char err[64];
+                snprintf(err, sizeof(err), "ffmpeg rc=%d", rc);
+                ui_stage_fail("Subtitle extraction", err);
               }
             }
           } else if (is_pgs_subtitle(sub)) {
@@ -925,8 +938,10 @@ int main(int argc, char *argv[]) {
             }
 
             if (srt_exists_for_lang) {
-              printf("  [SKIP] PGS #%d %s (SRT already available)\n",
-                     sub->index, lang);
+              char skip_label[64];
+              snprintf(skip_label, sizeof(skip_label), "PGS #%d %s",
+                       sub->index, lang);
+              ui_stage_skip(skip_label, "SRT already available");
               continue;
             }
 
@@ -945,23 +960,27 @@ int main(int argc, char *argv[]) {
             srt_is_sdh[srt_count] = sub->is_sdh;
             srt_variant[srt_count] = track_variant_key;
 
-            printf("  OCR PGS #%d %s → \"%s\"...\n", sub->index, lang,
+            ui_row("OCR      PGS #%-2d  %s  →  \"%s\"", sub->index, lang,
                    srt_names[srt_count]);
 
             SubtitleConvertResult scr =
                 convert_pgs_to_srt(filepath, sub, srt_paths[srt_count], NULL);
 
             if (scr.skipped) {
-              printf("  [SKIP] %s (already exists)\n", srt_fname);
+              ui_stage_skip(srt_fname, "already exists");
               srt_count++;
             } else if (scr.error == 0 && scr.subtitle_count > 0) {
-              printf("  [OK]   %s (%d subtitles)\n", srt_fname,
-                     scr.subtitle_count);
+              char detail[64];
+              snprintf(detail, sizeof(detail), "%d subtitles",
+                       scr.subtitle_count);
+              ui_stage_ok(srt_fname, detail);
               srt_count++;
             } else if (scr.error == 0) {
-              printf("  [WARN] %s (no subtitles extracted)\n", srt_fname);
+              ui_stage_skip(srt_fname, "no subtitles extracted");
             } else {
-              fprintf(stderr, "  [FAIL] OCR failed (error %d)\n", scr.error);
+              char err[64];
+              snprintf(err, sizeof(err), "OCR error %d", scr.error);
+              ui_stage_fail(srt_fname, err);
             }
           }
         }
@@ -1052,15 +1071,21 @@ int main(int argc, char *argv[]) {
 
         snprintf(rpu_path, sizeof(rpu_path), "%s%s", output_dir, rpu_name);
 
-        printf("\nExtracting Dolby Vision RPU...\n");
+        ui_section("Dolby Vision RPU");
+        time_t rpu_t0 = time(NULL);
         RpuExtractResult rpu_res = extract_rpu(filepath, rpu_path);
 
-        if (rpu_res.skipped)
-          printf("  [SKIP] %s (already exists)\n", rpu_name);
-        else if (rpu_res.error == 0)
-          printf("  [OK]   %s (%d RPUs)\n", rpu_name, rpu_res.rpu_count);
-        else {
-          fprintf(stderr, "  [FAIL] %s (error %d)\n", rpu_name, rpu_res.error);
+        if (rpu_res.skipped) {
+          ui_stage_skip(rpu_name, "already exists");
+        } else if (rpu_res.error == 0) {
+          char detail[64];
+          snprintf(detail, sizeof(detail), "%d RPUs in %s", rpu_res.rpu_count,
+                   ui_fmt_duration(difftime(time(NULL), rpu_t0)));
+          ui_stage_ok(rpu_name, detail);
+        } else {
+          char err[64];
+          snprintf(err, sizeof(err), "error %d", rpu_res.error);
+          ui_stage_fail(rpu_name, err);
           rpu_path[0] = '\0'; /* Don't use RPU on failure */
         }
       }
@@ -1069,17 +1094,38 @@ int main(int argc, char *argv[]) {
       char av1_video_path[4096];
       snprintf(av1_video_path, sizeof(av1_video_path), "%s%s.video.mkv",
                output_dir, base_name);
+      time_t video_t0 = time(NULL);
+      VideoEncodeResult vr = {0};
+      int bitrate = 0;
 
       {
-        int bitrate =
+        bitrate =
             cli_bitrate > 0
                 ? cli_bitrate
                 : get_target_bitrate(info.height,
                                      grain.error == 0 ? grain.grain_score
                                                       : 0.0);
-        printf("\nEncoding video to AV1 (%d kbps, %s, %s)...\n", bitrate,
-               quality_type_to_string(cli_quality),
-               info.height >= 2160 ? "4K" : "HD");
+
+        ui_section("Encoding plan");
+        ui_kv("Preset", "%s  (%s)", quality_type_to_string(cli_quality),
+              info.height >= 2160 ? "4K" : "HD");
+        ui_kv("SVT-AV1",
+              "preset %d, tune %d, keyint %d, ac-bias %.1f",
+              enc_preset->preset, enc_preset->tune, enc_preset->keyint,
+              enc_preset->ac_bias);
+        if (grain.error == 0) {
+          int is_4k = info.height >= 2160;
+          int is_grainy = grain.grain_score >= 0.08;
+          ui_kv("Grain", "level %d  (%s tier)", film_grain,
+                is_grainy ? "grainy" : "low-grain");
+          ui_kv("Bitrate", "%d kbps VBR  (%s %s tier)", bitrate,
+                is_4k ? "4K" : "HD", is_grainy ? "grainy" : "low-grain");
+        } else {
+          ui_kv("Bitrate", "%d kbps VBR", bitrate);
+        }
+        ui_kv("Output", "%s%s", output_dir, output_name);
+
+        ui_section("Video encoding");
 
         VideoEncodeConfig vcfg = {
             .input_path = filepath,
@@ -1099,15 +1145,22 @@ int main(int argc, char *argv[]) {
             .hdr = &hdr,
         };
 
-        VideoEncodeResult vr = encode_video(&vcfg);
+        vr = encode_video(&vcfg);
 
-        if (vr.skipped)
-          printf("  [SKIP] video (already exists)\n");
-        else if (vr.error == 0)
-          printf("  [OK]   video (%lld frames, %lld bytes)\n",
-                 (long long)vr.frames_encoded, (long long)vr.bytes_written);
-        else
-          fprintf(stderr, "  [FAIL] video (error %d)\n", vr.error);
+        if (vr.skipped) {
+          ui_stage_skip("video.mkv", "already exists");
+        } else if (vr.error == 0) {
+          char detail[128];
+          snprintf(detail, sizeof(detail), "%lld frames, %s in %s",
+                   (long long)vr.frames_encoded,
+                   ui_fmt_bytes(vr.bytes_written),
+                   ui_fmt_duration(difftime(time(NULL), video_t0)));
+          ui_stage_ok("video.mkv", detail);
+        } else {
+          char err[64];
+          snprintf(err, sizeof(err), "error %d", vr.error);
+          ui_stage_fail("video.mkv", err);
+        }
 
         /* Grain table is no longer needed once the encode has consumed it. */
         if (grain.error == 0 && grain.grain_table_path[0] &&
@@ -1163,40 +1216,78 @@ int main(int argc, char *argv[]) {
             .chapters_source_path = filepath,
         };
 
-        printf("\nMuxing final MKV (%d audio, %d subtitle tracks)...\n",
-               opus_count, srt_count);
-
+        ui_section("Final mux");
+        ui_kv("Inputs", "1 video + %d audio + %d subtitle track%s",
+              opus_count, srt_count, srt_count == 1 ? "" : "s");
+        time_t mux_t0 = time(NULL);
         FinalMuxResult mr = final_mux(&mux_cfg);
 
-        if (mr.skipped)
-          printf("  [SKIP] %s (already exists)\n", output_name);
-        else if (mr.error == 0)
-          printf("  [OK]   %s\n", output_name);
-        else
-          fprintf(stderr, "  [FAIL] %s (error %d)\n", output_name, mr.error);
+        if (mr.skipped) {
+          ui_stage_skip(output_name, "already exists");
+        } else if (mr.error == 0) {
+          char detail[64];
+          snprintf(detail, sizeof(detail), "%s",
+                   ui_fmt_duration(difftime(time(NULL), mux_t0)));
+          ui_stage_ok(output_name, detail);
+        } else {
+          char err[64];
+          snprintf(err, sizeof(err), "error %d", mr.error);
+          ui_stage_fail(output_name, err);
+        }
 
         /* Clean up intermediate files on success. Leaving sidecar .srt
            files next to the final MKV causes players to auto-load them
            as external subtitles, overriding the embedded defaults. */
+        int removed = 0;
         if (mr.error == 0) {
-          printf("\nCleaning up intermediate files...\n");
-          for (int i = 0; i < opus_count; i++) {
+          for (int i = 0; i < opus_count; i++)
             if (remove(opus_paths[i]) == 0)
-              printf("  [RM]   %s\n", opus_paths[i]);
-          }
+              removed++;
           for (int i = 0; i < srt_count; i++) {
             /* Skip user-supplied --srt files: they live outside output_dir
                or weren't created by us. Only remove SRTs we wrote into
                the output directory. */
-            if (strncmp(srt_paths[i], output_dir, strlen(output_dir)) == 0) {
+            if (strncmp(srt_paths[i], output_dir, strlen(output_dir)) == 0)
               if (remove(srt_paths[i]) == 0)
-                printf("  [RM]   %s\n", srt_paths[i]);
-            }
+                removed++;
           }
           if (remove(av1_video_path) == 0)
-            printf("  [RM]   %s\n", av1_video_path);
+            removed++;
           if (rpu_path[0] && remove(rpu_path) == 0)
-            printf("  [RM]   %s\n", rpu_path);
+            removed++;
+          if (removed > 0) {
+            char detail[64];
+            snprintf(detail, sizeof(detail), "%d intermediate file%s", removed,
+                     removed == 1 ? "" : "s");
+            ui_stage_ok("Cleanup", detail);
+          }
+        }
+
+        /* ---- Done receipt ---- */
+        if (mr.error == 0 && !mr.skipped) {
+          struct stat fst;
+          long long final_bytes = 0;
+          if (stat(final_path, &fst) == 0)
+            final_bytes = (long long)fst.st_size;
+
+          double elapsed = difftime(time(NULL), encode_start_time);
+          double avg_kbps = 0.0;
+          if (info.duration > 0.5 && final_bytes > 0)
+            avg_kbps = ((double)final_bytes * 8.0) /
+                       (info.duration * 1000.0);
+          double delta_pct =
+              bitrate > 0 ? (avg_kbps - bitrate) / bitrate * 100.0 : 0.0;
+          double speed = elapsed > 0.5 ? info.duration / elapsed : 0.0;
+
+          ui_section("Done");
+          ui_kv("Output", "%s", final_path);
+          ui_kv("Size", "%s", ui_fmt_bytes(final_bytes));
+          if (bitrate > 0 && avg_kbps > 0)
+            ui_kv("Bitrate", "%.0f kbps avg  (%+.1f%% vs %d kbps target)",
+                  avg_kbps, delta_pct, bitrate);
+          ui_kv("Duration", "%s  encoded in %s  (%.2f× realtime)",
+                ui_fmt_duration(info.duration), ui_fmt_duration(elapsed),
+                speed);
         }
       }
 

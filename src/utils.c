@@ -48,10 +48,10 @@ int check_dependencies(void) {
   dovi_rpu_free(NULL);
   hdr10plus_rs_data_free(NULL);
 
-  printf("SVT-AV1:          %s\n", svt_av1_get_version());
-
   return 0;
 }
+
+const char *get_svt_av1_version(void) { return svt_av1_get_version(); }
 
 bool str_contains_ci(const char *haystack, const char *needle) {
   size_t hlen = strlen(haystack), nlen = strlen(needle);

@@ -31,4 +31,12 @@ int check_dependencies(void);
  */
 bool str_contains_ci(const char *haystack, const char *needle);
 
+/**
+ * @brief Return the linked SVT-AV1-HDR version string.
+ *
+ * Indirection lets main.c avoid pulling in the SVT-AV1 headers just for
+ * the banner.
+ */
+const char *get_svt_av1_version(void);
+
 #endif /* UTILS_H */
