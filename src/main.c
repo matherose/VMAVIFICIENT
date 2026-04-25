@@ -39,6 +39,10 @@ static void print_usage(const char *prog) {
       "                   (no config.ini required)\n"
       "  --bitrate <kbps> Override target video bitrate (e.g. 3500)\n"
       "  --srt <path>     Additional SRT subtitle file (can be repeated)\n"
+      "  --dry-run        Run analysis + naming, print the encoding plan,\n"
+      "                   then exit. No audio/RPU/video work, no files written.\n"
+      "  --quiet          Compact output: hide informational sections, keep\n"
+      "                   only stage status lines + the Plan / Done blocks.\n"
       "  --help           Show this help\n"
       "\n"
       "Language flags (override auto-detection):\n"
@@ -266,6 +270,8 @@ int main(int argc, char *argv[]) {
   /* ---- CLI parsing ---- */
   int tmdb_id = 0;
   int cli_bitrate = 0; /* 0 = auto-compute from resolution/grain */
+  bool dry_run = false;
+  bool quiet = false;
   LanguageTag cli_lang_tag = LANG_TAG_NONE;
   SourceType cli_source = SOURCE_UNKNOWN;
   QualityType cli_quality = QUALITY_LIVEACTION;
@@ -314,6 +320,11 @@ int main(int argc, char *argv[]) {
     OPT_SUPER35_DIGITAL,
     OPT_IMAX_ANALOG,
     OPT_IMAX_DIGITAL,
+    /* Auxiliary flags appended at the end so they get the next free
+       sequential value without colliding with the explicit OPT_MULTI=256
+       anchor above. */
+    OPT_DRY_RUN,
+    OPT_QUIET,
   };
 
   static struct option long_options[] = {
@@ -322,6 +333,8 @@ int main(int argc, char *argv[]) {
       {"srt", required_argument, 0, OPT_SRT},
       {"help", no_argument, 0, OPT_HELP},
       {"blind", no_argument, 0, OPT_BLIND},
+      {"dry-run", no_argument, 0, OPT_DRY_RUN},
+      {"quiet", no_argument, 0, OPT_QUIET},
       /* Language flags. */
       {"multi", no_argument, 0, OPT_MULTI},
       {"multivfi", no_argument, 0, OPT_MULTIVFI},
@@ -386,6 +399,12 @@ int main(int argc, char *argv[]) {
       return 0;
     case OPT_BLIND:
       /* Already detected in the pre-scan above; nothing more to do here. */
+      break;
+    case OPT_DRY_RUN:
+      dry_run = true;
+      break;
+    case OPT_QUIET:
+      quiet = true;
       break;
     /* Language flags. */
     case OPT_MULTI:
@@ -494,6 +513,12 @@ int main(int argc, char *argv[]) {
       return 1;
     }
   }
+
+  /* Apply --quiet now that all flags are parsed. Sections that should
+     always render (Encoding plan, Done) bracket themselves with
+     ui_set_quiet(0) / ui_set_quiet(1). */
+  if (quiet)
+    ui_set_quiet(1);
 
   const char *filepath = NULL;
   if (optind < argc)
@@ -756,6 +781,47 @@ int main(int argc, char *argv[]) {
   }
 
   if (naming_ok) {
+    /* ---- Encoding plan ---- */
+    int bitrate =
+        cli_bitrate > 0
+            ? cli_bitrate
+            : get_target_bitrate(info.height,
+                                 grain.error == 0 ? grain.grain_score : 0.0);
+
+    /* Plan + Dry-run notice always render — the user needs them to decide
+       whether to let the encode proceed. */
+    int saved_quiet = ui_is_quiet();
+    ui_set_quiet(0);
+    ui_section("Encoding plan");
+    ui_kv("Preset", "%s  (%s)", quality_type_to_string(cli_quality),
+          info.height >= 2160 ? "4K" : "HD");
+    ui_kv("SVT-AV1", "preset %d, tune %d, keyint %d, ac-bias %.1f",
+          enc_preset->preset, enc_preset->tune, enc_preset->keyint,
+          enc_preset->ac_bias);
+    if (grain.error == 0) {
+      int is_4k = info.height >= 2160;
+      int is_grainy = grain.grain_score >= 0.08;
+      ui_kv("Grain", "level %d  (%s tier)", film_grain,
+            is_grainy ? "grainy" : "low-grain");
+      ui_kv("Bitrate", "%d kbps VBR  (%s %s tier)", bitrate,
+            is_4k ? "4K" : "HD", is_grainy ? "grainy" : "low-grain");
+    } else {
+      ui_kv("Bitrate", "%d kbps VBR", bitrate);
+    }
+    ui_kv("Output", "%s%s", output_dir, output_name);
+
+    if (dry_run) {
+      ui_section("Dry run");
+      ui_row("No files written. Re-run without --dry-run to encode.");
+      if (grain.error == 0 && grain.grain_table_path[0] &&
+          getenv("VMAV_KEEP_GRAIN_TMP") == NULL)
+        remove(grain.grain_table_path);
+      if (tracks.error == 0)
+        free_media_tracks(&tracks);
+      return 0;
+    }
+    ui_set_quiet(saved_quiet);
+
     {
       /* ---- OPUS audio encoding ---- */
       int enc_best_count = 0;
@@ -1096,35 +1162,8 @@ int main(int argc, char *argv[]) {
                output_dir, base_name);
       time_t video_t0 = time(NULL);
       VideoEncodeResult vr = {0};
-      int bitrate = 0;
 
       {
-        bitrate =
-            cli_bitrate > 0
-                ? cli_bitrate
-                : get_target_bitrate(info.height,
-                                     grain.error == 0 ? grain.grain_score
-                                                      : 0.0);
-
-        ui_section("Encoding plan");
-        ui_kv("Preset", "%s  (%s)", quality_type_to_string(cli_quality),
-              info.height >= 2160 ? "4K" : "HD");
-        ui_kv("SVT-AV1",
-              "preset %d, tune %d, keyint %d, ac-bias %.1f",
-              enc_preset->preset, enc_preset->tune, enc_preset->keyint,
-              enc_preset->ac_bias);
-        if (grain.error == 0) {
-          int is_4k = info.height >= 2160;
-          int is_grainy = grain.grain_score >= 0.08;
-          ui_kv("Grain", "level %d  (%s tier)", film_grain,
-                is_grainy ? "grainy" : "low-grain");
-          ui_kv("Bitrate", "%d kbps VBR  (%s %s tier)", bitrate,
-                is_4k ? "4K" : "HD", is_grainy ? "grainy" : "low-grain");
-        } else {
-          ui_kv("Bitrate", "%d kbps VBR", bitrate);
-        }
-        ui_kv("Output", "%s%s", output_dir, output_name);
-
         ui_section("Video encoding");
 
         VideoEncodeConfig vcfg = {
@@ -1279,6 +1318,9 @@ int main(int argc, char *argv[]) {
               bitrate > 0 ? (avg_kbps - bitrate) / bitrate * 100.0 : 0.0;
           double speed = elapsed > 0.5 ? info.duration / elapsed : 0.0;
 
+          /* Done receipt always renders — it's the headline result. */
+          int saved_quiet_done = ui_is_quiet();
+          ui_set_quiet(0);
           ui_section("Done");
           ui_kv("Output", "%s", final_path);
           ui_kv("Size", "%s", ui_fmt_bytes(final_bytes));
@@ -1288,6 +1330,7 @@ int main(int argc, char *argv[]) {
           ui_kv("Duration", "%s  encoded in %s  (%.2f× realtime)",
                 ui_fmt_duration(info.duration), ui_fmt_duration(elapsed),
                 speed);
+          ui_set_quiet(saved_quiet_done);
         }
       }
 

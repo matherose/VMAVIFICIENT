@@ -27,6 +27,19 @@
  */
 void ui_init(void);
 
+/**
+ * @brief Enable / disable quiet mode.
+ *
+ * In quiet mode, ui_section / ui_kv / ui_row become no-ops so the user
+ * sees only stage status lines (ui_stage_*). Call ui_set_quiet(0) to
+ * temporarily un-quiet around blocks that should always render — the
+ * Encoding plan and Done receipt are the canonical examples.
+ */
+void ui_set_quiet(int quiet);
+
+/** @brief Return current quiet state (0 = normal, non-zero = quiet). */
+int ui_is_quiet(void);
+
 /** Print "─── Title ────...─" filling UI_WIDTH visible columns. */
 void ui_section(const char *title);
 
