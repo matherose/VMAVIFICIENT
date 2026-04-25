@@ -118,6 +118,15 @@ void ui_stage_fail(const char *name, const char *reason) {
     fprintf(stderr, "  %s[FAIL]%s %s\n", c(ANSI_RED), c(ANSI_RESET), name);
 }
 
+void ui_hint(const char *fmt, ...) {
+  fprintf(stderr, "  %s[hint]%s ", c(ANSI_DIM), c(ANSI_RESET));
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  va_end(ap);
+  fputc('\n', stderr);
+}
+
 /* ---- Formatting helpers (rotating static buffers) --------------------- */
 
 #define ROTATE_N 4

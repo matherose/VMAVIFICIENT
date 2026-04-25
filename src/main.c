@@ -542,7 +542,11 @@ int main(int argc, char *argv[]) {
   /* ---- Source ---- */
   MediaInfo info = get_media_info(filepath);
   if (info.error != 0) {
-    fprintf(stderr, "Failed to analyze file (error %d).\n", info.error);
+    char err[64];
+    snprintf(err, sizeof(err), "could not probe %s (error %d)", filepath,
+             info.error);
+    ui_stage_fail("Source probe", err);
+    ui_hint("verify the path and that ffmpeg can read the container");
     return 1;
   }
   ui_section("Source");
@@ -631,7 +635,12 @@ int main(int argc, char *argv[]) {
     ui_kv("Variance", "%.4f", grain.grain_variance);
     ui_kv("Synth level", "%d  (0–50)", film_grain);
   } else {
-    ui_stage_fail("Grain analysis", "fell back to defaults");
+    char err[64];
+    snprintf(err, sizeof(err), "all windows failed (last error %d)",
+             grain.error);
+    ui_stage_fail("Grain analysis", err);
+    ui_hint("set VMAV_KEEP_GRAIN_TMP=1 to retain the per-window scratch "
+            "files for inspection");
   }
 
   const EncodePreset *enc_preset = get_encode_preset(cli_quality, info.height);
@@ -679,6 +688,8 @@ int main(int argc, char *argv[]) {
     TmdbMovieInfo tmdb = tmdb_fetch_movie(tmdb_id);
     if (tmdb.error != 0) {
       ui_stage_fail("TMDB fetch", "could not fetch movie info");
+      ui_hint("verify TMDB_API_KEY is set in config.ini and the ID is "
+              "correct (e.g. tmdb.org/movie/<id>)");
     } else {
       ui_kv("Title", "%s", tmdb.original_title);
       ui_kv("Year", "%d", tmdb.release_year);
@@ -904,9 +915,13 @@ int main(int argc, char *argv[]) {
                      ui_fmt_duration(difftime(time(NULL), track_t0)));
             ui_stage_ok(opus_name, detail);
           } else {
-            char err[64];
-            snprintf(err, sizeof(err), "error %d", r.error);
+            char err[128];
+            snprintf(err, sizeof(err), "stream #%d (%s, %dch): error %d",
+                     enc_best[i].index, enc_best[i].codec,
+                     enc_best[i].channels, r.error);
             ui_stage_fail(opus_name, err);
+            ui_hint("verify the source stream is decodable; opusenc-style "
+                    "channel layouts (>2ch) require ffmpeg with libopus");
           }
 
           opus_count++;
@@ -994,9 +1009,13 @@ int main(int argc, char *argv[]) {
                 ui_stage_ok(srt_fname, NULL);
                 srt_count++;
               } else {
-                char err[64];
-                snprintf(err, sizeof(err), "ffmpeg rc=%d", rc);
+                char err[128];
+                snprintf(err, sizeof(err),
+                         "stream #%d (%s, %s): ffmpeg rc=%d", sub->index, lang,
+                         sub->codec, rc);
                 ui_stage_fail("Subtitle extraction", err);
+                ui_hint("verify ffmpeg is on PATH and the stream codec is "
+                        "convertible to subrip");
               }
             }
           } else if (is_pgs_subtitle(sub)) {
@@ -1057,9 +1076,12 @@ int main(int argc, char *argv[]) {
             } else if (scr.error == 0) {
               ui_stage_skip(srt_fname, "no subtitles extracted");
             } else {
-              char err[64];
-              snprintf(err, sizeof(err), "OCR error %d", scr.error);
+              char err[128];
+              snprintf(err, sizeof(err), "PGS #%d (%s): OCR error %d",
+                       sub->index, lang, scr.error);
               ui_stage_fail(srt_fname, err);
+              ui_hint("verify Tesseract has training data for the "
+                      "language ($TESSDATA_PREFIX/<lang>.traineddata)");
             }
           }
         }
@@ -1165,6 +1187,8 @@ int main(int argc, char *argv[]) {
           char err[64];
           snprintf(err, sizeof(err), "error %d", rpu_res.error);
           ui_stage_fail(rpu_name, err);
+          ui_hint("source claims Dolby Vision but RPU extraction failed; "
+                  "encode will continue without DV metadata");
           rpu_path[0] = '\0'; /* Don't use RPU on failure */
         }
       }
@@ -1210,8 +1234,11 @@ int main(int argc, char *argv[]) {
           ui_stage_ok("video.mkv", detail);
         } else {
           char err[64];
-          snprintf(err, sizeof(err), "error %d", vr.error);
+          snprintf(err, sizeof(err), "error %d after %lld frames",
+                   vr.error, (long long)vr.frames_encoded);
           ui_stage_fail("video.mkv", err);
+          ui_hint("re-run with --verbose to forward SVT-AV1's own log to "
+                  "stderr (rate control, GOP layout, fatal warnings)");
         }
 
         /* Grain table is no longer needed once the encode has consumed it. */
@@ -1282,9 +1309,12 @@ int main(int argc, char *argv[]) {
                    ui_fmt_duration(difftime(time(NULL), mux_t0)));
           ui_stage_ok(output_name, detail);
         } else {
-          char err[64];
-          snprintf(err, sizeof(err), "error %d", mr.error);
+          char err[128];
+          snprintf(err, sizeof(err), "error %d (%d audio + %d sub inputs)",
+                   mr.error, opus_count, srt_count);
           ui_stage_fail(output_name, err);
+          ui_hint("intermediates kept on disk; inspect them next to the "
+                  "source file before re-running");
         }
 
         /* Clean up intermediate files on success. Leaving sidecar .srt
