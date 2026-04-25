@@ -76,6 +76,17 @@ void ui_stage_skip(const char *name, const char *reason);
 void ui_stage_fail(const char *name, const char *reason);
 
 /**
+ * @brief Print a "[hint] message\n" line — dim, to stderr.
+ *
+ * Pair with ui_stage_fail to give the user an actionable next step
+ * (which env var to set, which flag to add, what to verify).
+ *
+ *   ui_stage_fail("video.mkv", "error -1");
+ *   ui_hint("re-run with --verbose to see SVT-AV1 diagnostics");
+ */
+void ui_hint(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
+/**
  * @brief Format a duration into a rotating thread-unsafe buffer.
  *
  * Returns "Ns" for < 60s, "Mm SSs" for < 1h, "Hh MMm" for >= 1h.
