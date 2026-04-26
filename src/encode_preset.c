@@ -764,13 +764,34 @@ const EncodePreset *get_encode_preset(QualityType quality, int video_height) {
 /* Release-style flat table. The encoder handles grain structure via its
  * built-in denoise+synthesis path (film_grain_denoise_apply=1), so we do
  * NOT pay extra bits to preserve noise — we pick the right tier and let
- * the grain synthesizer rebuild texture on playback. */
+ * the grain synthesizer rebuild texture on playback.
+ *
+ * Tiers:
+ *
+ *   4KLight (height >= 2160):
+ *     noisy  source → 4000 kbps
+ *     clean  source → 3500 kbps
+ *     animation     → 3000 kbps   (clean - 500; animation has no real grain
+ *                                   so it's always treated as clean and gets
+ *                                   the extra 500 kbps shaved off)
+ *
+ *   HDLight (height < 2160):
+ *     noisy  source → 2500 kbps
+ *     clean  source → 2000 kbps
+ *     animation     → 1500 kbps
+ */
 #define GRAIN_THRESHOLD 0.08 /* grain_score above this → "grainy" tier */
 
-int get_target_bitrate(int height, double grain_score) {
+int get_target_bitrate(int height, double grain_score, QualityType quality) {
   int is_4k = (height >= 2160);
-  int is_grainy = (grain_score >= GRAIN_THRESHOLD);
 
+  /* Animation always uses the clean tier minus 500. The grain detector
+     measures texture/dithering on animation, not noise, so the grainy/clean
+     branch wouldn't be meaningful. */
+  if (quality == QUALITY_ANIMATION)
+    return is_4k ? 3000 : 1500;
+
+  int is_grainy = (grain_score >= GRAIN_THRESHOLD);
   if (is_4k)
     return is_grainy ? 4000 : 3500;
   return is_grainy ? 2500 : 2000;

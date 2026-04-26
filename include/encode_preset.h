@@ -112,22 +112,30 @@ typedef struct {
 const EncodePreset *get_encode_preset(QualityType quality, int video_height);
 
 /**
- * @brief Compute target bitrate (kbps) from resolution and grain.
+ * @brief Compute target bitrate (kbps) from resolution, grain, and content
+ *        type.
  *
  * Release-style flat targets — scene encoders pin bitrate by tier and grain,
  * not by perceptual score. Values calibrated for SVT-AV1-HDR @ preset 4 with
  * grain denoising (film_grain_denoise_apply=1) on:
  *
- *   4K grainy   → 4000 kbps   (height >= 2160 && grain_score >= GRAIN_THRESHOLD)
- *   4K low-grain→ 3500 kbps
- *   HD grainy   → 2500 kbps
- *   HD low-grain→ 2000 kbps
+ *   4KLight (height >= 2160):
+ *     noisy  source → 4000 kbps
+ *     clean  source → 3500 kbps
+ *     animation     → 3000 kbps   (clean - 500; no real grain to budget for)
+ *
+ *   HDLight (height < 2160):
+ *     noisy  source → 2500 kbps
+ *     clean  source → 2000 kbps
+ *     animation     → 1500 kbps
  *
  * @param height      Video height in pixels (>= 2160 selects 4K).
- * @param grain_score Composite grain score in [0, 1].
+ * @param grain_score Composite grain score in [0, 1]. Ignored for animation.
+ * @param quality     Content quality type — animation gets a flat
+ *                    clean-tier-minus-500 rate.
  * @return Target bitrate in kbps.
  */
-int get_target_bitrate(int height, double grain_score);
+int get_target_bitrate(int height, double grain_score, QualityType quality);
 
 /**
  * @brief Compute film grain synthesis level from a grain analysis score.
