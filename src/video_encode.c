@@ -290,15 +290,34 @@ static void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg,
       cfg->startup_qp_offset = (int8_t)p->startup_qp_offset;
   }
 
-  /* Film grain from grain score analysis.
+  /* Grain mechanism — branches per preset (use_noise flag).
    *
-   * Default for film_grain_denoise_apply is 0 — SVT-AV1 *analyzes* noise and
-   * stores a grain table but does NOT denoise the source, so the encoder
-   * pays for both the noisy residual AND the synthesis table. Forcing
-   * apply=1 denoises before coding, letting the bitrate actually land at
-   * the target. */
-  cfg->film_grain_denoise_strength = (uint32_t)film_grain;
-  cfg->film_grain_denoise_apply = (film_grain > 0) ? 1 : 0;
+   * use_noise = 1 (digital + animation):
+   *   --noise (SVT-AV1-HDR 4.1.0+) — synthetic noise table, no source
+   *   denoising, no analysis cost. Pure additive overlay. The strength
+   *   value comes from the same dynamic mapping (get_film_grain_from_score)
+   *   so the user-facing "grain level" stays consistent across mechanisms.
+   *
+   * use_noise = 0 (analog film):
+   *   --film-grain + denoise=1 — analyzes source grain, denoises before
+   *   encoding, decoder re-synths. The juliobbv-p fork normally disables
+   *   denoise (warns about detail loss), but at HDLight bitrates we need
+   *   the bitrate savings; analog film is the one tier where the source
+   *   grain has structure worth analyzing. */
+  if (p->use_noise) {
+    cfg->noise_strength = (uint8_t)film_grain;
+    cfg->noise_strength_chroma = (int32_t)p->noise_chroma_strength;
+    cfg->noise_chroma_from_luma = (uint8_t)p->noise_chroma_from_luma;
+    cfg->noise_size = (int8_t)p->noise_size;
+    /* Make sure the legacy film-grain path is fully off — both can't
+       drive fgs_table simultaneously. */
+    cfg->film_grain_denoise_strength = 0;
+    cfg->film_grain_denoise_apply = 0;
+  } else {
+    cfg->film_grain_denoise_strength = (uint32_t)film_grain;
+    cfg->film_grain_denoise_apply = (film_grain > 0) ? 1 : 0;
+    cfg->noise_strength = 0;
+  }
 }
 
 /* ====================================================================== */

@@ -81,6 +81,10 @@ static const EncodePreset presets_liveaction[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
     /* HD */
     {
@@ -139,6 +143,10 @@ static const EncodePreset presets_liveaction[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
 };
 
@@ -200,6 +208,10 @@ static const EncodePreset presets_animation[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
     /* HD */
     {
@@ -258,6 +270,10 @@ static const EncodePreset presets_animation[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
 };
 
@@ -319,6 +335,10 @@ static const EncodePreset presets_super35_analog[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 0,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
     /* HD */
     {
@@ -377,6 +397,10 @@ static const EncodePreset presets_super35_analog[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 0,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
 };
 
@@ -438,6 +462,10 @@ static const EncodePreset presets_super35_digital[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
     /* HD */
     {
@@ -496,6 +524,10 @@ static const EncodePreset presets_super35_digital[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
 };
 
@@ -557,6 +589,10 @@ static const EncodePreset presets_imax_analog[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 0,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
     /* HD */
     {
@@ -615,6 +651,10 @@ static const EncodePreset presets_imax_analog[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 0,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
 };
 
@@ -676,6 +716,10 @@ static const EncodePreset presets_imax_digital[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
     /* HD */
     {
@@ -734,6 +778,10 @@ static const EncodePreset presets_imax_digital[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
 };
 

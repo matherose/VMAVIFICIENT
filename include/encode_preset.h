@@ -96,6 +96,27 @@ typedef struct {
   /* Startup mini-GOP tuning */
   int startup_mg_size;   /**< First mini-GOP size after KF: 0=off, 2/3/4 (0=default). */
   int startup_qp_offset; /**< QP offset for startup mini-GOP (-63 to 63, 0=default). */
+
+  /* Grain mechanism selection (SVT-AV1-HDR 4.1.0+).
+   *
+   * use_noise = 1  → route synth strength to --noise (content-agnostic
+   *                  overlay, no source denoising, zero encoding overhead).
+   *                  Right for digital sources (sensor noise, CGI) and
+   *                  animation (banding mask).
+   *
+   * use_noise = 0  → route synth strength to --film-grain + denoise=1
+   *                  (analyzes source grain, denoises, re-synthesizes).
+   *                  Right for analog film where the grain has spatial /
+   *                  temporal structure worth preserving (Super 35 / IMAX
+   *                  shot on film). */
+  int use_noise;            /**< Grain mechanism: 1=--noise, 0=--film-grain. */
+  int noise_size;           /**< Noise grain size: -1=auto (resolution-based),
+                                 0–13=explicit. Only used when use_noise=1. */
+  int noise_chroma_strength; /**< Chroma noise strength: -1=auto (60% of
+                                  luma), 0=off, 1–200=explicit. */
+  int noise_chroma_from_luma; /**< Apply chroma noise based on luma plane
+                                   (0 default, 1 enables chroma noise on
+                                   grayscale). */
 } EncodePreset;
 
 /**
