@@ -46,6 +46,10 @@ static void print_usage(const char *prog) {
       "  --verbose        Forward SVT-AV1 encoder log messages to stderr\n"
       "                   (rate control, GOP layout, warnings). Composes\n"
       "                   with --quiet.\n"
+      "  --grain-only     Like --dry-run, plus dump every encoder knob the\n"
+      "                   resolved preset configures (grain mech, tune,\n"
+      "                   ac-bias, filters, QMs). For sanity-checking what\n"
+      "                   each tier actually does without a full encode.\n"
       "  --help           Show this help\n"
       "\n"
       "Language flags (override auto-detection):\n"
@@ -242,6 +246,105 @@ static int sub_sort_key(const char *lang, int is_forced) {
   return 50;
 }
 
+/**
+ * @brief Dump every relevant encoder knob from the resolved preset.
+ *
+ * Called by --grain-only so the user can sanity-check what each tier
+ * actually configures without committing to a multi-hour encode.
+ * Focuses on the knobs that meaningfully affect grain pass-through and
+ * perceived quality — preset / tune / ac-bias, the three filters
+ * (TF / CDEF / restoration), variance boost, QMs, the noise vs
+ * film-grain mechanism choice. Skips the rate-control plumbing
+ * (already in the Plan section) and per-temporal-layer offsets.
+ */
+static void print_encoder_knobs(const EncodePreset *p, int film_grain) {
+  ui_section("Encoder knobs");
+
+  ui_kv("Speed", "preset %d, keyint %d", p->preset, p->keyint);
+  ui_kv("Tune", "%d  (0=VQ, 1=PSNR, 5=Film Grain)", p->tune);
+  ui_kv("ac-bias", "%.1f", p->ac_bias);
+  ui_kv("Sharpness", "%d", p->sharpness);
+  ui_kv("Complex HVS", "%s", p->complex_hvs ? "on" : "off");
+
+  /* Grain mechanism — selected per-preset, plus the dynamic level. */
+  if (p->use_noise) {
+    char size_buf[32];
+    if (p->noise_size < 0)
+      snprintf(size_buf, sizeof(size_buf), "auto");
+    else
+      snprintf(size_buf, sizeof(size_buf), "%d", p->noise_size);
+    char chroma_buf[64];
+    if (p->noise_chroma_strength < 0)
+      snprintf(chroma_buf, sizeof(chroma_buf), "auto (~60%% of luma)");
+    else if (p->noise_chroma_strength == 0)
+      snprintf(chroma_buf, sizeof(chroma_buf), "off");
+    else
+      snprintf(chroma_buf, sizeof(chroma_buf), "%d",
+               p->noise_chroma_strength);
+    ui_kv("Grain mech", "%s", "--noise (synthetic overlay, 4.1.0+)");
+    ui_kv("Strength", "%d", film_grain);
+    ui_kv("Noise size", "%s", size_buf);
+    ui_kv("Noise chroma", "%s", chroma_buf);
+    ui_kv("Chroma← luma", "%s", p->noise_chroma_from_luma ? "on" : "off");
+  } else {
+    ui_kv("Grain mech", "%s", "--film-grain (analyzed) + denoise=1");
+    ui_kv("Strength", "%d", film_grain);
+  }
+
+  /* Filters that affect grain pass-through. */
+  if (p->enable_tf)
+    ui_kv("Temporal flt", "on  (frame %d, keyframe %d)", p->tf_strength,
+          p->kf_tf_strength);
+  else
+    ui_kv("Temporal flt", "off");
+  ui_kv("DLF", "%s",
+        p->enable_dlf == 0   ? "off"
+        : p->enable_dlf == 2 ? "accurate"
+                             : "on");
+  ui_kv("CDEF scaling", "%d", p->cdef_scaling);
+  ui_kv("Restoration", "%s",
+        p->enable_restoration == 0   ? "off"
+        : p->enable_restoration == 1 ? "on"
+                                     : "default");
+  ui_kv("Noise-adapt", "%d  (0=off, 2=tune-default, 3=CDEF-only, 4=restoration-only)",
+        p->noise_adaptive_filtering);
+
+  /* Variance boost (HDR-relevant). */
+  ui_kv("Var boost", "strength %d, octile %d, curve %d",
+        p->variance_boost, p->variance_octile, p->variance_curve);
+
+  /* Quantization matrices. */
+  if (p->enable_qm == 1) {
+    char qm_buf[32];
+    if (p->qm_min >= 0 && p->qm_max >= 0)
+      snprintf(qm_buf, sizeof(qm_buf), "luma %d-%d", p->qm_min, p->qm_max);
+    else
+      snprintf(qm_buf, sizeof(qm_buf), "default range");
+    char chroma_qm_buf[32];
+    if (p->chroma_qm_min >= 0 && p->chroma_qm_max >= 0)
+      snprintf(chroma_qm_buf, sizeof(chroma_qm_buf), "chroma %d-%d",
+               p->chroma_qm_min, p->chroma_qm_max);
+    else
+      snprintf(chroma_qm_buf, sizeof(chroma_qm_buf), "chroma default");
+    ui_kv("Quant matrix", "%s, %s", qm_buf, chroma_qm_buf);
+  } else {
+    ui_kv("Quant matrix", "off");
+  }
+
+  /* Other meaningful knobs. */
+  ui_kv("HBD MDS", "%d  (0=default, 1=full 10b, 2=hybrid)", p->hbd_mds);
+  ui_kv("Max tx size", "%d", p->max_tx_size);
+  ui_kv("QP scale comp", "%.1f", p->qp_scale_compress_strength);
+
+  /* Rate control extras the Plan block doesn't cover. */
+  if (p->look_ahead_distance >= 0)
+    ui_kv("Look-ahead", "%d frames", p->look_ahead_distance);
+  if (p->vbr_max_section_pct > 0)
+    ui_kv("VBR max-sec", "%d%%", p->vbr_max_section_pct);
+  if (p->gop_constraint_rc == 1)
+    ui_kv("GOP RC match", "on");
+}
+
 int main(int argc, char *argv[]) {
   init_logging();
   ui_init();
@@ -276,6 +379,7 @@ int main(int argc, char *argv[]) {
   bool dry_run = false;
   bool quiet = false;
   bool verbose = false;
+  bool grain_only = false;
   LanguageTag cli_lang_tag = LANG_TAG_NONE;
   SourceType cli_source = SOURCE_UNKNOWN;
   QualityType cli_quality = QUALITY_LIVEACTION;
@@ -330,6 +434,7 @@ int main(int argc, char *argv[]) {
     OPT_DRY_RUN,
     OPT_QUIET,
     OPT_VERBOSE,
+    OPT_GRAIN_ONLY,
   };
 
   static struct option long_options[] = {
@@ -341,6 +446,7 @@ int main(int argc, char *argv[]) {
       {"dry-run", no_argument, 0, OPT_DRY_RUN},
       {"quiet", no_argument, 0, OPT_QUIET},
       {"verbose", no_argument, 0, OPT_VERBOSE},
+      {"grain-only", no_argument, 0, OPT_GRAIN_ONLY},
       /* Language flags. */
       {"multi", no_argument, 0, OPT_MULTI},
       {"multivfi", no_argument, 0, OPT_MULTIVFI},
@@ -414,6 +520,9 @@ int main(int argc, char *argv[]) {
       break;
     case OPT_VERBOSE:
       verbose = true;
+      break;
+    case OPT_GRAIN_ONLY:
+      grain_only = true;
       break;
     /* Language flags. */
     case OPT_MULTI:
@@ -837,9 +946,13 @@ int main(int argc, char *argv[]) {
     }
     ui_kv("Output", "%s%s", output_dir, output_name);
 
-    if (dry_run) {
-      ui_section("Dry run");
-      ui_row("No files written. Re-run without --dry-run to encode.");
+    if (grain_only)
+      print_encoder_knobs(enc_preset, film_grain);
+
+    if (dry_run || grain_only) {
+      ui_section(grain_only ? "Grain-only" : "Dry run");
+      ui_row("No files written. Re-run without %s to encode.",
+             grain_only ? "--grain-only" : "--dry-run");
       if (tracks.error == 0)
         free_media_tracks(&tracks);
       return 0;
