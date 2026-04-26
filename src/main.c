@@ -809,8 +809,9 @@ int main(int argc, char *argv[]) {
     int bitrate =
         cli_bitrate > 0
             ? cli_bitrate
-            : get_target_bitrate(info.height,
-                                 grain.error == 0 ? grain.grain_score : 0.0);
+            : get_target_bitrate(
+                  info.height,
+                  grain.error == 0 ? grain.grain_score : 0.0, cli_quality);
 
     /* Plan + Dry-run notice always render — the user needs them to decide
        whether to let the encode proceed. */
@@ -824,11 +825,13 @@ int main(int argc, char *argv[]) {
           enc_preset->ac_bias);
     if (grain.error == 0) {
       int is_4k = info.height >= 2160;
-      int is_grainy = grain.grain_score >= 0.08;
-      ui_kv("Grain", "level %d  (%s tier)", film_grain,
-            is_grainy ? "grainy" : "low-grain");
+      int is_anim = (cli_quality == QUALITY_ANIMATION);
+      const char *content_tier =
+          is_anim ? "animation" : (grain.grain_score >= 0.08 ? "grainy"
+                                                             : "clean");
+      ui_kv("Grain", "level %d  (%s tier)", film_grain, content_tier);
       ui_kv("Bitrate", "%d kbps VBR  (%s %s tier)", bitrate,
-            is_4k ? "4K" : "HD", is_grainy ? "grainy" : "low-grain");
+            is_4k ? "4K" : "HD", content_tier);
     } else {
       ui_kv("Bitrate", "%d kbps VBR", bitrate);
     }
