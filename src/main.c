@@ -840,9 +840,6 @@ int main(int argc, char *argv[]) {
     if (dry_run) {
       ui_section("Dry run");
       ui_row("No files written. Re-run without --dry-run to encode.");
-      if (grain.error == 0 && grain.grain_table_path[0] &&
-          getenv("VMAV_KEEP_GRAIN_TMP") == NULL)
-        remove(grain.grain_table_path);
       if (tracks.error == 0)
         free_media_tracks(&tracks);
       return 0;
@@ -1211,10 +1208,6 @@ int main(int argc, char *argv[]) {
             .output_path = av1_video_path,
             .rpu_path = rpu_path[0] ? rpu_path : NULL,
             .preset = enc_preset,
-            .grain_table_path =
-                (grain.error == 0 && grain.grain_table_path[0])
-                    ? grain.grain_table_path
-                    : NULL,
             .film_grain = film_grain,
             .grain_score = grain.error == 0 ? grain.grain_score : 0.0,
             .grain_variance = grain.error == 0 ? grain.grain_variance : 0.0,
@@ -1244,10 +1237,6 @@ int main(int argc, char *argv[]) {
                   "stderr (rate control, GOP layout, fatal warnings)");
         }
 
-        /* Grain table is no longer needed once the encode has consumed it. */
-        if (grain.error == 0 && grain.grain_table_path[0] &&
-            getenv("VMAV_KEEP_GRAIN_TMP") == NULL)
-          remove(grain.grain_table_path);
       }
 
       /* ---- Final MKV muxing ---- */

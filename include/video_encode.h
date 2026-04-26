@@ -22,9 +22,6 @@ typedef struct {
   const char *output_path;    /**< Output .mkv path. */
   const char *rpu_path;       /**< Dolby Vision RPU .bin (NULL if none). */
   const EncodePreset *preset; /**< SVT-AV1 parameter preset. */
-  const char *grain_table_path; /**< grav1synth filmgrn1 table path for
-                                     fgs_table, or NULL/empty to let the
-                                     encoder analyze grain itself. */
   int film_grain;             /**< Film grain synthesis level (0–50). */
   double grain_score;         /**< Normalized grain score 0..1 from media_analysis.
                                    Used for grain-adaptive CDEF scaling. */

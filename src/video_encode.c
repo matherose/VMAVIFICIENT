@@ -33,7 +33,6 @@
 
 #include <libdovi/rpu_parser.h>
 
-#include "film_grain.h"
 #include "ui.h"
 
 /* ====================================================================== */
@@ -395,7 +394,6 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   struct SwsContext *sws_ctx = NULL;
   EbComponentType *svt_handle = NULL;
   EbSvtAv1EncConfiguration svt_config;
-  AomFilmGrain *parsed_grain = NULL;
   AVFrame *frame = NULL;
   AVFrame *cropped_frame = NULL;
   AVPacket *pkt = NULL;
@@ -535,21 +533,6 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   apply_preset_to_config(&svt_config, config->preset, config->film_grain,
                          config->target_bitrate, config->crf);
 
-  /* Measured grain table from media_analysis (grainiest window). Replaces
-   * SVT-AV1's own grain analysis with grav1synth's parameters; denoising
-   * (film_grain_denoise_apply=1) still runs so the bitrate target is met. */
-  if (config->grain_table_path && config->grain_table_path[0]) {
-    parsed_grain = parse_filmgrn1_table(config->grain_table_path);
-    if (parsed_grain) {
-      svt_config.fgs_table = parsed_grain;
-    } else {
-      fprintf(stderr,
-              "  Video Warning: failed to parse grain table %s — falling "
-              "back to encoder's internal grain analysis\n",
-              config->grain_table_path);
-    }
-  }
-
   /* PQ content adjustments (HDR10 / HDR10+ / Dolby Vision) */
   if (in_stream->codecpar->color_trc == AVCOL_TRC_SMPTE2084) {
     svt_config.variance_boost_curve = 3;
@@ -589,27 +572,38 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   double gs = config->grain_score;
 
   if (gs > 0.15) {
-    /* --- High grain --- */
+    /* --- High grain — emulate tune 5 (the Film Grain tune) ---
+     *
+     * SVT-AV1's tune 5 is shorthand for: --tune 0 --enable-tf 0
+     * --enable-restoration 0 --enable-cdef 0 --complex-hvs 1 --tx-bias 1
+     * --ac-bias 4.00. For grainy content, juliobbv-p's fork docs explicitly
+     * recommend it. Live-action presets ship with tune 0 by default; here
+     * we apply the same effect dynamically when we measure heavy grain on
+     * any preset. The analog film presets (Super 35 Analog / IMAX Analog)
+     * already use tune 5 in their preset config, so this block stacks
+     * harmlessly on them. */
 
-    /* CDEF: strong reduction — grain IS the texture, don't blur it. */
-    int cd = (int)svt_config.cdef_scaling - 6;
-    svt_config.cdef_scaling = (uint8_t)(cd < 4 ? 4 : cd);
+    /* CDEF: disable entirely (tune 5). */
+    svt_config.cdef_scaling = 4; /* min "active" value; SVT clamps to off
+                                    above */
+    /* Temporal filter: off (tune 5). */
+    svt_config.enable_tf = 0;
+    svt_config.tf_strength = 0;
+    svt_config.kf_tf_strength = 0;
 
-    /* Temporal filter: disable or minimize — TF smears grain into mush. */
-    if (svt_config.enable_tf && svt_config.tf_strength > 0)
-      svt_config.tf_strength = 0;
-    if (svt_config.kf_tf_strength > 0)
-      svt_config.kf_tf_strength = 0;
-
-    /* Restoration filter: OFF — Wiener/self-guided filters destroy grain. */
+    /* Restoration filter: OFF (tune 5). */
     svt_config.enable_restoration_filtering = 0;
+
+    /* Complex HVS: on (tune 5). */
+    svt_config.complex_hvs = 1;
+
+    /* AC bias: pin to 4.0 (tune 5's exact value). */
+    if (svt_config.ac_bias < 4.0)
+      svt_config.ac_bias = 4.0;
 
     /* Noise normalization: boost to preserve AC detail in RD decisions. */
     if (svt_config.noise_norm_strength < 4)
       svt_config.noise_norm_strength++;
-
-    /* AC bias: boost to weight RD toward preserving high-frequency texture. */
-    svt_config.ac_bias = fmin(svt_config.ac_bias + 1.0, 8.0);
 
     /* Noise-adaptive filtering: CDEF-only mode (skip restoration). */
     svt_config.noise_adaptive_filtering = 3;
@@ -1105,8 +1099,6 @@ cleanup:
     svt_av1_enc_deinit(svt_handle);
     svt_av1_enc_deinit_handle(svt_handle);
   }
-
-  free_film_grain(parsed_grain);
 
   if (sws_ctx)
     sws_freeContext(sws_ctx);
