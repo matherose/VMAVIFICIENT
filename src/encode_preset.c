@@ -812,30 +812,38 @@ static int lerp_grain(double score, double lo_score, double hi_score,
 
 /**
  * Analog film (Super 35 / IMAX shot on film): the grain is real and
- * artistically intentional.  Map aggressively — the detector is measuring
- * actual film stock noise.  Reference: Blade Runner 2049 REMUX -> 0.108.
+ * artistically intentional. Cap at 15 — SVT-AV1's own doc says levels in
+ * the 10–15 range are "noisy video" territory; higher than that risks
+ * noise stacking and mush at HDLight bitrates. The analog presets use
+ * tune 5 which already disables CDEF/restoration/TF for grain pass-through,
+ * so SVT only needs to add modest synth on top, not reproduce the source
+ * grain faithfully.
+ *
+ * Reference: Blade Runner 2049 REMUX -> 0.108.
  */
 static int film_grain_analog(double s) {
   if (s <= 0.04) return 0;
-  if (s <= 0.08) return lerp_grain(s, 0.04, 0.08, 4, 10);
-  if (s <= 0.12) return lerp_grain(s, 0.08, 0.12, 10, 20);
-  if (s <= 0.20) return lerp_grain(s, 0.12, 0.20, 20, 30);
-  if (s <= 1.00) return lerp_grain(s, 0.20, 1.00, 30, 40);
-  return 40;
+  if (s <= 0.08) return lerp_grain(s, 0.04, 0.08, 3, 6);
+  if (s <= 0.12) return lerp_grain(s, 0.08, 0.12, 6, 10);
+  if (s <= 0.20) return lerp_grain(s, 0.12, 0.20, 10, 13);
+  if (s <= 1.00) return lerp_grain(s, 0.20, 1.00, 13, 15);
+  return 15;
 }
 
 /**
  * Digital live-action / Super 35 digital / IMAX digital: minimal real grain,
  * detector mostly sees sensor noise and compression artifacts.
- * Moderate mapping — some synthesis helps mask banding, but don't overdo it.
+ * Cap at 10 — SVT-AV1's own doc says level ~8 is sufficient for normal
+ * grain. Anything higher is wasted bitrate on digital sources where there's
+ * no real grain to preserve.
  */
 static int film_grain_digital(double s) {
   if (s <= 0.05) return 0;
-  if (s <= 0.10) return lerp_grain(s, 0.05, 0.10, 2, 6);
-  if (s <= 0.15) return lerp_grain(s, 0.10, 0.15, 6, 10);
-  if (s <= 0.25) return lerp_grain(s, 0.15, 0.25, 10, 16);
-  if (s <= 1.00) return lerp_grain(s, 0.25, 1.00, 16, 22);
-  return 22;
+  if (s <= 0.10) return lerp_grain(s, 0.05, 0.10, 2, 5);
+  if (s <= 0.15) return lerp_grain(s, 0.10, 0.15, 5, 7);
+  if (s <= 0.25) return lerp_grain(s, 0.15, 0.25, 7, 9);
+  if (s <= 1.00) return lerp_grain(s, 0.25, 1.00, 9, 10);
+  return 10;
 }
 
 /**
@@ -845,8 +853,8 @@ static int film_grain_digital(double s) {
  */
 static int film_grain_animation(double s) {
   if (s <= 0.10) return 0;
-  if (s <= 0.25) return lerp_grain(s, 0.10, 0.25, 0, 4);
-  return 4;
+  if (s <= 0.25) return lerp_grain(s, 0.10, 0.25, 0, 3);
+  return 3;
 }
 
 /* Upper edges of each bracket in film_grain_analog and film_grain_digital.
