@@ -188,9 +188,11 @@ void ui_progress_update(UiProgress *p, long long current,
     snprintf(eta_str, sizeof(eta_str), "ETA %02d:%02d", eta_min, eta_sec);
   }
 
+  int has_middle = (middle && middle[0]);
+  const char *mid_text = has_middle ? middle : "";
+  const char *mid_sep = has_middle ? "  " : "";
   fprintf(stderr, "\r  [%s] %3d%%  %s%s%s   ", bar, (int)(pct * 100),
-          middle && middle[0] ? middle : "", middle && middle[0] ? "  " : "",
-          eta_str);
+          mid_text, mid_sep, eta_str);
   fflush(stderr);
 }
 
@@ -208,9 +210,11 @@ void ui_progress_done(UiProgress *p, long long final_count,
 
   (void)final_count; /* the caller's middle text usually carries the count */
 
+  int has_middle = (middle && middle[0]);
+  const char *mid_text = has_middle ? middle : "";
+  const char *mid_sep = has_middle ? "  " : "";
   fprintf(stderr, "\r  [%s] 100%%  %s%sDone in %02d:%02d          \n", bar,
-          middle && middle[0] ? middle : "", middle && middle[0] ? "  " : "",
-          min, sec);
+          mid_text, mid_sep, min, sec);
   fflush(stderr);
 }
 

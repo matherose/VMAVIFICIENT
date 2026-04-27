@@ -3,7 +3,9 @@
  * @brief Entry point for vmavificient.
  */
 
+#include <errno.h>
 #include <getopt.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +29,33 @@
 #include "ui.h"
 #include "utils.h"
 #include "video_encode.h"
+
+/**
+ * @brief Parse a string as a base-10 int.
+ *
+ * Returns the parsed value, or 0 if the string is NULL, empty, contains
+ * non-numeric content (besides leading/trailing whitespace and trailing
+ * newlines from fgets), or overflows int. Replaces atoi() — the
+ * cert-err34-c rule for the codebase.
+ */
+static int parse_int_or_zero(const char *s) {
+  if (!s)
+    return 0;
+  char *endptr = NULL;
+  errno = 0;
+  long v = strtol(s, &endptr, 10);
+  if (endptr == s)
+    return 0; /* no digits parsed */
+  /* Skip trailing whitespace; reject anything else. */
+  while (*endptr == ' ' || *endptr == '\t' || *endptr == '\n' ||
+         *endptr == '\r')
+    endptr++;
+  if (*endptr != '\0')
+    return 0;
+  if (errno == ERANGE || v > INT_MAX || v < INT_MIN)
+    return 0;
+  return (int)v;
+}
 
 static void print_usage(const char *prog) {
   fprintf(
@@ -136,7 +165,7 @@ static LanguageTag ask_language_tag(const MediaTracks *tracks) {
   if (!fgets(line, sizeof(line), stdin))
     return LANG_TAG_MULTI;
 
-  switch (atoi(line)) {
+  switch (parse_int_or_zero(line)) {
   case 1:
     return LANG_TAG_MULTI;
   case 2:
@@ -190,7 +219,7 @@ static SourceType ask_source(void) {
   if (!fgets(line, sizeof(line), stdin))
     return SOURCE_BLURAY;
 
-  switch (atoi(line)) {
+  switch (parse_int_or_zero(line)) {
   case 1:
     return SOURCE_BDRIP;
   case 2:
@@ -490,10 +519,10 @@ int main(int argc, char *argv[]) {
   while ((opt = getopt_long(argc, argv, "hb:s:", long_options, NULL)) != -1) {
     switch (opt) {
     case OPT_TMDB:
-      tmdb_id = atoi(optarg);
+      tmdb_id = parse_int_or_zero(optarg);
       break;
     case OPT_BITRATE:
-      cli_bitrate = atoi(optarg);
+      cli_bitrate = parse_int_or_zero(optarg);
       if (cli_bitrate <= 0) {
         fprintf(stderr, "Error: --bitrate must be a positive integer (kbps)\n");
         return 1;
@@ -695,10 +724,18 @@ int main(int argc, char *argv[]) {
     ui_kv("Audio", "%d source track%s", tracks.audio_count,
           tracks.audio_count == 1 ? "" : "s");
     for (int i = 0; i < tracks.audio_count; i++) {
-      ui_row("    #%-2d  %-4s  %-6s  %dch  %lld kbps  %s",
+      long long kbps = (long long)(tracks.audio[i].bitrate / 1000);
+      char rate_buf[16];
+      /* Hide "0 kbps" — usually means the demuxer didn't expose a
+         bitrate field for the codec (DTS in MKV is a common case),
+         not that the track is silent. */
+      if (kbps > 0)
+        snprintf(rate_buf, sizeof(rate_buf), "%5lld kbps", kbps);
+      else
+        snprintf(rate_buf, sizeof(rate_buf), "          ");
+      ui_row("    #%-2d  %-4s  %-6s  %dch  %s  %s",
              tracks.audio[i].index, tracks.audio[i].language,
-             tracks.audio[i].codec, tracks.audio[i].channels,
-             (long long)(tracks.audio[i].bitrate / 1000),
+             tracks.audio[i].codec, tracks.audio[i].channels, rate_buf,
              tracks.audio[i].name);
     }
 

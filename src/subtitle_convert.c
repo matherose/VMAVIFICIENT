@@ -29,6 +29,8 @@
 
 #include <zlib.h>
 
+#include "ui.h"
+
 #include <allheaders.h>
 #include <tesseract/capi.h>
 
@@ -525,38 +527,12 @@ static PIX *prepare_pix_for_ocr(PIX *src) {
 }
 
 /* ====================================================================== */
-/*  Progress display                                                      */
+/*  Progress middle-string formatter                                      */
 /* ====================================================================== */
 
-static void print_sub_progress(int current, int64_t duration_ms,
-                               int64_t current_ms, time_t start_time) {
-  if (duration_ms <= 0)
-    return;
-
-  double pct = (double)current_ms / duration_ms;
-  if (pct > 1.0)
-    pct = 1.0;
-
-  int bar_width = 30;
-  int filled = (int)(pct * bar_width);
-  char bar[64];
-  for (int i = 0; i < bar_width; i++)
-    bar[i] = (i < filled) ? '=' : (i == filled) ? '>' : ' ';
-  bar[bar_width] = '\0';
-
-  time_t now = time(NULL);
-  double elapsed = difftime(now, start_time);
-  char eta_str[32] = "";
-  if (pct > 0.01 && elapsed > 1.0) {
-    double remaining = elapsed * (1.0 - pct) / pct;
-    int eta_min = (int)(remaining / 60);
-    int eta_sec = (int)remaining % 60;
-    snprintf(eta_str, sizeof(eta_str), "ETA %02d:%02d", eta_min, eta_sec);
-  }
-
-  fprintf(stderr, "\r  [%s] %3d%%  %d subs  %s   ", bar, (int)(pct * 100),
-          current, eta_str);
-  fflush(stderr);
+/** Format the per-update middle string for the subtitle OCR progress bar. */
+static void fmt_sub_middle(char *out, size_t cap, int current) {
+  snprintf(out, cap, "%d subs", current);
 }
 
 /* ====================================================================== */
@@ -686,7 +662,8 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
     goto cleanup;
   }
 
-  time_t start_time = time(NULL);
+  UiProgress progress;
+  ui_progress_start(&progress, (long long)duration_ms);
   time_t last_progress = 0;
   int sub_index = 0;
 
@@ -798,7 +775,9 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
     /* Progress update */
     time_t now = time(NULL);
     if (now != last_progress) {
-      print_sub_progress(sub_index, duration_ms, pts_ms, start_time);
+      char middle[32];
+      fmt_sub_middle(middle, sizeof(middle), sub_index);
+      ui_progress_update(&progress, (long long)pts_ms, middle);
       last_progress = now;
     }
   }
@@ -830,13 +809,9 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
 
   /* Final progress */
   {
-    time_t end_time = time(NULL);
-    int elapsed = (int)difftime(end_time, start_time);
-    fprintf(stderr, "\r  [");
-    for (int i = 0; i < 30; i++)
-      fprintf(stderr, "=");
-    fprintf(stderr, "] 100%%  %d subs  Done in %02d:%02d          \n",
-            sub_index, elapsed / 60, elapsed % 60);
+    char middle[32];
+    fmt_sub_middle(middle, sizeof(middle), sub_index);
+    ui_progress_done(&progress, (long long)duration_ms, middle);
   }
 
 cleanup:
