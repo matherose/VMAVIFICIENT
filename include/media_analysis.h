@@ -23,11 +23,6 @@ typedef struct {
   int windows_succeeded;   /**< How many windows produced valid scores. */
   double grain_variance;   /**< Variance of per-window Y scores (high = inconsistent grain). */
   double chroma_grain_score; /**< Max of sCb/sCr averages across windows, 0..1. */
-
-  /** Path to the grainiest window's grav1synth filmgrn1 table, or empty if no
-   *  window succeeded. The caller owns the file on disk and should unlink it
-   *  after consuming it (e.g., after the encode). */
-  char grain_table_path[4096];
 } GrainScore;
 
 /**

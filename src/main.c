@@ -43,6 +43,9 @@ static void print_usage(const char *prog) {
       "                   then exit. No audio/RPU/video work, no files written.\n"
       "  --quiet          Compact output: hide informational sections, keep\n"
       "                   only stage status lines + the Plan / Done blocks.\n"
+      "  --verbose        Forward SVT-AV1 encoder log messages to stderr\n"
+      "                   (rate control, GOP layout, warnings). Composes\n"
+      "                   with --quiet.\n"
       "  --help           Show this help\n"
       "\n"
       "Language flags (override auto-detection):\n"
@@ -272,6 +275,7 @@ int main(int argc, char *argv[]) {
   int cli_bitrate = 0; /* 0 = auto-compute from resolution/grain */
   bool dry_run = false;
   bool quiet = false;
+  bool verbose = false;
   LanguageTag cli_lang_tag = LANG_TAG_NONE;
   SourceType cli_source = SOURCE_UNKNOWN;
   QualityType cli_quality = QUALITY_LIVEACTION;
@@ -325,6 +329,7 @@ int main(int argc, char *argv[]) {
        anchor above. */
     OPT_DRY_RUN,
     OPT_QUIET,
+    OPT_VERBOSE,
   };
 
   static struct option long_options[] = {
@@ -335,6 +340,7 @@ int main(int argc, char *argv[]) {
       {"blind", no_argument, 0, OPT_BLIND},
       {"dry-run", no_argument, 0, OPT_DRY_RUN},
       {"quiet", no_argument, 0, OPT_QUIET},
+      {"verbose", no_argument, 0, OPT_VERBOSE},
       /* Language flags. */
       {"multi", no_argument, 0, OPT_MULTI},
       {"multivfi", no_argument, 0, OPT_MULTIVFI},
@@ -405,6 +411,9 @@ int main(int argc, char *argv[]) {
       break;
     case OPT_QUIET:
       quiet = true;
+      break;
+    case OPT_VERBOSE:
+      verbose = true;
       break;
     /* Language flags. */
     case OPT_MULTI:
@@ -519,6 +528,10 @@ int main(int argc, char *argv[]) {
      ui_set_quiet(0) / ui_set_quiet(1). */
   if (quiet)
     ui_set_quiet(1);
+  /* --verbose is orthogonal: it forwards SVT-AV1 chatter to stderr.
+     Compatible with --quiet (compact our-output, raw encoder log). */
+  if (verbose)
+    ui_set_verbose(1);
 
   const char *filepath = NULL;
   if (optind < argc)
@@ -529,7 +542,11 @@ int main(int argc, char *argv[]) {
   /* ---- Source ---- */
   MediaInfo info = get_media_info(filepath);
   if (info.error != 0) {
-    fprintf(stderr, "Failed to analyze file (error %d).\n", info.error);
+    char err[64];
+    snprintf(err, sizeof(err), "could not probe %s (error %d)", filepath,
+             info.error);
+    ui_stage_fail("Source probe", err);
+    ui_hint("verify the path and that ffmpeg can read the container");
     return 1;
   }
   ui_section("Source");
@@ -618,7 +635,12 @@ int main(int argc, char *argv[]) {
     ui_kv("Variance", "%.4f", grain.grain_variance);
     ui_kv("Synth level", "%d  (0–50)", film_grain);
   } else {
-    ui_stage_fail("Grain analysis", "fell back to defaults");
+    char err[64];
+    snprintf(err, sizeof(err), "all windows failed (last error %d)",
+             grain.error);
+    ui_stage_fail("Grain analysis", err);
+    ui_hint("set VMAV_KEEP_GRAIN_TMP=1 to retain the per-window scratch "
+            "files for inspection");
   }
 
   const EncodePreset *enc_preset = get_encode_preset(cli_quality, info.height);
@@ -666,6 +688,8 @@ int main(int argc, char *argv[]) {
     TmdbMovieInfo tmdb = tmdb_fetch_movie(tmdb_id);
     if (tmdb.error != 0) {
       ui_stage_fail("TMDB fetch", "could not fetch movie info");
+      ui_hint("verify TMDB_API_KEY is set in config.ini and the ID is "
+              "correct (e.g. tmdb.org/movie/<id>)");
     } else {
       ui_kv("Title", "%s", tmdb.original_title);
       ui_kv("Year", "%d", tmdb.release_year);
@@ -785,8 +809,9 @@ int main(int argc, char *argv[]) {
     int bitrate =
         cli_bitrate > 0
             ? cli_bitrate
-            : get_target_bitrate(info.height,
-                                 grain.error == 0 ? grain.grain_score : 0.0);
+            : get_target_bitrate(
+                  info.height,
+                  grain.error == 0 ? grain.grain_score : 0.0, cli_quality);
 
     /* Plan + Dry-run notice always render — the user needs them to decide
        whether to let the encode proceed. */
@@ -800,11 +825,13 @@ int main(int argc, char *argv[]) {
           enc_preset->ac_bias);
     if (grain.error == 0) {
       int is_4k = info.height >= 2160;
-      int is_grainy = grain.grain_score >= 0.08;
-      ui_kv("Grain", "level %d  (%s tier)", film_grain,
-            is_grainy ? "grainy" : "low-grain");
+      int is_anim = (cli_quality == QUALITY_ANIMATION);
+      const char *content_tier =
+          is_anim ? "animation" : (grain.grain_score >= 0.08 ? "grainy"
+                                                             : "clean");
+      ui_kv("Grain", "level %d  (%s tier)", film_grain, content_tier);
       ui_kv("Bitrate", "%d kbps VBR  (%s %s tier)", bitrate,
-            is_4k ? "4K" : "HD", is_grainy ? "grainy" : "low-grain");
+            is_4k ? "4K" : "HD", content_tier);
     } else {
       ui_kv("Bitrate", "%d kbps VBR", bitrate);
     }
@@ -813,9 +840,6 @@ int main(int argc, char *argv[]) {
     if (dry_run) {
       ui_section("Dry run");
       ui_row("No files written. Re-run without --dry-run to encode.");
-      if (grain.error == 0 && grain.grain_table_path[0] &&
-          getenv("VMAV_KEEP_GRAIN_TMP") == NULL)
-        remove(grain.grain_table_path);
       if (tracks.error == 0)
         free_media_tracks(&tracks);
       return 0;
@@ -891,9 +915,13 @@ int main(int argc, char *argv[]) {
                      ui_fmt_duration(difftime(time(NULL), track_t0)));
             ui_stage_ok(opus_name, detail);
           } else {
-            char err[64];
-            snprintf(err, sizeof(err), "error %d", r.error);
+            char err[128];
+            snprintf(err, sizeof(err), "stream #%d (%s, %dch): error %d",
+                     enc_best[i].index, enc_best[i].codec,
+                     enc_best[i].channels, r.error);
             ui_stage_fail(opus_name, err);
+            ui_hint("verify the source stream is decodable; opusenc-style "
+                    "channel layouts (>2ch) require ffmpeg with libopus");
           }
 
           opus_count++;
@@ -981,9 +1009,13 @@ int main(int argc, char *argv[]) {
                 ui_stage_ok(srt_fname, NULL);
                 srt_count++;
               } else {
-                char err[64];
-                snprintf(err, sizeof(err), "ffmpeg rc=%d", rc);
+                char err[128];
+                snprintf(err, sizeof(err),
+                         "stream #%d (%s, %s): ffmpeg rc=%d", sub->index, lang,
+                         sub->codec, rc);
                 ui_stage_fail("Subtitle extraction", err);
+                ui_hint("verify ffmpeg is on PATH and the stream codec is "
+                        "convertible to subrip");
               }
             }
           } else if (is_pgs_subtitle(sub)) {
@@ -1044,9 +1076,12 @@ int main(int argc, char *argv[]) {
             } else if (scr.error == 0) {
               ui_stage_skip(srt_fname, "no subtitles extracted");
             } else {
-              char err[64];
-              snprintf(err, sizeof(err), "OCR error %d", scr.error);
+              char err[128];
+              snprintf(err, sizeof(err), "PGS #%d (%s): OCR error %d",
+                       sub->index, lang, scr.error);
               ui_stage_fail(srt_fname, err);
+              ui_hint("verify Tesseract has training data for the "
+                      "language ($TESSDATA_PREFIX/<lang>.traineddata)");
             }
           }
         }
@@ -1152,6 +1187,8 @@ int main(int argc, char *argv[]) {
           char err[64];
           snprintf(err, sizeof(err), "error %d", rpu_res.error);
           ui_stage_fail(rpu_name, err);
+          ui_hint("source claims Dolby Vision but RPU extraction failed; "
+                  "encode will continue without DV metadata");
           rpu_path[0] = '\0'; /* Don't use RPU on failure */
         }
       }
@@ -1171,10 +1208,6 @@ int main(int argc, char *argv[]) {
             .output_path = av1_video_path,
             .rpu_path = rpu_path[0] ? rpu_path : NULL,
             .preset = enc_preset,
-            .grain_table_path =
-                (grain.error == 0 && grain.grain_table_path[0])
-                    ? grain.grain_table_path
-                    : NULL,
             .film_grain = film_grain,
             .grain_score = grain.error == 0 ? grain.grain_score : 0.0,
             .grain_variance = grain.error == 0 ? grain.grain_variance : 0.0,
@@ -1197,14 +1230,13 @@ int main(int argc, char *argv[]) {
           ui_stage_ok("video.mkv", detail);
         } else {
           char err[64];
-          snprintf(err, sizeof(err), "error %d", vr.error);
+          snprintf(err, sizeof(err), "error %d after %lld frames",
+                   vr.error, (long long)vr.frames_encoded);
           ui_stage_fail("video.mkv", err);
+          ui_hint("re-run with --verbose to forward SVT-AV1's own log to "
+                  "stderr (rate control, GOP layout, fatal warnings)");
         }
 
-        /* Grain table is no longer needed once the encode has consumed it. */
-        if (grain.error == 0 && grain.grain_table_path[0] &&
-            getenv("VMAV_KEEP_GRAIN_TMP") == NULL)
-          remove(grain.grain_table_path);
       }
 
       /* ---- Final MKV muxing ---- */
@@ -1269,9 +1301,12 @@ int main(int argc, char *argv[]) {
                    ui_fmt_duration(difftime(time(NULL), mux_t0)));
           ui_stage_ok(output_name, detail);
         } else {
-          char err[64];
-          snprintf(err, sizeof(err), "error %d", mr.error);
+          char err[128];
+          snprintf(err, sizeof(err), "error %d (%d audio + %d sub inputs)",
+                   mr.error, opus_count, srt_count);
           ui_stage_fail(output_name, err);
+          ui_hint("intermediates kept on disk; inspect them next to the "
+                  "source file before re-running");
         }
 
         /* Clean up intermediate files on success. Leaving sidecar .srt

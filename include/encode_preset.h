@@ -96,6 +96,27 @@ typedef struct {
   /* Startup mini-GOP tuning */
   int startup_mg_size;   /**< First mini-GOP size after KF: 0=off, 2/3/4 (0=default). */
   int startup_qp_offset; /**< QP offset for startup mini-GOP (-63 to 63, 0=default). */
+
+  /* Grain mechanism selection (SVT-AV1-HDR 4.1.0+).
+   *
+   * use_noise = 1  → route synth strength to --noise (content-agnostic
+   *                  overlay, no source denoising, zero encoding overhead).
+   *                  Right for digital sources (sensor noise, CGI) and
+   *                  animation (banding mask).
+   *
+   * use_noise = 0  → route synth strength to --film-grain + denoise=1
+   *                  (analyzes source grain, denoises, re-synthesizes).
+   *                  Right for analog film where the grain has spatial /
+   *                  temporal structure worth preserving (Super 35 / IMAX
+   *                  shot on film). */
+  int use_noise;            /**< Grain mechanism: 1=--noise, 0=--film-grain. */
+  int noise_size;           /**< Noise grain size: -1=auto (resolution-based),
+                                 0–13=explicit. Only used when use_noise=1. */
+  int noise_chroma_strength; /**< Chroma noise strength: -1=auto (60% of
+                                  luma), 0=off, 1–200=explicit. */
+  int noise_chroma_from_luma; /**< Apply chroma noise based on luma plane
+                                   (0 default, 1 enables chroma noise on
+                                   grayscale). */
 } EncodePreset;
 
 /**
@@ -112,22 +133,30 @@ typedef struct {
 const EncodePreset *get_encode_preset(QualityType quality, int video_height);
 
 /**
- * @brief Compute target bitrate (kbps) from resolution and grain.
+ * @brief Compute target bitrate (kbps) from resolution, grain, and content
+ *        type.
  *
  * Release-style flat targets — scene encoders pin bitrate by tier and grain,
  * not by perceptual score. Values calibrated for SVT-AV1-HDR @ preset 4 with
  * grain denoising (film_grain_denoise_apply=1) on:
  *
- *   4K grainy   → 4000 kbps   (height >= 2160 && grain_score >= GRAIN_THRESHOLD)
- *   4K low-grain→ 3500 kbps
- *   HD grainy   → 2500 kbps
- *   HD low-grain→ 2000 kbps
+ *   4KLight (height >= 2160):
+ *     noisy  source → 4000 kbps
+ *     clean  source → 3500 kbps
+ *     animation     → 3000 kbps   (clean - 500; no real grain to budget for)
+ *
+ *   HDLight (height < 2160):
+ *     noisy  source → 2500 kbps
+ *     clean  source → 2000 kbps
+ *     animation     → 1500 kbps
  *
  * @param height      Video height in pixels (>= 2160 selects 4K).
- * @param grain_score Composite grain score in [0, 1].
+ * @param grain_score Composite grain score in [0, 1]. Ignored for animation.
+ * @param quality     Content quality type — animation gets a flat
+ *                    clean-tier-minus-500 rate.
  * @return Target bitrate in kbps.
  */
-int get_target_bitrate(int height, double grain_score);
+int get_target_bitrate(int height, double grain_score, QualityType quality);
 
 /**
  * @brief Compute film grain synthesis level from a grain analysis score.
