@@ -180,7 +180,7 @@ set(LIBDOVI_GIT_TAG         "libdovi-3.3.2")
 set(LIBDOVI_VERSION         "3.3.2")
 set(LIBHDR10PLUS_GIT_TAG    "libhdr10plus-2.1.5")
 set(LIBHDR10PLUS_VERSION    "2.1.5")
-set(SVTAV1_GIT_TAG          "v4.0.1")
+set(SVTAV1_GIT_TAG          "v4.1.0")
 set(CJSON_GIT_TAG           "v1.7.18")
 set(ZLIB_GIT_TAG            "v1.3.1")
 set(OPENSSL_GIT_TAG         "openssl-3.3.2")
@@ -814,7 +814,6 @@ add_executable(vmavificient
     src/audio_encode.c
     src/config.c
     src/encode_preset.c
-    src/film_grain.c
     src/rpu_extract.c
     src/video_encode.c
     src/subtitle_convert.c

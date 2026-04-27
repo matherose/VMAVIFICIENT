@@ -17,6 +17,8 @@
 #include <libavutil/opt.h>
 #include <libswresample/swresample.h>
 
+#include "ui.h"
+
 /** @brief Check if a 3-letter language code is French. */
 static int is_french(const char *lang) {
   return strcmp(lang, "fre") == 0 || strcmp(lang, "fra") == 0;
@@ -168,57 +170,20 @@ static int encode_from_fifo(AVAudioFifo *fifo, AVCodecContext *enc_ctx,
 }
 
 /**
- * @brief Print a progress bar with speed and ETA to stderr.
+ * @brief Format a realtime-multiplier middle string for ui_progress.
  *
- * Format: "  [=========>          ] 45%  12.5x  ETA 02:15"
- * Speed is a realtime multiplier (seconds of audio per wall-clock second).
+ * Speed is audio seconds encoded per wall-clock second.
  */
-static void print_progress(int64_t current_pts, int64_t total_samples,
-                           time_t start_time) {
-  if (total_samples <= 0)
-    return;
-
-  double pct = (double)current_pts / total_samples;
-  if (pct > 1.0)
-    pct = 1.0;
-
-  int bar_width = 30;
-  int filled = (int)(pct * bar_width);
-
-  char bar[64];
-  for (int i = 0; i < bar_width; i++) {
-    if (i < filled)
-      bar[i] = '=';
-    else if (i == filled)
-      bar[i] = '>';
-    else
-      bar[i] = ' ';
-  }
-  bar[bar_width] = '\0';
-
-  time_t now = time(NULL);
-  double elapsed = difftime(now, start_time);
-
-  /* Speed: audio seconds encoded per wall-clock second. */
-  char speed_str[32] = "";
+static void fmt_audio_middle(char *out, size_t cap, int64_t current_pts,
+                             time_t start_time) {
+  double elapsed = difftime(time(NULL), start_time);
   if (elapsed > 1.0) {
     double audio_secs = (double)current_pts / 48000.0;
     double speed = audio_secs / elapsed;
-    snprintf(speed_str, sizeof(speed_str), "%.1fx", speed);
+    snprintf(out, cap, "%.1fx", speed);
+  } else {
+    out[0] = '\0';
   }
-
-  /* ETA. */
-  char eta_str[32] = "";
-  if (pct > 0.01 && elapsed > 1.0) {
-    double remaining = elapsed * (1.0 - pct) / pct;
-    int eta_min = (int)(remaining / 60);
-    int eta_sec = (int)remaining % 60;
-    snprintf(eta_str, sizeof(eta_str), "ETA %02d:%02d", eta_min, eta_sec);
-  }
-
-  fprintf(stderr, "\r  [%s] %3d%%  %6s  %s   ", bar, (int)(pct * 100),
-          speed_str, eta_str);
-  fflush(stderr);
 }
 
 OpusEncodeResult encode_track_to_opus(const char *input_path,
@@ -426,6 +391,8 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
                                  (AVRational){1, 48000});
 
   time_t start_time = time(NULL);
+  UiProgress progress;
+  ui_progress_start(&progress, (long long)total_samples);
   time_t last_progress = 0;
   int64_t next_pts = 0;
 
@@ -480,7 +447,9 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
       /* Update progress at most once per second. */
       time_t now = time(NULL);
       if (now != last_progress) {
-        print_progress(next_pts, total_samples, start_time);
+        char middle[32];
+        fmt_audio_middle(middle, sizeof(middle), next_pts, start_time);
+        ui_progress_update(&progress, (long long)next_pts, middle);
         last_progress = now;
       }
     }
@@ -543,14 +512,11 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
   av_write_trailer(ofmt_ctx);
 
   /* Final progress: 100%. */
-  print_progress(total_samples, total_samples, start_time);
-  time_t end_time = time(NULL);
-  int elapsed = (int)difftime(end_time, start_time);
-  fprintf(stderr, "\r  [");
-  for (int i = 0; i < 30; i++)
-    fprintf(stderr, "=");
-  fprintf(stderr, "] 100%%  Done in %02d:%02d          \n", elapsed / 60,
-          elapsed % 60);
+  {
+    char middle[32];
+    fmt_audio_middle(middle, sizeof(middle), total_samples, start_time);
+    ui_progress_done(&progress, (long long)total_samples, middle);
+  }
 
   /* ── Verify output ── */
   ret = verify_opus_file(output_path);

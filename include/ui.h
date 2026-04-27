@@ -40,6 +40,22 @@ void ui_set_quiet(int quiet);
 /** @brief Return current quiet state (0 = normal, non-zero = quiet). */
 int ui_is_quiet(void);
 
+/**
+ * @brief Enable / disable verbose mode.
+ *
+ * Verbose mode does NOT change ui_* output (it's already at full
+ * verbosity by default). Other modules query ui_is_verbose() to decide
+ * whether to forward third-party library chatter — currently SVT-AV1's
+ * own log callback in video_encode.c, which is silent unless verbose.
+ *
+ * Orthogonal to ui_set_quiet: --quiet --verbose is valid (compact ui_*
+ * output, but encoder chatter forwarded to stderr).
+ */
+void ui_set_verbose(int verbose);
+
+/** @brief Return current verbose state (0 = normal, non-zero = verbose). */
+int ui_is_verbose(void);
+
 /** Print "─── Title ────...─" filling UI_WIDTH visible columns. */
 void ui_section(const char *title);
 
@@ -58,6 +74,55 @@ void ui_stage_skip(const char *name, const char *reason);
 
 /** Print "[✗] name  reason\n" — red cross to stderr. reason may be NULL. */
 void ui_stage_fail(const char *name, const char *reason);
+
+/**
+ * @brief Print a "[hint] message\n" line — dim, to stderr.
+ *
+ * Pair with ui_stage_fail to give the user an actionable next step
+ * (which env var to set, which flag to add, what to verify).
+ *
+ *   ui_stage_fail("video.mkv", "error -1");
+ *   ui_hint("re-run with --verbose to see SVT-AV1 diagnostics");
+ */
+void ui_hint(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
+/* ---- Progress bar ----------------------------------------------------- */
+
+/**
+ * @brief Per-call state for the progress bar. Stack-allocated by the caller.
+ *
+ * Initialize with ui_progress_start(); update with ui_progress_update();
+ * finish with ui_progress_done(). Updates render to stderr in-place
+ * (\r-prefixed) and are throttled to ~4 Hz so a per-frame call doesn't
+ * spam the terminal.
+ */
+typedef struct UiProgress {
+  long long total;        /**< Total work units. <=0 = bar is a no-op. */
+  long long start_time_s; /**< Wall-clock seconds at start. */
+  double last_draw_s;     /**< Last draw time (for throttling). */
+} UiProgress;
+
+/**
+ * @brief Initialize and clear the progress state. No draw.
+ *
+ * @p total may be <= 0 — subsequent updates / done become no-ops.
+ */
+void ui_progress_start(UiProgress *p, long long total);
+
+/**
+ * @brief Throttled update — draws "  [bar] PCT%  <middle>  ETA mm:ss"
+ * to stderr in-place, at most ~4 times per second.
+ *
+ * @p middle is a free-form caller-formatted string for the variable
+ * middle field (e.g. "12345 frames  3.2 fps", "248K RPUs", "12.5x").
+ * Pass NULL or "" to omit the middle field.
+ */
+void ui_progress_update(UiProgress *p, long long current, const char *middle);
+
+/**
+ * @brief Force a final draw at 100%, append "Done in mm:ss", end with \\n.
+ */
+void ui_progress_done(UiProgress *p, long long final_count, const char *middle);
 
 /**
  * @brief Format a duration into a rotating thread-unsafe buffer.

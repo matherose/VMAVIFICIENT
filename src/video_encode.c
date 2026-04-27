@@ -33,19 +33,41 @@
 
 #include <libdovi/rpu_parser.h>
 
-#include "film_grain.h"
+#include "ui.h"
 
 /* ====================================================================== */
-/*  Suppress SVT-AV1 log output (we show our own progress)               */
+/*  SVT-AV1 log routing                                                  */
+/*                                                                       */
+/* Default: silent — we render our own progress bar and don't want SVT's */
+/* per-frame chatter clobbering it. With --verbose (ui_is_verbose), we   */
+/* forward everything to stderr so the user sees the encoder's diagnostic*/
+/* output (rate control decisions, GOP layout, warnings, etc.).         */
 /* ====================================================================== */
 
-static void svt_silent_log(void *context, SvtAv1LogLevel level, const char *tag,
-                           const char *fmt, va_list args) {
+static void svt_log_callback(void *context, SvtAv1LogLevel level,
+                             const char *tag, const char *fmt, va_list args) {
   (void)context;
-  (void)level;
-  (void)tag;
-  (void)fmt;
-  (void)args;
+  if (!ui_is_verbose())
+    return;
+  /* SVT-AV1 levels: 0=fatal, 1=error, 2=warn, 3=info, 4=debug. We always
+     forward warn+ to stderr; info+ also gated by verbose (already checked
+     above, so this is effectively all levels when verbose is on). */
+  const char *level_str = "info";
+  switch (level) {
+  case SVT_AV1_LOG_FATAL: level_str = "fatal"; break;
+  case SVT_AV1_LOG_ERROR: level_str = "error"; break;
+  case SVT_AV1_LOG_WARN:  level_str = "warn";  break;
+  case SVT_AV1_LOG_INFO:  level_str = "info";  break;
+  case SVT_AV1_LOG_DEBUG: level_str = "debug"; break;
+  default: break;
+  }
+  fprintf(stderr, "[svt-av1 %s%s%s] ", level_str, tag ? " " : "",
+          tag ? tag : "");
+  vfprintf(stderr, fmt, args);
+  /* SVT messages may or may not end with \n; don't double up. */
+  size_t fmtlen = fmt ? strlen(fmt) : 0;
+  if (fmtlen == 0 || fmt[fmtlen - 1] != '\n')
+    fputc('\n', stderr);
 }
 
 /* ====================================================================== */
@@ -117,37 +139,12 @@ static size_t rpu_reader_next(RpuReader *r, uint8_t **out_data) {
 /*  Progress display                                                      */
 /* ====================================================================== */
 
-static void print_progress(int64_t frames_done, int64_t total_frames,
-                           time_t start_time) {
-  if (total_frames <= 0)
-    return;
-
-  double pct = (double)frames_done / total_frames;
-  if (pct > 1.0)
-    pct = 1.0;
-
-  int bar_width = 30;
-  int filled = (int)(pct * bar_width);
-  char bar[64];
-  for (int i = 0; i < bar_width; i++)
-    bar[i] = (i < filled) ? '=' : (i == filled) ? '>' : ' ';
-  bar[bar_width] = '\0';
-
-  time_t now = time(NULL);
-  double elapsed = difftime(now, start_time);
+/** Format the per-update middle string for the video progress bar. */
+static void fmt_video_middle(char *out, size_t cap, int64_t frames_done,
+                             time_t start_time) {
+  double elapsed = difftime(time(NULL), start_time);
   double fps = (elapsed > 0.5) ? frames_done / elapsed : 0;
-
-  char eta_str[32] = "";
-  if (pct > 0.01 && elapsed > 1.0) {
-    double remaining = elapsed * (1.0 - pct) / pct;
-    int eta_min = (int)(remaining / 60);
-    int eta_sec = (int)remaining % 60;
-    snprintf(eta_str, sizeof(eta_str), "ETA %02d:%02d", eta_min, eta_sec);
-  }
-
-  fprintf(stderr, "\r  [%s] %3d%%  %lld frames  %.1f fps  %s   ", bar,
-          (int)(pct * 100), (long long)frames_done, fps, eta_str);
-  fflush(stderr);
+  snprintf(out, cap, "%lld frames  %.1f fps", (long long)frames_done, fps);
 }
 
 /* ====================================================================== */
@@ -293,15 +290,34 @@ static void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg,
       cfg->startup_qp_offset = (int8_t)p->startup_qp_offset;
   }
 
-  /* Film grain from grain score analysis.
+  /* Grain mechanism — branches per preset (use_noise flag).
    *
-   * Default for film_grain_denoise_apply is 0 — SVT-AV1 *analyzes* noise and
-   * stores a grain table but does NOT denoise the source, so the encoder
-   * pays for both the noisy residual AND the synthesis table. Forcing
-   * apply=1 denoises before coding, letting the bitrate actually land at
-   * the target. */
-  cfg->film_grain_denoise_strength = (uint32_t)film_grain;
-  cfg->film_grain_denoise_apply = (film_grain > 0) ? 1 : 0;
+   * use_noise = 1 (digital + animation):
+   *   --noise (SVT-AV1-HDR 4.1.0+) — synthetic noise table, no source
+   *   denoising, no analysis cost. Pure additive overlay. The strength
+   *   value comes from the same dynamic mapping (get_film_grain_from_score)
+   *   so the user-facing "grain level" stays consistent across mechanisms.
+   *
+   * use_noise = 0 (analog film):
+   *   --film-grain + denoise=1 — analyzes source grain, denoises before
+   *   encoding, decoder re-synths. The juliobbv-p fork normally disables
+   *   denoise (warns about detail loss), but at HDLight bitrates we need
+   *   the bitrate savings; analog film is the one tier where the source
+   *   grain has structure worth analyzing. */
+  if (p->use_noise) {
+    cfg->noise_strength = (uint8_t)film_grain;
+    cfg->noise_strength_chroma = (int32_t)p->noise_chroma_strength;
+    cfg->noise_chroma_from_luma = (uint8_t)p->noise_chroma_from_luma;
+    cfg->noise_size = (int8_t)p->noise_size;
+    /* Make sure the legacy film-grain path is fully off — both can't
+       drive fgs_table simultaneously. */
+    cfg->film_grain_denoise_strength = 0;
+    cfg->film_grain_denoise_apply = 0;
+  } else {
+    cfg->film_grain_denoise_strength = (uint32_t)film_grain;
+    cfg->film_grain_denoise_apply = (film_grain > 0) ? 1 : 0;
+    cfg->noise_strength = 0;
+  }
 }
 
 /* ====================================================================== */
@@ -397,7 +413,6 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   struct SwsContext *sws_ctx = NULL;
   EbComponentType *svt_handle = NULL;
   EbSvtAv1EncConfiguration svt_config;
-  AomFilmGrain *parsed_grain = NULL;
   AVFrame *frame = NULL;
   AVFrame *cropped_frame = NULL;
   AVPacket *pkt = NULL;
@@ -502,7 +517,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   int need_crop = (crop_top || crop_bottom || crop_left || crop_right);
 
   /* ---- Initialize SVT-AV1-HDR encoder ---- */
-  svt_av1_set_log_callback(svt_silent_log, NULL);
+  svt_av1_set_log_callback(svt_log_callback, NULL);
   ret = svt_av1_enc_init_handle(&svt_handle, &svt_config);
   if (ret != EB_ErrorNone) {
     fprintf(stderr, "  Video Error: svt_av1_enc_init_handle failed (%d)\n",
@@ -536,21 +551,6 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   /* Apply quality preset */
   apply_preset_to_config(&svt_config, config->preset, config->film_grain,
                          config->target_bitrate, config->crf);
-
-  /* Measured grain table from media_analysis (grainiest window). Replaces
-   * SVT-AV1's own grain analysis with grav1synth's parameters; denoising
-   * (film_grain_denoise_apply=1) still runs so the bitrate target is met. */
-  if (config->grain_table_path && config->grain_table_path[0]) {
-    parsed_grain = parse_filmgrn1_table(config->grain_table_path);
-    if (parsed_grain) {
-      svt_config.fgs_table = parsed_grain;
-    } else {
-      fprintf(stderr,
-              "  Video Warning: failed to parse grain table %s — falling "
-              "back to encoder's internal grain analysis\n",
-              config->grain_table_path);
-    }
-  }
 
   /* PQ content adjustments (HDR10 / HDR10+ / Dolby Vision) */
   if (in_stream->codecpar->color_trc == AVCOL_TRC_SMPTE2084) {
@@ -591,27 +591,38 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   double gs = config->grain_score;
 
   if (gs > 0.15) {
-    /* --- High grain --- */
+    /* --- High grain — emulate tune 5 (the Film Grain tune) ---
+     *
+     * SVT-AV1's tune 5 is shorthand for: --tune 0 --enable-tf 0
+     * --enable-restoration 0 --enable-cdef 0 --complex-hvs 1 --tx-bias 1
+     * --ac-bias 4.00. For grainy content, juliobbv-p's fork docs explicitly
+     * recommend it. Live-action presets ship with tune 0 by default; here
+     * we apply the same effect dynamically when we measure heavy grain on
+     * any preset. The analog film presets (Super 35 Analog / IMAX Analog)
+     * already use tune 5 in their preset config, so this block stacks
+     * harmlessly on them. */
 
-    /* CDEF: strong reduction — grain IS the texture, don't blur it. */
-    int cd = (int)svt_config.cdef_scaling - 6;
-    svt_config.cdef_scaling = (uint8_t)(cd < 4 ? 4 : cd);
+    /* CDEF: disable entirely (tune 5). */
+    svt_config.cdef_scaling = 4; /* min "active" value; SVT clamps to off
+                                    above */
+    /* Temporal filter: off (tune 5). */
+    svt_config.enable_tf = 0;
+    svt_config.tf_strength = 0;
+    svt_config.kf_tf_strength = 0;
 
-    /* Temporal filter: disable or minimize — TF smears grain into mush. */
-    if (svt_config.enable_tf && svt_config.tf_strength > 0)
-      svt_config.tf_strength = 0;
-    if (svt_config.kf_tf_strength > 0)
-      svt_config.kf_tf_strength = 0;
-
-    /* Restoration filter: OFF — Wiener/self-guided filters destroy grain. */
+    /* Restoration filter: OFF (tune 5). */
     svt_config.enable_restoration_filtering = 0;
+
+    /* Complex HVS: on (tune 5). */
+    svt_config.complex_hvs = 1;
+
+    /* AC bias: pin to 4.0 (tune 5's exact value). */
+    if (svt_config.ac_bias < 4.0)
+      svt_config.ac_bias = 4.0;
 
     /* Noise normalization: boost to preserve AC detail in RD decisions. */
     if (svt_config.noise_norm_strength < 4)
       svt_config.noise_norm_strength++;
-
-    /* AC bias: boost to weight RD toward preserving high-frequency texture. */
-    svt_config.ac_bias = fmin(svt_config.ac_bias + 1.0, 8.0);
 
     /* Noise-adaptive filtering: CDEF-only mode (skip restoration). */
     svt_config.noise_adaptive_filtering = 3;
@@ -734,6 +745,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
     total_frames = (int64_t)(config->info->duration * config->info->framerate);
 
   time_t start_time = time(NULL);
+  UiProgress progress;
+  ui_progress_start(&progress, (long long)total_frames);
   time_t last_progress = 0;
   int64_t frame_number = 0;
   int pic_send_done = 0;
@@ -918,7 +931,9 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
       /* Progress */
       time_t now = time(NULL);
       if (now != last_progress) {
-        print_progress(frame_number, total_frames, start_time);
+        char middle[64];
+        fmt_video_middle(middle, sizeof(middle), frame_number, start_time);
+        ui_progress_update(&progress, (long long)frame_number, middle);
         last_progress = now;
       }
     }
@@ -1087,13 +1102,10 @@ flush_encoder:
 
   /* Final progress */
   {
-    time_t end_time = time(NULL);
-    int elapsed = (int)difftime(end_time, start_time);
-    fprintf(stderr, "\r  [");
-    for (int i = 0; i < 30; i++)
-      fprintf(stderr, "=");
-    fprintf(stderr, "] 100%%  %lld frames  Done in %02d:%02d          \n",
-            (long long)result.frames_encoded, elapsed / 60, elapsed % 60);
+    char middle[64];
+    snprintf(middle, sizeof(middle), "%lld frames",
+             (long long)result.frames_encoded);
+    ui_progress_done(&progress, (long long)result.frames_encoded, middle);
   }
 
 cleanup:
@@ -1106,8 +1118,6 @@ cleanup:
     svt_av1_enc_deinit(svt_handle);
     svt_av1_enc_deinit_handle(svt_handle);
   }
-
-  free_film_grain(parsed_grain);
 
   if (sws_ctx)
     sws_freeContext(sws_ctx);

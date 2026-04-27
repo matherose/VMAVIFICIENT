@@ -81,6 +81,10 @@ static const EncodePreset presets_liveaction[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
     /* HD */
     {
@@ -139,6 +143,10 @@ static const EncodePreset presets_liveaction[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
 };
 
@@ -200,6 +208,10 @@ static const EncodePreset presets_animation[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
     /* HD */
     {
@@ -258,6 +270,10 @@ static const EncodePreset presets_animation[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
 };
 
@@ -319,6 +335,10 @@ static const EncodePreset presets_super35_analog[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 0,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
     /* HD */
     {
@@ -377,6 +397,10 @@ static const EncodePreset presets_super35_analog[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 0,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
 };
 
@@ -438,6 +462,10 @@ static const EncodePreset presets_super35_digital[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
     /* HD */
     {
@@ -496,6 +524,10 @@ static const EncodePreset presets_super35_digital[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
 };
 
@@ -557,6 +589,10 @@ static const EncodePreset presets_imax_analog[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 0,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
     /* HD */
     {
@@ -615,6 +651,10 @@ static const EncodePreset presets_imax_analog[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 0,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
 };
 
@@ -676,6 +716,10 @@ static const EncodePreset presets_imax_digital[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
     /* HD */
     {
@@ -734,6 +778,10 @@ static const EncodePreset presets_imax_digital[2] = {
         .gop_constraint_rc = 1,
         .startup_mg_size = 3,
         .startup_qp_offset = -5,
+        .use_noise = 1,
+        .noise_size = -1,
+        .noise_chroma_strength = -1,
+        .noise_chroma_from_luma = 0,
     },
 };
 
@@ -764,13 +812,34 @@ const EncodePreset *get_encode_preset(QualityType quality, int video_height) {
 /* Release-style flat table. The encoder handles grain structure via its
  * built-in denoise+synthesis path (film_grain_denoise_apply=1), so we do
  * NOT pay extra bits to preserve noise — we pick the right tier and let
- * the grain synthesizer rebuild texture on playback. */
+ * the grain synthesizer rebuild texture on playback.
+ *
+ * Tiers:
+ *
+ *   4KLight (height >= 2160):
+ *     noisy  source → 4000 kbps
+ *     clean  source → 3500 kbps
+ *     animation     → 3000 kbps   (clean - 500; animation has no real grain
+ *                                   so it's always treated as clean and gets
+ *                                   the extra 500 kbps shaved off)
+ *
+ *   HDLight (height < 2160):
+ *     noisy  source → 2500 kbps
+ *     clean  source → 2000 kbps
+ *     animation     → 1500 kbps
+ */
 #define GRAIN_THRESHOLD 0.08 /* grain_score above this → "grainy" tier */
 
-int get_target_bitrate(int height, double grain_score) {
+int get_target_bitrate(int height, double grain_score, QualityType quality) {
   int is_4k = (height >= 2160);
-  int is_grainy = (grain_score >= GRAIN_THRESHOLD);
 
+  /* Animation always uses the clean tier minus 500. The grain detector
+     measures texture/dithering on animation, not noise, so the grainy/clean
+     branch wouldn't be meaningful. */
+  if (quality == QUALITY_ANIMATION)
+    return is_4k ? 3000 : 1500;
+
+  int is_grainy = (grain_score >= GRAIN_THRESHOLD);
   if (is_4k)
     return is_grainy ? 4000 : 3500;
   return is_grainy ? 2500 : 2000;
@@ -791,30 +860,38 @@ static int lerp_grain(double score, double lo_score, double hi_score,
 
 /**
  * Analog film (Super 35 / IMAX shot on film): the grain is real and
- * artistically intentional.  Map aggressively — the detector is measuring
- * actual film stock noise.  Reference: Blade Runner 2049 REMUX -> 0.108.
+ * artistically intentional. Cap at 15 — SVT-AV1's own doc says levels in
+ * the 10–15 range are "noisy video" territory; higher than that risks
+ * noise stacking and mush at HDLight bitrates. The analog presets use
+ * tune 5 which already disables CDEF/restoration/TF for grain pass-through,
+ * so SVT only needs to add modest synth on top, not reproduce the source
+ * grain faithfully.
+ *
+ * Reference: Blade Runner 2049 REMUX -> 0.108.
  */
 static int film_grain_analog(double s) {
   if (s <= 0.04) return 0;
-  if (s <= 0.08) return lerp_grain(s, 0.04, 0.08, 4, 10);
-  if (s <= 0.12) return lerp_grain(s, 0.08, 0.12, 10, 20);
-  if (s <= 0.20) return lerp_grain(s, 0.12, 0.20, 20, 30);
-  if (s <= 1.00) return lerp_grain(s, 0.20, 1.00, 30, 40);
-  return 40;
+  if (s <= 0.08) return lerp_grain(s, 0.04, 0.08, 3, 6);
+  if (s <= 0.12) return lerp_grain(s, 0.08, 0.12, 6, 10);
+  if (s <= 0.20) return lerp_grain(s, 0.12, 0.20, 10, 13);
+  if (s <= 1.00) return lerp_grain(s, 0.20, 1.00, 13, 15);
+  return 15;
 }
 
 /**
  * Digital live-action / Super 35 digital / IMAX digital: minimal real grain,
  * detector mostly sees sensor noise and compression artifacts.
- * Moderate mapping — some synthesis helps mask banding, but don't overdo it.
+ * Cap at 10 — SVT-AV1's own doc says level ~8 is sufficient for normal
+ * grain. Anything higher is wasted bitrate on digital sources where there's
+ * no real grain to preserve.
  */
 static int film_grain_digital(double s) {
   if (s <= 0.05) return 0;
-  if (s <= 0.10) return lerp_grain(s, 0.05, 0.10, 2, 6);
-  if (s <= 0.15) return lerp_grain(s, 0.10, 0.15, 6, 10);
-  if (s <= 0.25) return lerp_grain(s, 0.15, 0.25, 10, 16);
-  if (s <= 1.00) return lerp_grain(s, 0.25, 1.00, 16, 22);
-  return 22;
+  if (s <= 0.10) return lerp_grain(s, 0.05, 0.10, 2, 5);
+  if (s <= 0.15) return lerp_grain(s, 0.10, 0.15, 5, 7);
+  if (s <= 0.25) return lerp_grain(s, 0.15, 0.25, 7, 9);
+  if (s <= 1.00) return lerp_grain(s, 0.25, 1.00, 9, 10);
+  return 10;
 }
 
 /**
@@ -824,8 +901,8 @@ static int film_grain_digital(double s) {
  */
 static int film_grain_animation(double s) {
   if (s <= 0.10) return 0;
-  if (s <= 0.25) return lerp_grain(s, 0.10, 0.25, 0, 4);
-  return 4;
+  if (s <= 0.25) return lerp_grain(s, 0.10, 0.25, 0, 3);
+  return 3;
 }
 
 /* Upper edges of each bracket in film_grain_analog and film_grain_digital.
