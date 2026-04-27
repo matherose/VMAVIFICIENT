@@ -731,17 +731,18 @@ int main(int argc, char *argv[]) {
 
   /* ---- Grain analysis ---- */
   ui_section("Grain analysis");
-  ui_row("Sampling windows from source... (this may take a few minutes)");
+  ui_row("Sampling 4 windows (extends to 7 if variance is high)…");
   GrainScore grain = get_grain_score(filepath);
   int film_grain = 0;
   if (grain.error == 0) {
     film_grain = get_film_grain_from_score(grain.grain_score,
                                            grain.grain_variance, cli_quality);
-    ui_kv("Windows", "%d%s", grain.windows_succeeded,
-          grain.windows_succeeded > 4 ? "  (refined)" : "");
-    ui_kv("Luma score", "%.4f", grain.grain_score);
+    /* Per-window OK/FAIL lines already printed by media_analysis as it
+       worked; these summary kvs collect the aggregate signal. */
+    ui_kv("Luma score", "%.4f  (max across windows)", grain.grain_score);
     ui_kv("Chroma score", "%.4f", grain.chroma_grain_score);
-    ui_kv("Variance", "%.4f", grain.grain_variance);
+    ui_kv("Variance", "%.4f%s", grain.grain_variance,
+          grain.windows_succeeded > 4 ? "  (refinement triggered)" : "");
     ui_kv("Synth level", "%d  (0–50)", film_grain);
   } else {
     char err[64];

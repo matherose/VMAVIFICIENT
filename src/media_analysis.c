@@ -22,6 +22,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <libavcodec/avcodec.h>
@@ -34,6 +35,8 @@
 #include <libavutil/frame.h>
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
+
+#include "ui.h"
 
 #ifndef VMAV_GRAV1SYNTH_BIN
 #error "VMAV_GRAV1SYNTH_BIN must be defined by the build system"
@@ -578,7 +581,8 @@ static GrainTableScores parse_grain_table(const char *path) {
  *  fgs_table, but feeding measured grain params back to the encoder
  *  produced over-faithful (mushy + expensive) reproduction at HDLight
  *  bitrates, so we now let SVT do its own grain analysis instead. */
-static int sample_grain_window(const char *path, int window_idx, double position,
+static int sample_grain_window(const char *path, const char *label,
+                               int window_idx, double position,
                                int keep_tmp, GrainTableScores *out_scores) {
   char src_tmp[4096], denoised_tmp[4096], table_tmp[4096];
   snprintf(src_tmp, sizeof(src_tmp), "%s.grav1_src_%d.mkv", path, window_idx);
@@ -587,6 +591,7 @@ static int sample_grain_window(const char *path, int window_idx, double position
   snprintf(table_tmp, sizeof(table_tmp), "%s.grav1_table_%d.txt", path,
            window_idx);
 
+  time_t window_t0 = time(NULL);
   int ret = extract_samples(path, src_tmp, denoised_tmp, position,
                             SAMPLE_DURATION_SEC);
   if (ret >= 0) {
@@ -609,6 +614,21 @@ static int sample_grain_window(const char *path, int window_idx, double position
   } else {
     fprintf(stderr, "[grain] window %d (pos %.2f): kept %s\n", window_idx,
             position, table_tmp);
+  }
+
+  /* Per-window status — gives the user something to watch during the long
+     analysis pass instead of a silent 10+ minute wait. */
+  if (ret >= 0) {
+    char detail[64];
+    snprintf(detail, sizeof(detail), "pos %.0f%%, luma %.4f  %s",
+             position * 100.0, out_scores->y,
+             ui_fmt_duration(difftime(time(NULL), window_t0)));
+    ui_stage_ok(label, detail);
+  } else {
+    char err[64];
+    snprintf(err, sizeof(err), "pos %.0f%%, error %d", position * 100.0,
+             ret);
+    ui_stage_fail(label, err);
   }
 
   return ret;
@@ -647,8 +667,10 @@ GrainScore get_grain_score(const char *path) {
 
   for (int i = 0; i < NUM_SAMPLES; i++, total_attempts++) {
     GrainTableScores scores = {0};
-    int ret = sample_grain_window(path, total_attempts, SAMPLE_POSITIONS[i],
-                                  keep_tmp, &scores);
+    char label[32];
+    snprintf(label, sizeof(label), "Window %d/%d", i + 1, NUM_SAMPLES);
+    int ret = sample_grain_window(path, label, total_attempts,
+                                  SAMPLE_POSITIONS[i], keep_tmp, &scores);
     if (ret >= 0) {
       result.per_window_scores[i] = scores.y;
       y_scores[total_attempts] = scores.y;
@@ -683,7 +705,9 @@ GrainScore get_grain_score(const char *path) {
     for (int j = 0; j < refine_count && total_attempts < MAX_SAMPLE_WINDOWS;
          j++, total_attempts++) {
       GrainTableScores scores = {0};
-      int ret = sample_grain_window(path, total_attempts,
+      char label[32];
+      snprintf(label, sizeof(label), "Refine %d/%d", j + 1, refine_count);
+      int ret = sample_grain_window(path, label, total_attempts,
                                     REFINE_SAMPLE_POSITIONS[j], keep_tmp,
                                     &scores);
       if (ret >= 0) {
