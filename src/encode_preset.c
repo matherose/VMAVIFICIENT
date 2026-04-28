@@ -1,6 +1,6 @@
 /**
  * @file encode_preset.c
- * @brief SVT-AV1-HDR v4.0.1 encoding quality presets.
+ * @brief SVT-AV1-HDR v4.1.0+ encoding quality presets.
  */
 
 #include "encode_preset.h"
