@@ -1,6 +1,6 @@
 /**
  * @file encode_preset.h
- * @brief SVT-AV1-HDR v4.0.1 encoding quality presets.
+ * @brief SVT-AV1-HDR v4.1.0+ encoding quality presets.
  */
 
 #ifndef ENCODE_PRESET_H
@@ -22,7 +22,7 @@ typedef enum {
 } QualityType;
 
 /**
- * @brief SVT-AV1-HDR v4.0.1 encoding parameters.
+ * @brief SVT-AV1-HDR v4.1.0+ encoding parameters.
  *
  * Film grain is NOT included here — it is computed dynamically from the
  * grain score via @ref get_film_grain_from_score().
