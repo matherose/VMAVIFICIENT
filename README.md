@@ -126,37 +126,22 @@ Everything else comes from the system: FFmpeg (avformat/avcodec/avutil/avfilter/
 
 ### System requirements
 
+- **macOS arm64** (Apple Silicon). Linux support is on the roadmap but
+  deferred — `libdovi-dev` only landed in Debian trixie / Ubuntu 25.04+,
+  and we don't want to ship a half-working Linux story.
 - **CMake** ≥ 3.24, **Ninja**, **pkg-config**
 - **LLVM/Clang** (the build forces it; gcc is not supported)
 - **Rust** toolchain (for libhdr10plus / grav1synth)
 - **cargo-c** (`cargo install cargo-c`) for libhdr10plus
-- macOS arm64 or Linux x86_64
 
-### Install build + runtime deps
-
-**macOS (Homebrew):**
+### Install build + runtime deps (macOS)
 
 ```bash
 brew install \
-    ninja pkg-config nasm \
+    ninja pkg-config nasm rust cargo-c \
     ffmpeg opus dovi_tool tesseract leptonica \
     jpeg-turbo libpng libtiff cjson openssl@3
 ```
-
-**Debian / Ubuntu (apt):**
-
-```bash
-sudo apt install -y \
-    cmake ninja-build pkg-config nasm \
-    clang lld llvm \
-    libavformat-dev libavcodec-dev libavutil-dev \
-    libavfilter-dev libswscale-dev libswresample-dev \
-    libopus-dev libdovi-dev libtesseract-dev libleptonica-dev \
-    libpng-dev libjpeg-dev libtiff-dev \
-    zlib1g-dev libssl-dev libcurl4-openssl-dev libcjson-dev
-```
-
-Note: `libdovi-dev` 3.3.2+ is in Debian trixie / Ubuntu 24.10+. On older releases either install from backports or fall back to `-DVMAV_USE_SYSTEM_DEPS=OFF` (below).
 
 ## Building
 
