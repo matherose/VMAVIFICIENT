@@ -450,8 +450,13 @@ static int spawn_grav1synth(const char *src, const char *denoised,
                                    O_WRONLY, 0);
   posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null",
                                    O_WRONLY, 0);
+  /* posix_spawnp does PATH lookup when the program name has no slash —
+     so packagers can pass -DVMAV_GRAV1SYNTH_BIN_RUNTIME=grav1synth and
+     ship the helper alongside vmavificient in bin/. Absolute paths
+     (the dev-build default) still work because the `p` variant only
+     consults PATH when the name is unqualified. */
   int ret =
-      posix_spawn(&pid, VMAV_GRAV1SYNTH_BIN, &actions, NULL, argv, environ);
+      posix_spawnp(&pid, VMAV_GRAV1SYNTH_BIN, &actions, NULL, argv, environ);
   posix_spawn_file_actions_destroy(&actions);
   if (ret != 0)
     return -ret;
