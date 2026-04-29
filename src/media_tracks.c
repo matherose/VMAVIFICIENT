@@ -474,8 +474,9 @@ int detect_track_french_variant(const TrackInfo *track) {
   if (!t || !t[0])
     return 0;
   /* Check VFQ/VFI before VFF so "VFF" doesn't shadow more specific tokens. */
-  if (str_contains_ci(t, "VFQ") || str_contains_ci(t, "qu\xc3\xa9"
-                                                      "becois") ||
+  if (str_contains_ci(t, "VFQ") ||
+      str_contains_ci(t, "qu\xc3\xa9"
+                         "becois") ||
       str_contains_ci(t, "quebec"))
     return 2; /* FRENCH_VARIANT_VFQ */
   if (str_contains_ci(t, "VFI"))
@@ -501,10 +502,13 @@ TrackInfo *select_best_audio_per_language(const MediaTracks *tracks,
     return NULL;
 
   /* Parallel array of French variant per kept slot (0 for non-French or when
-     splitting is disabled). */
-  int best_variant[tracks->audio_count];
-  for (int i = 0; i < tracks->audio_count; i++)
-    best_variant[i] = 0;
+     splitting is disabled). Heap-allocated rather than a VLA so MSVC and
+     strict static analyzers stay happy on the future Windows port. */
+  int *best_variant = calloc((size_t)tracks->audio_count, sizeof(int));
+  if (!best_variant) {
+    free(best);
+    return NULL;
+  }
 
   int count = 0;
   for (int i = 0; i < tracks->audio_count; i++) {
@@ -533,6 +537,7 @@ TrackInfo *select_best_audio_per_language(const MediaTracks *tracks,
     }
   }
 
+  free(best_variant);
   *out_count = count;
   return best;
 }

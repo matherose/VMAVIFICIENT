@@ -11,7 +11,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
+
+/* Defined by the build system (-DVMAV_VERSION=...). Fallback keeps
+   non-CMake builds linkable, e.g. ad-hoc clang invocations. */
+#ifndef VMAV_VERSION
+#define VMAV_VERSION "dev"
+#endif
 
 #include "audio_encode.h"
 #include "config.h"
@@ -69,7 +76,8 @@ static void print_usage(const char *prog) {
       "  --bitrate <kbps> Override target video bitrate (e.g. 3500)\n"
       "  --srt <path>     Additional SRT subtitle file (can be repeated)\n"
       "  --dry-run        Run analysis + naming, print the encoding plan,\n"
-      "                   then exit. No audio/RPU/video work, no files written.\n"
+      "                   then exit. No audio/RPU/video work, no files "
+      "written.\n"
       "  --quiet          Compact output: hide informational sections, keep\n"
       "                   only stage status lines + the Plan / Done blocks.\n"
       "  --verbose        Forward SVT-AV1 encoder log messages to stderr\n"
@@ -308,8 +316,7 @@ static void print_encoder_knobs(const EncodePreset *p, int film_grain) {
     else if (p->noise_chroma_strength == 0)
       snprintf(chroma_buf, sizeof(chroma_buf), "off");
     else
-      snprintf(chroma_buf, sizeof(chroma_buf), "%d",
-               p->noise_chroma_strength);
+      snprintf(chroma_buf, sizeof(chroma_buf), "%d", p->noise_chroma_strength);
     ui_kv("Grain mech", "%s", "--noise (synthetic overlay, 4.1.0+)");
     ui_kv("Strength", "%d", film_grain);
     ui_kv("Noise size", "%s", size_buf);
@@ -335,12 +342,13 @@ static void print_encoder_knobs(const EncodePreset *p, int film_grain) {
         p->enable_restoration == 0   ? "off"
         : p->enable_restoration == 1 ? "on"
                                      : "default");
-  ui_kv("Noise-adapt", "%d  (0=off, 2=tune-default, 3=CDEF-only, 4=restoration-only)",
+  ui_kv("Noise-adapt",
+        "%d  (0=off, 2=tune-default, 3=CDEF-only, 4=restoration-only)",
         p->noise_adaptive_filtering);
 
   /* Variance boost (HDR-relevant). */
-  ui_kv("Var boost", "strength %d, octile %d, curve %d",
-        p->variance_boost, p->variance_octile, p->variance_curve);
+  ui_kv("Var boost", "strength %d, octile %d, curve %d", p->variance_boost,
+        p->variance_octile, p->variance_curve);
 
   /* Quantization matrices. */
   if (p->enable_qm == 1) {
@@ -378,7 +386,8 @@ int main(int argc, char *argv[]) {
   init_logging();
   ui_init();
   time_t encode_start_time = time(NULL);
-  printf("vmavificient — SVT-AV1-HDR %s\n", get_svt_av1_version());
+  printf("vmavificient v%s — SVT-AV1-HDR %s\n", VMAV_VERSION,
+         get_svt_av1_version());
 
   /* Handle --help / -h before config_init so users can discover the CLI
    * without having to provision a config.ini first. Likewise, --blind
@@ -708,11 +717,10 @@ int main(int argc, char *argv[]) {
 
   /* ---- Crop ---- */
   CropInfo crop = get_crop_info(filepath);
-  if (crop.error == 0 &&
-      (crop.top || crop.bottom || crop.left || crop.right)) {
+  if (crop.error == 0 && (crop.top || crop.bottom || crop.left || crop.right)) {
     ui_section("Crop");
-    ui_kv("Detected", "T/B %d/%d   L/R %d/%d", crop.top, crop.bottom,
-          crop.left, crop.right);
+    ui_kv("Detected", "T/B %d/%d   L/R %d/%d", crop.top, crop.bottom, crop.left,
+          crop.right);
   }
 
   /* ---- Tracks ---- */
@@ -733,10 +741,9 @@ int main(int argc, char *argv[]) {
         snprintf(rate_buf, sizeof(rate_buf), "%5lld kbps", kbps);
       else
         snprintf(rate_buf, sizeof(rate_buf), "          ");
-      ui_row("    #%-2d  %-4s  %-6s  %dch  %s  %s",
-             tracks.audio[i].index, tracks.audio[i].language,
-             tracks.audio[i].codec, tracks.audio[i].channels, rate_buf,
-             tracks.audio[i].name);
+      ui_row("    #%-2d  %-4s  %-6s  %dch  %s  %s", tracks.audio[i].index,
+             tracks.audio[i].language, tracks.audio[i].codec,
+             tracks.audio[i].channels, rate_buf, tracks.audio[i].name);
     }
 
     int split_fre = (cli_lang_tag == LANG_TAG_MULTI_VF2) ? 1 : 0;
@@ -746,8 +753,7 @@ int main(int argc, char *argv[]) {
             best_count == 1 ? "" : "s");
       for (int i = 0; i < best_count; i++) {
         ui_row("    #%-2d  %-4s  %-6s  %dch  %s", best[i].index,
-               best[i].language, best[i].codec, best[i].channels,
-               best[i].name);
+               best[i].language, best[i].codec, best[i].channels, best[i].name);
       }
     }
 
@@ -956,9 +962,9 @@ int main(int argc, char *argv[]) {
     int bitrate =
         cli_bitrate > 0
             ? cli_bitrate
-            : get_target_bitrate(
-                  info.height,
-                  grain.error == 0 ? grain.grain_score : 0.0, cli_quality);
+            : get_target_bitrate(info.height,
+                                 grain.error == 0 ? grain.grain_score : 0.0,
+                                 cli_quality);
 
     /* Plan + Dry-run notice always render — the user needs them to decide
        whether to let the encode proceed. */
@@ -974,8 +980,8 @@ int main(int argc, char *argv[]) {
       int is_4k = info.height >= 2160;
       int is_anim = (cli_quality == QUALITY_ANIMATION);
       const char *content_tier =
-          is_anim ? "animation" : (grain.grain_score >= 0.08 ? "grainy"
-                                                             : "clean");
+          is_anim ? "animation"
+                  : (grain.grain_score >= 0.08 ? "grainy" : "clean");
       ui_kv("Grain", "level %d  (%s tier)", film_grain, content_tier);
       ui_kv("Bitrate", "%d kbps VBR  (%s %s tier)", bitrate,
             is_4k ? "4K" : "HD", content_tier);
@@ -1023,9 +1029,8 @@ int main(int argc, char *argv[]) {
              produce distinct .fre.fr.opus / .fre.ca.opus files. */
           FrenchVariant track_fv = fv;
           FrenchAudioOrigin track_origin = fr_audio_origin;
-          if (enc_split_fre &&
-              (strcmp(enc_best[i].language, "fre") == 0 ||
-               strcmp(enc_best[i].language, "fra") == 0)) {
+          if (enc_split_fre && (strcmp(enc_best[i].language, "fre") == 0 ||
+                                strcmp(enc_best[i].language, "fra") == 0)) {
             FrenchVariant detected =
                 (FrenchVariant)detect_track_french_variant(&enc_best[i]);
             if (detected != FRENCH_VARIANT_UNKNOWN) {
@@ -1051,8 +1056,8 @@ int main(int argc, char *argv[]) {
 
           ui_row("[%d/%d] %s  %s  %dch  %lld kbps  →  \"%s\"", i + 1,
                  enc_best_count, enc_best[i].language, enc_best[i].codec,
-                 enc_best[i].channels,
-                 (long long)(enc_best[i].bitrate / 1000), audio_names[i]);
+                 enc_best[i].channels, (long long)(enc_best[i].bitrate / 1000),
+                 audio_names[i]);
 
           time_t track_t0 = time(NULL);
           OpusEncodeResult r =
@@ -1068,8 +1073,8 @@ int main(int argc, char *argv[]) {
           } else {
             char err[128];
             snprintf(err, sizeof(err), "stream #%d (%s, %dch): error %d",
-                     enc_best[i].index, enc_best[i].codec,
-                     enc_best[i].channels, r.error);
+                     enc_best[i].index, enc_best[i].codec, enc_best[i].channels,
+                     r.error);
             ui_stage_fail(opus_name, err);
             ui_hint("verify the source stream is decodable; opusenc-style "
                     "channel layouts (>2ch) require ffmpeg with libopus");
@@ -1085,7 +1090,8 @@ int main(int argc, char *argv[]) {
       char srt_langs[64][64];
       int srt_is_forced[64];
       int srt_is_sdh[64];
-      int srt_variant[64]; /* FrenchVariant per track (0 = unknown/non-French) */
+      int srt_variant[64]; /* FrenchVariant per track (0 = unknown/non-French)
+                            */
       int srt_count = 0;
       int sub_split_fre = (resolved_lang_tag == LANG_TAG_MULTI_VF2) ? 1 : 0;
 
@@ -1147,23 +1153,34 @@ int main(int argc, char *argv[]) {
               /* If already SRT (subrip), copy stream; else convert to srt. */
               const char *codec_arg =
                   (strcmp(sub->codec, "subrip") == 0) ? "copy" : "srt";
-              snprintf(cmd, sizeof(cmd),
-                       "ffmpeg -y -loglevel error -i \"%s\" -map 0:%d "
-                       "-c:s %s \"%s\"",
-                       filepath, sub->index, codec_arg, srt_paths[srt_count]);
+              /* Build the command with shell_quote_append() for paths so
+                 a filename containing $(…), backticks, or quotes can't
+                 escape into the shell. */
+              size_t pos = 0;
+              int n =
+                  snprintf(cmd, sizeof(cmd), "ffmpeg -y -loglevel error -i ");
+              if (n > 0)
+                pos = (size_t)n;
+              shell_quote_append(cmd, sizeof(cmd), &pos, filepath);
+              n = snprintf(cmd + pos, sizeof(cmd) - pos, " -map 0:%d -c:s %s ",
+                           sub->index, codec_arg);
+              if (n > 0 && (size_t)n < sizeof(cmd) - pos)
+                pos += (size_t)n;
+              shell_quote_append(cmd, sizeof(cmd), &pos, srt_paths[srt_count]);
 
               ui_row("Extract  #%-2d  %s  %s  →  \"%s\"", sub->index, lang,
                      sub->codec, srt_names[srt_count]);
 
               int rc = system(cmd);
-              if (rc == 0) {
+              int exit_code =
+                  (rc == -1 || !WIFEXITED(rc)) ? -1 : WEXITSTATUS(rc);
+              if (exit_code == 0) {
                 ui_stage_ok(srt_fname, NULL);
                 srt_count++;
               } else {
                 char err[128];
-                snprintf(err, sizeof(err),
-                         "stream #%d (%s, %s): ffmpeg rc=%d", sub->index, lang,
-                         sub->codec, rc);
+                snprintf(err, sizeof(err), "stream #%d (%s, %s): ffmpeg rc=%d",
+                         sub->index, lang, sub->codec, exit_code);
                 ui_stage_fail("Subtitle extraction", err);
                 ui_hint("verify ffmpeg is on PATH and the stream codec is "
                         "convertible to subrip");
@@ -1188,8 +1205,8 @@ int main(int argc, char *argv[]) {
 
             if (srt_exists_for_lang) {
               char skip_label[64];
-              snprintf(skip_label, sizeof(skip_label), "PGS #%d %s",
-                       sub->index, lang);
+              snprintf(skip_label, sizeof(skip_label), "PGS #%d %s", sub->index,
+                       lang);
               ui_stage_skip(skip_label, "SRT already available");
               continue;
             }
@@ -1375,19 +1392,17 @@ int main(int argc, char *argv[]) {
         } else if (vr.error == 0) {
           char detail[128];
           snprintf(detail, sizeof(detail), "%lld frames, %s in %s",
-                   (long long)vr.frames_encoded,
-                   ui_fmt_bytes(vr.bytes_written),
+                   (long long)vr.frames_encoded, ui_fmt_bytes(vr.bytes_written),
                    ui_fmt_duration(difftime(time(NULL), video_t0)));
           ui_stage_ok("video.mkv", detail);
         } else {
           char err[64];
-          snprintf(err, sizeof(err), "error %d after %lld frames",
-                   vr.error, (long long)vr.frames_encoded);
+          snprintf(err, sizeof(err), "error %d after %lld frames", vr.error,
+                   (long long)vr.frames_encoded);
           ui_stage_fail("video.mkv", err);
           ui_hint("re-run with --verbose to forward SVT-AV1's own log to "
                   "stderr (rate control, GOP layout, fatal warnings)");
         }
-
       }
 
       /* ---- Final MKV muxing ---- */
@@ -1439,8 +1454,8 @@ int main(int argc, char *argv[]) {
         };
 
         ui_section("Final mux");
-        ui_kv("Inputs", "1 video + %d audio + %d subtitle track%s",
-              opus_count, srt_count, srt_count == 1 ? "" : "s");
+        ui_kv("Inputs", "1 video + %d audio + %d subtitle track%s", opus_count,
+              srt_count, srt_count == 1 ? "" : "s");
         time_t mux_t0 = time(NULL);
         FinalMuxResult mr = final_mux(&mux_cfg);
 
@@ -1498,8 +1513,7 @@ int main(int argc, char *argv[]) {
           double elapsed = difftime(time(NULL), encode_start_time);
           double avg_kbps = 0.0;
           if (info.duration > 0.5 && final_bytes > 0)
-            avg_kbps = ((double)final_bytes * 8.0) /
-                       (info.duration * 1000.0);
+            avg_kbps = ((double)final_bytes * 8.0) / (info.duration * 1000.0);
           double delta_pct =
               bitrate > 0 ? (avg_kbps - bitrate) / bitrate * 100.0 : 0.0;
           double speed = elapsed > 0.5 ? info.duration / elapsed : 0.0;
