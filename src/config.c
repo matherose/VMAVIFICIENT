@@ -73,12 +73,13 @@ typedef struct {
   size_t offset;
 } RequiredKey;
 
-#define REQ(field) {#field, offsetof(VmavConfig, field)}
+/* Inlined rather than macro-expanded so clang-format produces stable output
+   across versions — the stringizing macro confused clang-format-18's
+   braced-list handling. */
 static const RequiredKey REQUIRED_KEYS[] = {
-    REQ(tmdb_api_key),
-    REQ(release_group),
+    {"tmdb_api_key", offsetof(VmavConfig, tmdb_api_key)},
+    {"release_group", offsetof(VmavConfig, release_group)},
 };
-#undef REQ
 
 static void die_config(const char *msg, const char *path_tried) {
   fprintf(stderr,
