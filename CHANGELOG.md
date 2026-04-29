@@ -4,6 +4,57 @@ All notable changes to vmavificient are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-04-29
+
+System-deps refactor. The build now uses system-provided shared libraries by
+default; only the three deps that aren't packaged anywhere (SVT-AV1-HDR,
+libhdr10plus, grav1synth) still build from source. This is the foundation
+for distro packaging — `.deb`, brew formula, AUR — and brings build times
+from ~30 min to ~3 min on a clean checkout.
+
+### Build / packaging
+
+- New CMake option **`VMAV_USE_SYSTEM_DEPS`** (default `ON`):
+  - **`ON`**: use `pkg_check_modules` / `find_package` for FFmpeg (6 libs),
+    Opus, libdovi, Tesseract, Leptonica, libpng/jpeg/tiff, zlib, OpenSSL,
+    libcurl, cJSON. The default and recommended path.
+  - **`OFF`**: reproduce the v1.0.x build that vendors and statically links
+    every dependency. Used by the GitHub-release static-binary artifact.
+- Three deps stay vendored regardless of the toggle:
+  - **SVT-AV1-HDR** (juliobbv-p fork) — Debian only ships upstream SVT-AV1;
+    we need the HDR fork's `--noise` and DV/HDR10+ passthrough.
+  - **libhdr10plus** — not in Debian; Homebrew formula installs the binary
+    without the library.
+  - **grav1synth** — CLI tool, invoked as a subprocess.
+- Build size dropped from ~38 MB (vendored) to ~4 MB (system) on macOS arm64.
+
+### CI
+
+- New **`build-linux-system`** job (Ubuntu 24.04 + apt) — first-class Linux
+  support, replacing the previous "aspirational" status.
+- Renamed `build` → **`build-macos-system`**: uses Homebrew + system deps,
+  runs on every push. Cuts CI time from ~30 min to ~5 min.
+- New **`build-static`** job: vendored mode for the GitHub-release artifact,
+  runs only on tag pushes (`refs/tags/v*`) and `workflow_dispatch`. Caches
+  `build/deps/` keyed on `hashFiles('CMakeLists.txt')`.
+- The **`sanitizer`** job stays on vendored mode so ASAN can interpose our
+  static archives without bumping into Homebrew's signed dynamic libs.
+
+### Documentation
+
+- README rewritten with per-platform install commands (macOS Homebrew +
+  Debian/Ubuntu apt) and a section explaining when to use
+  `-DVMAV_USE_SYSTEM_DEPS=OFF` for the static-binary build.
+- `CMakeLists.txt` reorganized for clarity: always-vendored deps first,
+  then a single `if(VMAV_USE_SYSTEM_DEPS)` switch separating the two
+  branches.
+
+### Roadmap
+
+- **v1.2.0** — CPack `DEB` generator on top of v1.1.0; bundles the three
+  vendored libs as static archives in the .deb. AUR + a Homebrew formula
+  to follow.
+
 ## [1.0.1] — 2026-04-29
 
 Polish + correctness pass on top of the v1.0.0 release. No behavior changes
@@ -124,5 +175,6 @@ subtitles / chapters preserved.
   Tesseract, grav1synth).
 - macOS arm64 supported; Linux aspirational.
 
-[1.0.1]: https://github.com/tordjmanjoel/VMAVIFICIENT/releases/tag/v1.0.1
-[1.0.0]: https://github.com/tordjmanjoel/VMAVIFICIENT/releases/tag/v1.0.0
+[1.1.0]: https://github.com/matherose/VMAVIFICIENT/releases/tag/v1.1.0
+[1.0.1]: https://github.com/matherose/VMAVIFICIENT/releases/tag/v1.0.1
+[1.0.0]: https://github.com/matherose/VMAVIFICIENT/releases/tag/v1.0.0
