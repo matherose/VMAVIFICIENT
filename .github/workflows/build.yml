@@ -16,10 +16,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Pin to a specific clang-format version. The unversioned package
+      # tracks the distro default and shifts under our feet when the
+      # runner image updates; pinning keeps the gate stable so a green
+      # local run stays green in CI.
       - name: Install clang-format
-        run: sudo apt-get update && sudo apt-get install -y clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format-18
       - name: Check formatting
-        run: clang-format --dry-run -Werror src/*.c include/*.h
+        run: clang-format-18 --dry-run -Werror src/*.c include/*.h
 
   # ── Main build + smoke test ───────────────────────────────────────
   build:
