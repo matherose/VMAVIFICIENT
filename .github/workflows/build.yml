@@ -90,72 +90,10 @@ jobs:
           [ -n "$OUTPUT" ] || { echo "::error::no MKV produced"; exit 1; }
           echo "Output: $OUTPUT ($(du -h "$OUTPUT" | cut -f1))"
 
-  # ── Default build: Linux + apt system deps ────────────────────────
-  # Mirrors the macOS job on Ubuntu so we catch portability issues
-  # early. Foundation for the v1.2.0 .deb packaging work.
-  build-linux-system:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    needs: format-check
-
-    steps:
-      - uses: actions/checkout@v4
-
-      # Add LLVM's apt repo — Ubuntu's default clang is too old for some
-      # of our flags (-march tunings, modern libc++ headers). LLVM 18
-      # matches the format-check version.
-      - name: Install build + runtime deps via apt
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            cmake ninja-build pkg-config nasm \
-            clang-18 lld-18 llvm-18 \
-            libavformat-dev libavcodec-dev libavutil-dev \
-            libavfilter-dev libswscale-dev libswresample-dev \
-            libopus-dev libdovi-dev libtesseract-dev libleptonica-dev \
-            libpng-dev libjpeg-dev libtiff-dev \
-            zlib1g-dev libssl-dev libcurl4-openssl-dev libcjson-dev \
-            ffmpeg
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry & git
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-ubuntu-${{ hashFiles('rust/**/Cargo.lock', 'rust/**/Cargo.toml') }}
-          restore-keys: cargo-ubuntu-
-
-      - name: Install cargo-c
-        run: cargo install cargo-c
-
-      - name: Configure (system deps)
-        env:
-          CC: clang-18
-          CXX: clang++-18
-        run: |
-          cmake -G Ninja -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CROSSCOMPILING=ON
-
-      - name: Build
-        run: cmake --build build -j$(nproc)
-
-      - name: Verify version banner
-        run: ./build/vmavificient --help | head -1
-
-      - name: Test encode
-        run: |
-          curl -L -o bbb.mp4.zip \
-            "https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_30fps_normal.mp4.zip"
-          unzip bbb.mp4.zip
-          ffmpeg -y -ss 0 -t 5 -i bbb_sunflower_1080p_30fps_normal.mp4 \
-            -c copy sample.mp4
-          ./build/vmavificient --blind --bitrate 2000 sample.mp4
-        timeout-minutes: 15
+  # Linux CI is deferred until the dep surface is in a stable distro
+  # most users actually run (libdovi-dev only landed in Debian trixie /
+  # Ubuntu 25.04+). When we revisit, mirror build-macos-system on
+  # ubuntu-latest with apt-installed -dev packages.
 
   # ── Sanitizer build (ASAN/UBSAN) ──────────────────────────────────
   # Uses vendored mode so the sanitizer interposes our static archives
@@ -286,7 +224,7 @@ jobs:
 
   # ── Release (on tag push) ─────────────────────────────────────────
   release:
-    needs: [build-macos-system, build-linux-system, sanitizer, build-static]
+    needs: [build-macos-system, sanitizer, build-static]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

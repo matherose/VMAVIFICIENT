@@ -291,16 +291,14 @@ if(VMAV_USE_SYSTEM_DEPS)
     # =======================================================================
     # System-deps mode: pkg-config / find_package
     # =======================================================================
-    # On Debian / Ubuntu install with:
-    #   sudo apt install -y libavformat-dev libavcodec-dev libavutil-dev \
-    #       libavfilter-dev libswscale-dev libswresample-dev libopus-dev \
-    #       libdovi-dev libtesseract-dev libleptonica-dev libpng-dev \
-    #       libjpeg-dev libtiff-dev zlib1g-dev libssl-dev \
-    #       libcurl4-openssl-dev libcjson-dev pkg-config
-    #
     # On macOS install with:
     #   brew install ffmpeg opus dovi_tool tesseract jpeg-turbo libpng \
     #       libtiff cjson openssl@3 pkg-config
+    #
+    # Linux support is deferred — the dependency surface (specifically
+    # libdovi-dev) only landed in Debian trixie / Ubuntu 25.04+, and we
+    # don't want to ship a half-working Linux story. Revisit when it's
+    # in a stable distro most users actually run.
     # -----------------------------------------------------------------------
     find_package(PkgConfig REQUIRED)
     find_package(OpenSSL REQUIRED)
