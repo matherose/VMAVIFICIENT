@@ -870,11 +870,16 @@ static int lerp_grain(double score, double lo_score, double hi_score,
  * Reference: Blade Runner 2049 REMUX -> 0.108.
  */
 static int film_grain_analog(double s) {
-  if (s <= 0.04) return 0;
-  if (s <= 0.08) return lerp_grain(s, 0.04, 0.08, 3, 6);
-  if (s <= 0.12) return lerp_grain(s, 0.08, 0.12, 6, 10);
-  if (s <= 0.20) return lerp_grain(s, 0.12, 0.20, 10, 13);
-  if (s <= 1.00) return lerp_grain(s, 0.20, 1.00, 13, 15);
+  if (s <= 0.04)
+    return 0;
+  if (s <= 0.08)
+    return lerp_grain(s, 0.04, 0.08, 3, 6);
+  if (s <= 0.12)
+    return lerp_grain(s, 0.08, 0.12, 6, 10);
+  if (s <= 0.20)
+    return lerp_grain(s, 0.12, 0.20, 10, 13);
+  if (s <= 1.00)
+    return lerp_grain(s, 0.20, 1.00, 13, 15);
   return 15;
 }
 
@@ -886,11 +891,16 @@ static int film_grain_analog(double s) {
  * no real grain to preserve.
  */
 static int film_grain_digital(double s) {
-  if (s <= 0.05) return 0;
-  if (s <= 0.10) return lerp_grain(s, 0.05, 0.10, 2, 5);
-  if (s <= 0.15) return lerp_grain(s, 0.10, 0.15, 5, 7);
-  if (s <= 0.25) return lerp_grain(s, 0.15, 0.25, 7, 9);
-  if (s <= 1.00) return lerp_grain(s, 0.25, 1.00, 9, 10);
+  if (s <= 0.05)
+    return 0;
+  if (s <= 0.10)
+    return lerp_grain(s, 0.05, 0.10, 2, 5);
+  if (s <= 0.15)
+    return lerp_grain(s, 0.10, 0.15, 5, 7);
+  if (s <= 0.25)
+    return lerp_grain(s, 0.15, 0.25, 7, 9);
+  if (s <= 1.00)
+    return lerp_grain(s, 0.25, 1.00, 9, 10);
   return 10;
 }
 
@@ -900,8 +910,10 @@ static int film_grain_digital(double s) {
  * Film grain synthesis would degrade the clean look.  Cap very low.
  */
 static int film_grain_animation(double s) {
-  if (s <= 0.10) return 0;
-  if (s <= 0.25) return lerp_grain(s, 0.10, 0.25, 0, 3);
+  if (s <= 0.10)
+    return 0;
+  if (s <= 0.25)
+    return lerp_grain(s, 0.10, 0.25, 0, 3);
   return 3;
 }
 
@@ -937,9 +949,9 @@ int get_film_grain_from_score(double grain_score, double grain_variance,
   case QUALITY_SUPER35_ANALOG:
   case QUALITY_IMAX_ANALOG:
     if (nudge)
-      grain_score = nudge_to_higher_bracket(
-          grain_score, ANALOG_BRACKETS,
-          sizeof(ANALOG_BRACKETS) / sizeof(ANALOG_BRACKETS[0]));
+      grain_score = nudge_to_higher_bracket(grain_score, ANALOG_BRACKETS,
+                                            sizeof(ANALOG_BRACKETS) /
+                                                sizeof(ANALOG_BRACKETS[0]));
     return film_grain_analog(grain_score);
 
   case QUALITY_ANIMATION:
@@ -952,9 +964,9 @@ int get_film_grain_from_score(double grain_score, double grain_variance,
   case QUALITY_IMAX_DIGITAL:
   default:
     if (nudge)
-      grain_score = nudge_to_higher_bracket(
-          grain_score, DIGITAL_BRACKETS,
-          sizeof(DIGITAL_BRACKETS) / sizeof(DIGITAL_BRACKETS[0]));
+      grain_score = nudge_to_higher_bracket(grain_score, DIGITAL_BRACKETS,
+                                            sizeof(DIGITAL_BRACKETS) /
+                                                sizeof(DIGITAL_BRACKETS[0]));
     return film_grain_digital(grain_score);
   }
 }

@@ -14,11 +14,11 @@
 
 /* ---- ANSI escape sequences -------------------------------------------- */
 
-#define ANSI_RESET  "\x1b[0m"
-#define ANSI_BOLD   "\x1b[1m"
-#define ANSI_DIM    "\x1b[2m"
-#define ANSI_RED    "\x1b[31m"
-#define ANSI_GREEN  "\x1b[32m"
+#define ANSI_RESET "\x1b[0m"
+#define ANSI_BOLD "\x1b[1m"
+#define ANSI_DIM "\x1b[2m"
+#define ANSI_RED "\x1b[31m"
+#define ANSI_GREEN "\x1b[32m"
 
 /* ---- Color + quiet + verbose state ------------------------------------ */
 
@@ -26,11 +26,19 @@ static int g_color = 0;
 static int g_quiet = 0;
 static int g_verbose = 0;
 
-void ui_set_quiet(int quiet) { g_quiet = quiet ? 1 : 0; }
-int ui_is_quiet(void) { return g_quiet; }
+void ui_set_quiet(int quiet) {
+  g_quiet = quiet ? 1 : 0;
+}
+int ui_is_quiet(void) {
+  return g_quiet;
+}
 
-void ui_set_verbose(int verbose) { g_verbose = verbose ? 1 : 0; }
-int ui_is_verbose(void) { return g_verbose; }
+void ui_set_verbose(int verbose) {
+  g_verbose = verbose ? 1 : 0;
+}
+int ui_is_verbose(void) {
+  return g_verbose;
+}
 
 void ui_init(void) {
   static int initialized = 0;
@@ -48,7 +56,9 @@ void ui_init(void) {
 }
 
 /** Returns @p code on a colored TTY, empty string otherwise. */
-static const char *c(const char *code) { return g_color ? code : ""; }
+static const char *c(const char *code) {
+  return g_color ? code : "";
+}
 
 /* ---- Section header --------------------------------------------------- */
 
@@ -141,8 +151,10 @@ static double monotonic_seconds(void) {
 }
 
 static void render_bar(char *buf, size_t cap, double pct) {
-  if (pct < 0.0) pct = 0.0;
-  if (pct > 1.0) pct = 1.0;
+  if (pct < 0.0)
+    pct = 0.0;
+  if (pct > 1.0)
+    pct = 1.0;
   int filled = (int)(pct * UI_PROGRESS_BAR_W);
   size_t i;
   for (i = 0; i < UI_PROGRESS_BAR_W && i + 1 < cap; i++) {
@@ -157,15 +169,16 @@ static void render_bar(char *buf, size_t cap, double pct) {
 }
 
 void ui_progress_start(UiProgress *p, long long total) {
-  if (!p) return;
+  if (!p)
+    return;
   p->total = total;
   p->start_time_s = (long long)time(NULL);
   p->last_draw_s = 0.0; /* force first update to draw */
 }
 
-void ui_progress_update(UiProgress *p, long long current,
-                        const char *middle) {
-  if (!p || p->total <= 0) return;
+void ui_progress_update(UiProgress *p, long long current, const char *middle) {
+  if (!p || p->total <= 0)
+    return;
 
   double now = monotonic_seconds();
   if (p->last_draw_s != 0.0 &&
@@ -174,7 +187,8 @@ void ui_progress_update(UiProgress *p, long long current,
   p->last_draw_s = now;
 
   double pct = (double)current / (double)p->total;
-  if (pct > 1.0) pct = 1.0;
+  if (pct > 1.0)
+    pct = 1.0;
 
   char bar[UI_PROGRESS_BAR_W + 1];
   render_bar(bar, sizeof(bar), pct);
@@ -191,14 +205,15 @@ void ui_progress_update(UiProgress *p, long long current,
   int has_middle = (middle && middle[0]);
   const char *mid_text = has_middle ? middle : "";
   const char *mid_sep = has_middle ? "  " : "";
-  fprintf(stderr, "\r  [%s] %3d%%  %s%s%s   ", bar, (int)(pct * 100),
-          mid_text, mid_sep, eta_str);
+  fprintf(stderr, "\r  [%s] %3d%%  %s%s%s   ", bar, (int)(pct * 100), mid_text,
+          mid_sep, eta_str);
   fflush(stderr);
 }
 
 void ui_progress_done(UiProgress *p, long long final_count,
                       const char *middle) {
-  if (!p) return;
+  if (!p)
+    return;
   /* Force a final draw at 100% even if total <= 0, so users always get a
      newline + summary regardless of how the bar was configured. */
   char bar[UI_PROGRESS_BAR_W + 1];
