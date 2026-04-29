@@ -2,9 +2,9 @@
  * @file config.h
  * @brief Runtime configuration loaded from config.ini.
  *
- * Search order for config.ini:
- *   1. ./config.ini  (current working directory)
- *   2. $HOME/.config/vmavificient/config.ini
+ * Search order:
+ *   1. $HOME/.config/vmavificient/config.ini  (primary; written by --config)
+ *   2. ./config.ini                            (legacy dev fallback)
  *
  * INI format: `key = value`, `#` and `;` are comments. Sections are ignored.
  * All listed keys are required: vmavificient aborts at startup if config.ini
@@ -32,5 +32,20 @@ void config_init(void);
  * @brief Get the loaded configuration. config_init() must have run first.
  */
 const VmavConfig *config_get(void);
+
+/**
+ * @brief Run an interactive setup that writes
+ * `$HOME/.config/vmavificient/config.ini` from prompts.
+ *
+ * Asks for the TMDB API key and the release group, then writes them with
+ * `0600` permissions (the API key is sensitive). The directory is
+ * created if missing. If a config already exists the user is asked
+ * before it gets overwritten. Used by the `--config` CLI flag so a fresh
+ * `brew install` user can get to a working state without learning the
+ * INI format.
+ *
+ * @return 0 on success or user-cancelled overwrite, 1 on I/O error.
+ */
+int config_interactive_setup(void);
 
 #endif /* VMAV_CONFIG_H */

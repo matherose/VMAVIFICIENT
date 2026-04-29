@@ -33,7 +33,7 @@ endif()
 
 # C++ is enabled purely so CMake picks the C++ driver when linking the final
 # executable (tesseract is C++ and drags in libc++/libstdc++).
-project(vmavificient VERSION 1.1.0 LANGUAGES C CXX)
+project(vmavificient VERSION 1.2.0 LANGUAGES C CXX)
 
 # Enforce Ninja generator for the top-level build.
 if(NOT CMAKE_GENERATOR STREQUAL "Ninja")
@@ -886,11 +886,18 @@ target_compile_options(vmavificient PRIVATE ${VMAV_OPT_FLAGS})
 target_link_options(vmavificient PRIVATE ${VMAV_LINK_FLAGS})
 
 # Build-time defines:
-#   VMAV_GRAV1SYNTH_BIN — absolute path to the bundled grav1synth binary
-#                         (invoked as a subprocess from src/media_analysis.c)
+#   VMAV_GRAV1SYNTH_BIN — path/command for the grav1synth subprocess
+#                         (invoked from src/media_analysis.c). Defaults to
+#                         the absolute path of the in-tree build, which is
+#                         right for `cmake --build` invocations. Packagers
+#                         (Homebrew, .deb) override it with a bare command
+#                         name so the binary uses PATH lookup, then ship
+#                         grav1synth alongside vmavificient in bin/.
 #   VMAV_VERSION         — project version string for the CLI banner
+set(VMAV_GRAV1SYNTH_BIN_RUNTIME "${GRAV1SYNTH_BIN}" CACHE STRING
+    "Path or command name baked into the binary for spawning grav1synth")
 target_compile_definitions(vmavificient PRIVATE
-    "VMAV_GRAV1SYNTH_BIN=\"${GRAV1SYNTH_BIN}\""
+    "VMAV_GRAV1SYNTH_BIN=\"${VMAV_GRAV1SYNTH_BIN_RUNTIME}\""
     "VMAV_VERSION=\"${PROJECT_VERSION}\"")
 add_dependencies(vmavificient ep_grav1synth)
 
@@ -974,6 +981,23 @@ elseif(NOT VMAV_USE_SYSTEM_DEPS)
     # distro's openssl.pc lists -ldl already.
     target_link_libraries(vmavificient PRIVATE dl)
 endif()
+
+# ===========================================================================
+# Install rules
+# ===========================================================================
+# `cmake --install build` lays out a standard prefix tree for packagers
+# (Homebrew formula, .deb / .rpm CPack generators, etc.). vmavificient
+# spawns grav1synth via VMAV_GRAV1SYNTH_BIN at runtime, so the helper is
+# installed alongside the main binary; if the packager passed
+# -DVMAV_GRAV1SYNTH_BIN_RUNTIME=grav1synth, vmavificient does a PATH
+# lookup and finds it there.
+include(GNUInstallDirs)
+install(TARGETS vmavificient
+    RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+)
+install(PROGRAMS "${GRAV1SYNTH_BIN}"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}"
+)
 
 # ===========================================================================
 # Doxygen documentation (optional)
