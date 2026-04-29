@@ -7,6 +7,7 @@
 #define UTILS_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 /** @brief Default test media file used when no argument is provided. */
 #define DEFAULT_TEST_FILE "bbb_sunflower_1080p_30fps_normal.mp4"
@@ -38,5 +39,22 @@ bool str_contains_ci(const char *haystack, const char *needle);
  * the banner.
  */
 const char *get_svt_av1_version(void);
+
+/**
+ * @brief Append @p src to @p dst as a double-quoted, shell-safe token.
+ *
+ * Wraps the value in `"…"` and backslash-escapes the four characters that
+ * remain special inside double quotes (`"`, `\`, `$`, `` ` ``). Used by
+ * every code path that builds a command string for @c system / @c popen
+ * from a user-supplied path: without this, a filename containing
+ * `$(…)` or backticks would execute as a subshell.
+ *
+ * @param dst Destination buffer.
+ * @param cap Capacity of @p dst, including the trailing NUL.
+ * @param pos In/out: current write offset; advanced past the appended quoted
+ * token. On overflow the buffer is NUL-terminated and `*pos` is left at @p cap.
+ * @param src NUL-terminated source string. NULL is treated as empty.
+ */
+void shell_quote_append(char *dst, size_t cap, size_t *pos, const char *src);
 
 #endif /* UTILS_H */

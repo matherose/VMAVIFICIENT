@@ -9,9 +9,23 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ── Format check ──────────────────────────────────────────────────
+  # Cheap, runs on a tiny ubuntu image; fails fast on style drift so we
+  # don't waste 30 minutes of macOS time before noticing.
+  format-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+      - name: Check formatting
+        run: clang-format --dry-run -Werror src/*.c include/*.h
+
+  # ── Main build + smoke test ───────────────────────────────────────
   build:
     runs-on: macos-14
     timeout-minutes: 120
+    needs: format-check
 
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +49,17 @@ jobs:
             ~/.cargo/git
           key: cargo-macos-arm64-${{ hashFiles('rust/**/Cargo.lock', 'rust/**/Cargo.toml') }}
           restore-keys: cargo-macos-arm64-
+
+      # The big win: cache build/deps so FFmpeg, SVT-AV1, Tesseract et al.
+      # don't get rebuilt from scratch on every CI run. Keyed on
+      # CMakeLists.txt because that's where every version pin lives —
+      # bumping a dep invalidates the cache automatically.
+      - name: Cache ExternalProject builds
+        uses: actions/cache@v4
+        with:
+          path: build/deps
+          key: cmake-deps-macos-arm64-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: cmake-deps-macos-arm64-
 
       - name: Install cargo-c
         run: cargo install cargo-c
@@ -66,9 +91,12 @@ jobs:
             -c copy sample.mp4
           ls -lh sample.mp4
 
+      # 2000 kbps = the HD live-action clean tier floor; 500 kbps was below
+      # any preset's target and didn't really exercise the rate-control path.
+      # Still a smoke test, not a quality gate.
       - name: Test encode
         run: |
-          ./build/vmavificient --blind --bitrate 500 sample.mp4
+          ./build/vmavificient --blind --bitrate 2000 sample.mp4
         timeout-minutes: 15
 
       - name: Verify output
@@ -93,9 +121,75 @@ jobs:
           name: vmavificient-macos-arm64
           path: dist/vmavificient-macos-arm64
 
+  # ── Sanitizer build (ASAN/UBSAN) ──────────────────────────────────
+  # Separate job so the main release artifact stays optimization-free of
+  # sanitizer overhead. Reuses the same dep cache key as the build job.
+  sanitizer:
+    runs-on: macos-14
+    timeout-minutes: 120
+    needs: format-check
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install ninja pkg-config nasm ffmpeg
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-macos-arm64-${{ hashFiles('rust/**/Cargo.lock', 'rust/**/Cargo.toml') }}
+          restore-keys: cargo-macos-arm64-
+
+      - name: Cache ExternalProject builds
+        uses: actions/cache@v4
+        with:
+          path: build-asan/deps
+          key: cmake-deps-asan-macos-arm64-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: cmake-deps-asan-macos-arm64-
+
+      - name: Install cargo-c
+        run: cargo install cargo-c
+
+      - name: Configure (sanitizer)
+        run: |
+          cmake -G Ninja -B build-asan \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CROSSCOMPILING=ON \
+            -DVMAV_SANITIZE=ON
+
+      - name: Build (sanitizer)
+        run: cmake --build build-asan -j$(sysctl -n hw.ncpu)
+
+      - name: Download test media
+        run: |
+          curl -L -o bbb.mp4.zip \
+            "https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_30fps_normal.mp4.zip"
+          unzip bbb.mp4.zip
+          ffmpeg -y -ss 0 -t 5 -i bbb_sunflower_1080p_30fps_normal.mp4 \
+            -c copy sample.mp4
+
+      # ASAN_OPTIONS=halt_on_error=1 so a single bad access fails CI loud.
+      # detect_leaks=0 because libdovi/libhdr10plus's Rust runtime hangs
+      # on tiny static allocations the loader doesn't reclaim — false
+      # positives, not real leaks.
+      - name: Test encode (sanitizer)
+        env:
+          ASAN_OPTIONS: halt_on_error=1:detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          ./build-asan/vmavificient --blind --bitrate 2000 sample.mp4
+        timeout-minutes: 30
+
   # ── Release (on tag push) ───────────────────────────────────────
   release:
-    needs: build
+    needs: [build, sanitizer]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -107,6 +201,14 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+
+      # SHA256SUMS lives next to the binary in the GitHub release so
+      # downloaders can verify integrity with a single `shasum -c`.
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          shasum -a 256 * > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
