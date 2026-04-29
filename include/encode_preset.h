@@ -81,8 +81,10 @@ typedef struct {
                                               -1=default). */
 
   /* Keyframe QP offsets — negative gives I-frames more bits. */
-  int key_frame_qindex_offset;        /**< Luma QP offset for keyframes (-64 to 63, 0=default). */
-  int key_frame_chroma_qindex_offset;  /**< Chroma QP offset for keyframes (-64 to 63, 0=default). */
+  int key_frame_qindex_offset; /**< Luma QP offset for keyframes (-64 to 63,
+                                  0=default). */
+  int key_frame_chroma_qindex_offset; /**< Chroma QP offset for keyframes (-64
+                                         to 63, 0=default). */
 
   /* DC coefficient QP offsets — affect luminance/color smoothness. */
   int luma_y_dc_qindex_offset;   /**< Luma DC offset (-64 to 63, 0=default). */
@@ -90,12 +92,15 @@ typedef struct {
   int chroma_v_dc_qindex_offset; /**< Cr DC offset (-64 to 63, 0=default). */
 
   /* VBR rate shaping */
-  int vbr_max_section_pct; /**< Max GOP bitrate as % of target (0–10000, -1=default 2000). */
+  int vbr_max_section_pct; /**< Max GOP bitrate as % of target (0–10000,
+                              -1=default 2000). */
   int gop_constraint_rc;   /**< Per-GOP rate matching (0–1, -1=default). */
 
   /* Startup mini-GOP tuning */
-  int startup_mg_size;   /**< First mini-GOP size after KF: 0=off, 2/3/4 (0=default). */
-  int startup_qp_offset; /**< QP offset for startup mini-GOP (-63 to 63, 0=default). */
+  int startup_mg_size;   /**< First mini-GOP size after KF: 0=off, 2/3/4
+                            (0=default). */
+  int startup_qp_offset; /**< QP offset for startup mini-GOP (-63 to 63,
+                            0=default). */
 
   /* Grain mechanism selection (SVT-AV1-HDR 4.1.0+).
    *
@@ -109,9 +114,9 @@ typedef struct {
    *                  Right for analog film where the grain has spatial /
    *                  temporal structure worth preserving (Super 35 / IMAX
    *                  shot on film). */
-  int use_noise;            /**< Grain mechanism: 1=--noise, 0=--film-grain. */
-  int noise_size;           /**< Noise grain size: -1=auto (resolution-based),
-                                 0–13=explicit. Only used when use_noise=1. */
+  int use_noise;             /**< Grain mechanism: 1=--noise, 0=--film-grain. */
+  int noise_size;            /**< Noise grain size: -1=auto (resolution-based),
+                                  0–13=explicit. Only used when use_noise=1. */
   int noise_chroma_strength; /**< Chroma noise strength: -1=auto (60% of
                                   luma), 0=off, 1–200=explicit. */
   int noise_chroma_from_luma; /**< Apply chroma noise based on luma plane

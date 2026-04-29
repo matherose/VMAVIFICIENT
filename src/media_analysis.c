@@ -60,11 +60,13 @@ extern char **environ;
 /** Max bytes of the grain-table file we'll parse (safety bound). */
 #define MAX_TABLE_BYTES (4 * 1024 * 1024)
 
-/** Positions (0..1) through the file at which to extract the initial windows. */
+/** Positions (0..1) through the file at which to extract the initial windows.
+ */
 static const double SAMPLE_POSITIONS[NUM_SAMPLES] = {0.20, 0.40, 0.60, 0.80};
-/** Midpoints between the initial positions, used when refinement is triggered. */
-static const double REFINE_SAMPLE_POSITIONS[MAX_SAMPLE_WINDOWS - NUM_SAMPLES] = {
-    0.30, 0.50, 0.70};
+/** Midpoints between the initial positions, used when refinement is triggered.
+ */
+static const double REFINE_SAMPLE_POSITIONS[MAX_SAMPLE_WINDOWS - NUM_SAMPLES] =
+    {0.30, 0.50, 0.70};
 
 /* ------------------------------------------------------------------------- */
 /*  Sample-extraction pipeline                                               */
@@ -194,8 +196,8 @@ static int build_graph(AVFilterGraph **graph, AVFilterContext **src_ctx,
            dec->sample_aspect_ratio.den ? dec->sample_aspect_ratio.den : 1,
            dec->colorspace, dec->color_range);
 
-  int ret = avfilter_graph_create_filter(src_ctx, avfilter_get_by_name("buffer"),
-                                         "in", args, NULL, *graph);
+  int ret = avfilter_graph_create_filter(
+      src_ctx, avfilter_get_by_name("buffer"), "in", args, NULL, *graph);
   if (ret < 0)
     return ret;
 
@@ -437,13 +439,9 @@ done:
 static int spawn_grav1synth(const char *src, const char *denoised,
                             const char *table_out) {
   /* grav1synth diff <src> <denoised> -o <table_out> */
-  char *argv[] = {(char *)VMAV_GRAV1SYNTH_BIN,
-                  "diff",
-                  (char *)src,
-                  (char *)denoised,
-                  "-o",
-                  (char *)table_out,
-                  NULL};
+  char *argv[] = {
+      (char *)VMAV_GRAV1SYNTH_BIN, "diff", (char *)src, (char *)denoised, "-o",
+      (char *)table_out,           NULL};
   pid_t pid;
   posix_spawn_file_actions_t actions;
   posix_spawn_file_actions_init(&actions);
@@ -452,8 +450,8 @@ static int spawn_grav1synth(const char *src, const char *denoised,
                                    O_WRONLY, 0);
   posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null",
                                    O_WRONLY, 0);
-  int ret = posix_spawn(&pid, VMAV_GRAV1SYNTH_BIN, &actions, NULL, argv,
-                        environ);
+  int ret =
+      posix_spawn(&pid, VMAV_GRAV1SYNTH_BIN, &actions, NULL, argv, environ);
   posix_spawn_file_actions_destroy(&actions);
   if (ret != 0)
     return -ret;
@@ -582,12 +580,12 @@ static GrainTableScores parse_grain_table(const char *path) {
  *  produced over-faithful (mushy + expensive) reproduction at HDLight
  *  bitrates, so we now let SVT do its own grain analysis instead. */
 static int sample_grain_window(const char *path, const char *label,
-                               int window_idx, double position,
-                               int keep_tmp, GrainTableScores *out_scores) {
+                               int window_idx, double position, int keep_tmp,
+                               GrainTableScores *out_scores) {
   char src_tmp[4096], denoised_tmp[4096], table_tmp[4096];
   snprintf(src_tmp, sizeof(src_tmp), "%s.grav1_src_%d.mkv", path, window_idx);
-  snprintf(denoised_tmp, sizeof(denoised_tmp), "%s.grav1_denoised_%d.mkv",
-           path, window_idx);
+  snprintf(denoised_tmp, sizeof(denoised_tmp), "%s.grav1_denoised_%d.mkv", path,
+           window_idx);
   snprintf(table_tmp, sizeof(table_tmp), "%s.grav1_table_%d.txt", path,
            window_idx);
 
@@ -626,8 +624,7 @@ static int sample_grain_window(const char *path, const char *label,
     ui_stage_ok(label, detail);
   } else {
     char err[64];
-    snprintf(err, sizeof(err), "pos %.0f%%, error %d", position * 100.0,
-             ret);
+    snprintf(err, sizeof(err), "pos %.0f%%, error %d", position * 100.0, ret);
     ui_stage_fail(label, err);
   }
 
@@ -700,16 +697,16 @@ GrainScore get_grain_score(const char *path) {
    * max aggregation sees any grainier passage lurking between them. */
   int refined = 0;
   if (initial_variance > GRAIN_VARIANCE_REFINE_THRESHOLD) {
-    const int refine_count =
-        (int)(sizeof(REFINE_SAMPLE_POSITIONS) / sizeof(REFINE_SAMPLE_POSITIONS[0]));
+    const int refine_count = (int)(sizeof(REFINE_SAMPLE_POSITIONS) /
+                                   sizeof(REFINE_SAMPLE_POSITIONS[0]));
     for (int j = 0; j < refine_count && total_attempts < MAX_SAMPLE_WINDOWS;
          j++, total_attempts++) {
       GrainTableScores scores = {0};
       char label[32];
       snprintf(label, sizeof(label), "Refine %d/%d", j + 1, refine_count);
-      int ret = sample_grain_window(path, label, total_attempts,
-                                    REFINE_SAMPLE_POSITIONS[j], keep_tmp,
-                                    &scores);
+      int ret =
+          sample_grain_window(path, label, total_attempts,
+                              REFINE_SAMPLE_POSITIONS[j], keep_tmp, &scores);
       if (ret >= 0) {
         y_scores[total_attempts] = scores.y;
         if (scores.y > max_score)

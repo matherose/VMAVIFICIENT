@@ -54,12 +54,23 @@ static void svt_log_callback(void *context, SvtAv1LogLevel level,
      above, so this is effectively all levels when verbose is on). */
   const char *level_str = "info";
   switch (level) {
-  case SVT_AV1_LOG_FATAL: level_str = "fatal"; break;
-  case SVT_AV1_LOG_ERROR: level_str = "error"; break;
-  case SVT_AV1_LOG_WARN:  level_str = "warn";  break;
-  case SVT_AV1_LOG_INFO:  level_str = "info";  break;
-  case SVT_AV1_LOG_DEBUG: level_str = "debug"; break;
-  default: break;
+  case SVT_AV1_LOG_FATAL:
+    level_str = "fatal";
+    break;
+  case SVT_AV1_LOG_ERROR:
+    level_str = "error";
+    break;
+  case SVT_AV1_LOG_WARN:
+    level_str = "warn";
+    break;
+  case SVT_AV1_LOG_INFO:
+    level_str = "info";
+    break;
+  case SVT_AV1_LOG_DEBUG:
+    level_str = "debug";
+    break;
+  default:
+    break;
   }
   fprintf(stderr, "[svt-av1 %s%s%s] ", level_str, tag ? " " : "",
           tag ? tag : "");

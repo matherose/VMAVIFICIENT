@@ -62,8 +62,10 @@ void free_media_tracks(MediaTracks *tracks);
  * (language, VFF/VFQ/VFI) detected from the track title, so e.g. MULTi.VF2
  * sources keep one VFF and one VFQ instead of collapsing to a single "fre".
  *
- * @param tracks                 A populated MediaTracks (from @ref get_media_tracks).
- * @param split_french_variants  1 to separate VFF/VFQ/VFI French tracks, 0 otherwise.
+ * @param tracks                 A populated MediaTracks (from @ref
+ * get_media_tracks).
+ * @param split_french_variants  1 to separate VFF/VFQ/VFI French tracks, 0
+ * otherwise.
  * @param out_count              Receives the number of selected tracks.
  * @return Heap-allocated array of TrackInfo (caller must @c free), or NULL.
  */
