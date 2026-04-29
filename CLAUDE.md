@@ -80,7 +80,7 @@ Progress bars across `audio_encode`, `rpu_extract`, `subtitle_convert`, `video_e
 
 `CMakeLists.txt` exposes a `VMAV_USE_SYSTEM_DEPS` toggle (default **ON**):
 
-- **ON**: use `pkg_check_modules` / `find_package` for FFmpeg (6 libs), Opus, libdovi, Tesseract+Leptonica, libpng/jpeg/tiff, zlib, OpenSSL, libcurl, cJSON. Fast (~3 min on a clean checkout), small binary (~4 MB on macOS arm64), the path Homebrew/`.deb` use.
+- **ON**: use `pkg_check_modules` / `find_package` for FFmpeg (6 libs), Opus, libdovi, Tesseract+Leptonica, libpng/jpeg/tiff, zlib, OpenSSL, libcurl, cJSON. Fast (~3 min on a clean checkout), small binary (~4 MB on macOS arm64), what the Homebrew formula uses.
 - **OFF**: vendor and statically link everything via `ExternalProject_Add`. Slow (~30 min), big (~38 MB), used only by the GitHub-release static-binary CI job (tag pushes).
 
 Three deps stay vendored regardless of the toggle: SVT-AV1-HDR (we need the juliobbv-p HDR fork), libhdr10plus (not in Debian; brew formula installs binary only), grav1synth (CLI tool used as subprocess). The `posix_spawnp` call in `media_analysis.c` does PATH lookup when the compile-time `VMAV_GRAV1SYNTH_BIN` has no slash, so packagers can pass `-DVMAV_GRAV1SYNTH_BIN_RUNTIME=grav1synth` and ship the helper alongside the main binary in `bin/`.

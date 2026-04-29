@@ -7,9 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [1.2.0] — 2026-04-29
 
 Packaging path. v1.2.0 makes vmavificient installable as a Homebrew
-formula (and ready for `.deb` / AUR), plus a one-shot interactive setup
-that replaces the old "go read `config.ini.example`" first-run
-experience.
+formula on macOS, plus a one-shot interactive setup that replaces the
+old "go read `config.ini.example`" first-run experience.
 
 ### Added
 
@@ -35,17 +34,21 @@ experience.
   as a fallback for the dev workflow. Error messages updated accordingly.
 - `--help` documents `--config` and points at the new config path.
 
+### Homebrew tap
+
+A Homebrew tap (`matherose/vmavificient`) ships in lockstep with this
+release; install with:
+
+```bash
+brew tap matherose/vmavificient
+brew install vmavificient
+vmavificient --config
+```
+
 ### Roadmap
 
-- **v1.3.0** — CPack `DEB` generator on top of v1.2.0; CI publishes a
-  `.deb` artifact for amd64 / arm64 alongside the macOS static binary.
-- A Homebrew tap (`matherose/vmavificient`) ships in lockstep with this
-  release; install with:
-  ```
-  brew tap matherose/vmavificient
-  brew install vmavificient
-  vmavificient --config
-  ```
+- **Future** — Linux support (and a `.deb` generator) once `libdovi-dev`
+  is in a stable distro most users actually run.
 
 ## [1.1.0] — 2026-04-29
 
