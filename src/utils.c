@@ -51,7 +51,9 @@ int check_dependencies(void) {
   return 0;
 }
 
-const char *get_svt_av1_version(void) { return svt_av1_get_version(); }
+const char *get_svt_av1_version(void) {
+  return svt_av1_get_version();
+}
 
 bool str_contains_ci(const char *haystack, const char *needle) {
   size_t hlen = strlen(haystack), nlen = strlen(needle);
@@ -70,4 +72,27 @@ bool str_contains_ci(const char *haystack, const char *needle) {
       return true;
   }
   return false;
+}
+
+void shell_quote_append(char *dst, size_t cap, size_t *pos, const char *src) {
+  if (cap == 0)
+    return;
+  if (*pos < cap)
+    dst[(*pos)++] = '"';
+  for (; src && *src; src++) {
+    /* Each iteration writes at most 2 bytes (escape + char); reserve one
+       more for the closing quote so we never write past cap-1. */
+    if (*pos + 3 >= cap)
+      break;
+    unsigned char c = (unsigned char)*src;
+    if (c == '"' || c == '\\' || c == '$' || c == '`')
+      dst[(*pos)++] = '\\';
+    dst[(*pos)++] = (char)c;
+  }
+  if (*pos < cap)
+    dst[(*pos)++] = '"';
+  if (*pos < cap)
+    dst[*pos] = '\0';
+  else
+    dst[cap - 1] = '\0';
 }

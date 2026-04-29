@@ -33,7 +33,7 @@ endif()
 
 # C++ is enabled purely so CMake picks the C++ driver when linking the final
 # executable (tesseract is C++ and drags in libc++/libstdc++).
-project(vmavificient VERSION 1.0.0 LANGUAGES C CXX)
+project(vmavificient VERSION 1.0.1 LANGUAGES C CXX)
 
 # Enforce Ninja generator for the top-level build.
 if(NOT CMAKE_GENERATOR STREQUAL "Ninja")
@@ -94,6 +94,26 @@ if(NOT APPLE)
     list(APPEND VMAV_OPT_FLAGS -ffunction-sections -fdata-sections)
 endif()
 
+# Optional ASAN/UBSAN build for CI and local debugging.
+#   cmake -G Ninja -B build-asan -DVMAV_SANITIZE=ON && cmake --build build-asan
+# Disables -fvisibility=hidden so sanitizer interceptors resolve cleanly,
+# and forces -O1 to keep stack frames intact for useful diagnostics.
+option(VMAV_SANITIZE "Build with -fsanitize=address,undefined" OFF)
+if(VMAV_SANITIZE)
+    list(REMOVE_ITEM VMAV_OPT_FLAGS -fvisibility=hidden)
+    list(APPEND VMAV_OPT_FLAGS
+        -O1
+        -g
+        -fno-omit-frame-pointer
+        -fsanitize=address,undefined
+        -fno-sanitize-recover=all
+    )
+    set(VMAV_SANITIZE_LINK -fsanitize=address,undefined)
+    message(STATUS "Sanitizers: address, undefined")
+else()
+    set(VMAV_SANITIZE_LINK "")
+endif()
+
 # Linker optimizations: dead-strip + use lld if available.
 set(VMAV_LINK_FLAGS "")
 # lld is faster than the GNU linker on Linux, but Homebrew's lld crashes with
@@ -110,6 +130,10 @@ if(APPLE)
     list(APPEND VMAV_LINK_FLAGS -Wl,-dead_strip)
 else()
     list(APPEND VMAV_LINK_FLAGS -Wl,--gc-sections -Wl,-O2)
+endif()
+if(VMAV_SANITIZE)
+    # Sanitizer runtimes must be linked into the final executable too.
+    list(APPEND VMAV_LINK_FLAGS ${VMAV_SANITIZE_LINK})
 endif()
 
 include(ExternalProject)
@@ -826,10 +850,13 @@ add_executable(vmavificient
 target_compile_options(vmavificient PRIVATE ${VMAV_OPT_FLAGS})
 target_link_options(vmavificient PRIVATE ${VMAV_LINK_FLAGS})
 
-# grav1synth is invoked as a subprocess from src/media_analysis.c;
-# expose its absolute install path via a build-time define.
+# Build-time defines:
+#   VMAV_GRAV1SYNTH_BIN — absolute path to the bundled grav1synth binary
+#                         (invoked as a subprocess from src/media_analysis.c)
+#   VMAV_VERSION         — project version string for the CLI banner
 target_compile_definitions(vmavificient PRIVATE
-    "VMAV_GRAV1SYNTH_BIN=\"${GRAV1SYNTH_BIN}\"")
+    "VMAV_GRAV1SYNTH_BIN=\"${GRAV1SYNTH_BIN}\""
+    "VMAV_VERSION=\"${PROJECT_VERSION}\"")
 add_dependencies(vmavificient ep_grav1synth)
 
 # tesseract is C++; use the C++ linker driver so libc++/libstdc++ is pulled in.

@@ -16,33 +16,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
-/**
- * @brief Append a shell-quoted copy of @p src to @p dst.
- *
- * Wraps the value in double quotes and backslash-escapes any
- * shell-significant characters.
- */
-static void shell_quote_append(char *dst, size_t cap, size_t *pos,
-                               const char *src) {
-  if (*pos < cap)
-    dst[(*pos)++] = '"';
-  for (; src && *src; src++) {
-    if (*pos + 2 >= cap)
-      break;
-    unsigned char c = (unsigned char)*src;
-    if (c == '"' || c == '\\' || c == '$' || c == '`') {
-      dst[(*pos)++] = '\\';
-    }
-    dst[(*pos)++] = (char)c;
-  }
-  if (*pos < cap)
-    dst[(*pos)++] = '"';
-  if (*pos < cap)
-    dst[*pos] = '\0';
-  else
-    dst[cap - 1] = '\0';
-}
+#include "utils.h"
 
 /** @brief Append a printf-formatted string to the command buffer. */
 static void cmd_appendf(char *buf, size_t cap, size_t *pos, const char *fmt,
@@ -204,10 +180,13 @@ FinalMuxResult final_mux(const FinalMuxConfig *config) {
   int rc = system(cmd);
   free(cmd);
 
-  if (rc != 0) {
-    fprintf(stderr, "  Mux Error: ffmpeg returned %d\n", rc);
+  /* WIFEXITED tells real exit codes apart from "killed by signal"; treat
+     the latter as a generic failure so callers get a sane non-zero rc. */
+  int exit_code = (rc == -1 || !WIFEXITED(rc)) ? -1 : WEXITSTATUS(rc);
+  if (exit_code != 0) {
+    fprintf(stderr, "  Mux Error: ffmpeg returned %d\n", exit_code);
     remove(config->output_path);
-    result.error = rc == 0 ? -1 : rc;
+    result.error = exit_code;
     return result;
   }
 
