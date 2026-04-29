@@ -55,8 +55,9 @@ Progress bars across `audio_encode`, `rpu_extract`, `subtitle_convert`, `video_e
 
 | Flag | What it does |
 |---|---|
-| `--tmdb <id>` | Use TMDB for naming; requires `config.ini` with `tmdb_api_key` |
-| `--blind` | Skip TMDB; use input filename. No config.ini needed. |
+| `--tmdb <id>` | Use TMDB for naming; requires a config file with `tmdb_api_key` (see `--config`) |
+| `--blind` | Skip TMDB; use input filename. No config file needed. |
+| `--config` | One-shot interactive setup. Writes `~/.config/vmavificient/config.ini` (chmod 0600). Run once after install. |
 | `--bitrate <kbps>` | Override the tier table |
 | `--srt <path>` | Add an external SRT (repeatable) |
 | `--dry-run` | Plan + exit. No files written. |
@@ -75,13 +76,37 @@ Progress bars across `audio_encode`, `rpu_extract`, `subtitle_convert`, `video_e
 - **Plan + Done sections always render**, even in `--quiet` (bracketed with `ui_set_quiet(0)` / restore).
 - **Errors include context + a hint**: `ui_stage_fail("video.mkv", "error -1 after 142336 frames")` followed by `ui_hint("re-run with --verbose to forward SVT-AV1's own log to stderr")`.
 
+## Build modes (v1.1.0+)
+
+`CMakeLists.txt` exposes a `VMAV_USE_SYSTEM_DEPS` toggle (default **ON**):
+
+- **ON**: use `pkg_check_modules` / `find_package` for FFmpeg (6 libs), Opus, libdovi, Tesseract+Leptonica, libpng/jpeg/tiff, zlib, OpenSSL, libcurl, cJSON. Fast (~3 min on a clean checkout), small binary (~4 MB on macOS arm64), the path Homebrew/`.deb` use.
+- **OFF**: vendor and statically link everything via `ExternalProject_Add`. Slow (~30 min), big (~38 MB), used only by the GitHub-release static-binary CI job (tag pushes).
+
+Three deps stay vendored regardless of the toggle: SVT-AV1-HDR (we need the juliobbv-p HDR fork), libhdr10plus (not in Debian; brew formula installs binary only), grav1synth (CLI tool used as subprocess). The `posix_spawnp` call in `media_analysis.c` does PATH lookup when the compile-time `VMAV_GRAV1SYNTH_BIN` has no slash, so packagers can pass `-DVMAV_GRAV1SYNTH_BIN_RUNTIME=grav1synth` and ship the helper alongside the main binary in `bin/`.
+
+Local pkg-config tip: if you have both MacPorts and Homebrew installed, point CMake at Homebrew's pkg-config explicitly so it finds the right `.pc` files:
+
+```bash
+PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:/opt/homebrew/opt/openssl@3/lib/pkgconfig:/opt/homebrew/opt/jpeg-turbo/lib/pkgconfig" \
+cmake -G Ninja -B build -DOPENSSL_ROOT_DIR=/opt/homebrew/opt/openssl@3
+```
+
+## Homebrew tap
+
+Lives at [matherose/homebrew-vmavificient](https://github.com/matherose/homebrew-vmavificient). One-line consumer install:
+
+```bash
+brew tap matherose/vmavificient
+brew install vmavificient
+vmavificient --config
+```
+
+The formula uses `VMAV_USE_SYSTEM_DEPS=ON` (the default) and passes `-DVMAV_GRAV1SYNTH_BIN_RUNTIME=grav1synth` so the bundled helper resolves via PATH after install. When bumping the formula's `head:` ref or pinning a stable `url`+`sha256`, keep in sync with the project's `PROJECT_VERSION` in `CMakeLists.txt`.
+
 ## Build workflow gotcha
 
-The repo uses **two git worktrees**:
-- Main checkout at the repo root (used to be the build target before the worktree refactor)
-- Active worktree at `.claude/worktrees/affectionate-buck-95a474/` (where Claude works)
-
-The `build/` directory lives only in the worktree. `cmake -B build` from the worktree root regenerates it. ExternalProject sub-builds bake absolute paths into their CMakeCache.txt files, so if those paths drift (e.g. you tried to move `build/` to main), expect "source directory does not match" errors. Fix:
+Claude works in a per-session worktree at `.claude/worktrees/<name>/` (the worktree branch is `claude/<name>`). The `build/` directory lives only in the worktree; `cmake -B build` from the worktree root regenerates it. ExternalProject sub-builds bake absolute paths into their `CMakeCache.txt`, so if those paths drift (e.g. you tried to move `build/` between worktrees), expect "source directory does not match" errors. Fix:
 
 ```bash
 find build/deps/build -name CMakeCache.txt -exec sed -i '' \
