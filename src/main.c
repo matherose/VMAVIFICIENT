@@ -72,7 +72,11 @@ static void print_usage(const char *prog) {
       "Options:\n"
       "  --tmdb <id>      TMDB movie ID for naming (requires TMDB_API_KEY)\n"
       "  --blind          Skip TMDB lookup; name output as <input-stem>.mkv\n"
-      "                   (no config.ini required)\n"
+      "                   (no config required)\n"
+      "  --config         Run interactive setup once; writes\n"
+      "                   $HOME/.config/vmavificient/config.ini with the TMDB\n"
+      "                   API key and release group. Subsequent runs read it\n"
+      "                   automatically.\n"
       "  --bitrate <kbps> Override target video bitrate (e.g. 3500)\n"
       "  --srt <path>     Additional SRT subtitle file (can be repeated)\n"
       "  --dry-run        Run analysis + naming, print the encoding plan,\n"
@@ -390,15 +394,18 @@ int main(int argc, char *argv[]) {
          get_svt_av1_version());
 
   /* Handle --help / -h before config_init so users can discover the CLI
-   * without having to provision a config.ini first. Likewise, --blind
-   * runs the encode pipeline without any TMDB/release-group metadata, so
-   * config.ini is not required in that mode either. */
+   * without having to provision a config first. Likewise, --blind runs
+   * the encode pipeline without any TMDB/release-group metadata, so the
+   * config file is not required in that mode either. --config runs the
+   * interactive setup and exits; it must also bypass config_init. */
   bool blind = false;
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
       print_usage(argv[0]);
       return 0;
     }
+    if (strcmp(argv[i], "--config") == 0)
+      return config_interactive_setup();
     if (strcmp(argv[i], "--blind") == 0)
       blind = true;
   }
@@ -473,6 +480,11 @@ int main(int argc, char *argv[]) {
     OPT_QUIET,
     OPT_VERBOSE,
     OPT_GRAIN_ONLY,
+    /* --config is pre-scanned and dispatched before getopt_long runs;
+       it's still registered with getopt so the parser doesn't reject it
+       when it shows up alongside other flags. Placed at the end so its
+       auto-incremented value can't collide with OPT_MULTI = 256 anchor. */
+    OPT_CONFIG_SETUP,
   };
 
   static struct option long_options[] = {
@@ -481,6 +493,7 @@ int main(int argc, char *argv[]) {
       {"srt", required_argument, 0, OPT_SRT},
       {"help", no_argument, 0, OPT_HELP},
       {"blind", no_argument, 0, OPT_BLIND},
+      {"config", no_argument, 0, OPT_CONFIG_SETUP},
       {"dry-run", no_argument, 0, OPT_DRY_RUN},
       {"quiet", no_argument, 0, OPT_QUIET},
       {"verbose", no_argument, 0, OPT_VERBOSE},
@@ -550,6 +563,10 @@ int main(int argc, char *argv[]) {
     case OPT_BLIND:
       /* Already detected in the pre-scan above; nothing more to do here. */
       break;
+    case OPT_CONFIG_SETUP:
+      /* Pre-scan dispatches this; reaching here means a flag came before
+         it that getopt processed first. Run setup and exit anyway. */
+      return config_interactive_setup();
     case OPT_DRY_RUN:
       dry_run = true;
       break;

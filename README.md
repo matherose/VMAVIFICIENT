@@ -205,14 +205,30 @@ Adds `-fsanitize=address,undefined` for catching memory / UB bugs locally. Used 
 
 ### Configuration
 
-Copy `config.ini.example` to `config.ini` and fill in your values:
+Run the one-shot interactive setup; it prompts for the TMDB API key and the release group, then writes `$HOME/.config/vmavificient/config.ini` with `0600` permissions:
+
+```bash
+vmavificient --config
+```
+
+Subsequent invocations read it automatically — `vmavificient --tmdb 335984 input.mkv` "just works" after that.
+
+If you'd rather edit the file by hand, the format is two `key = value` lines:
 
 ```ini
 tmdb_api_key = <your TMDB v3 API key>
 release_group = MyGroup
 ```
 
-`config.ini` is only required when using `--tmdb`. With `--blind` the tool works without any config.
+For dev work from the build tree, vmavificient also accepts `./config.ini` next to the binary as a fallback. With `--blind` the tool works without any config at all.
+
+### Homebrew (macOS)
+
+```bash
+brew tap matherose/vmavificient
+brew install vmavificient
+vmavificient --config
+```
 
 ## License
 
