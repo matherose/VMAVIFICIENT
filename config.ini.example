@@ -1,8 +1,17 @@
 # vmavificient runtime configuration
 #
-# Place this file at one of:
-#   1. ./config.ini  (current working directory)
-#   2. $HOME/.config/vmavificient/config.ini
+# The recommended way to create this file is the one-shot interactive
+# setup, which prompts for both fields and writes them with 0600
+# permissions:
+#
+#     vmavificient --config
+#
+# It writes to $HOME/.config/vmavificient/config.ini directly. Use this
+# example only if you'd rather edit the INI by hand.
+#
+# Search order (first hit wins):
+#   1. $HOME/.config/vmavificient/config.ini  (primary; --config writes here)
+#   2. ./config.ini                            (legacy dev fallback)
 #
 # Lines beginning with '#' or ';' are comments. Sections (e.g. [foo]) are
 # ignored — keys are global.

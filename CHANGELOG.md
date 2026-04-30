@@ -4,6 +4,52 @@ All notable changes to vmavificient are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-04-29
+
+Packaging path. v1.2.0 makes vmavificient installable as a Homebrew
+formula on macOS, plus a one-shot interactive setup that replaces the
+old "go read `config.ini.example`" first-run experience.
+
+### Added
+
+- **`--config` flag** — runs an interactive setup that asks for the TMDB
+  API key + release group, then writes
+  `$HOME/.config/vmavificient/config.ini` with `0600` permissions.
+  If a config already exists the user is asked before it gets
+  overwritten. Used by Homebrew users on first run; replaces the
+  manual `cp config.ini.example config.ini` step.
+- **CMake `install()` rules** — `cmake --install build` lays out the
+  binary in `bin/` and installs `grav1synth` next to it so packagers
+  get a standard prefix tree.
+- **`VMAV_GRAV1SYNTH_BIN_RUNTIME` CMake cache var** — packagers pass
+  `-DVMAV_GRAV1SYNTH_BIN_RUNTIME=grav1synth` so the compiled-in path
+  becomes a bare command name and vmavificient does a PATH lookup
+  (instead of pointing at an absolute build-tree path that doesn't
+  exist after install).
+
+### Changed
+
+- Config search order: `$HOME/.config/vmavificient/config.ini` is now
+  the primary location (written by `--config`); `./config.ini` is kept
+  as a fallback for the dev workflow. Error messages updated accordingly.
+- `--help` documents `--config` and points at the new config path.
+
+### Homebrew tap
+
+A Homebrew tap (`matherose/vmavificient`) ships in lockstep with this
+release; install with:
+
+```bash
+brew tap matherose/vmavificient
+brew install vmavificient
+vmavificient --config
+```
+
+### Roadmap
+
+- **Future** — Linux support (and a `.deb` generator) once `libdovi-dev`
+  is in a stable distro most users actually run.
+
 ## [1.1.0] — 2026-04-29
 
 System-deps refactor. The build now uses system-provided shared libraries by
@@ -180,6 +226,7 @@ subtitles / chapters preserved.
   Tesseract, grav1synth).
 - macOS arm64 supported; Linux aspirational.
 
+[1.2.0]: https://github.com/matherose/VMAVIFICIENT/releases/tag/v1.2.0
 [1.1.0]: https://github.com/matherose/VMAVIFICIENT/releases/tag/v1.1.0
 [1.0.1]: https://github.com/matherose/VMAVIFICIENT/releases/tag/v1.0.1
 [1.0.0]: https://github.com/matherose/VMAVIFICIENT/releases/tag/v1.0.0
