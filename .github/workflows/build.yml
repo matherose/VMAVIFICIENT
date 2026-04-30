@@ -25,7 +25,6 @@ jobs:
       - name: Check formatting
         run: clang-format-18 --dry-run -Werror src/*.c include/*.h
 
-<<<<<<< HEAD
   # ── Default build: macOS + Homebrew system deps ───────────────────
   # Verifies the recommended build path (VMAV_USE_SYSTEM_DEPS=ON, the
   # default since v1.1.0). Fast: only SVT-AV1-HDR, libhdr10plus, and
