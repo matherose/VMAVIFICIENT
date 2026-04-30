@@ -25,6 +25,7 @@ jobs:
       - name: Check formatting
         run: clang-format-18 --dry-run -Werror src/*.c include/*.h
 
+<<<<<<< HEAD
   # ── Default build: macOS + Homebrew system deps ───────────────────
   # Verifies the recommended build path (VMAV_USE_SYSTEM_DEPS=ON, the
   # default since v1.1.0). Fast: only SVT-AV1-HDR, libhdr10plus, and
@@ -56,6 +57,17 @@ jobs:
           key: cargo-macos-arm64-${{ hashFiles('rust/**/Cargo.lock', 'rust/**/Cargo.toml') }}
           restore-keys: cargo-macos-arm64-
 
+      # The big win: cache build/deps so FFmpeg, SVT-AV1, Tesseract et al.
+      # don't get rebuilt from scratch on every CI run. Keyed on
+      # CMakeLists.txt because that's where every version pin lives —
+      # bumping a dep invalidates the cache automatically.
+      - name: Cache ExternalProject builds
+        uses: actions/cache@v4
+        with:
+          path: build/deps
+          key: cmake-deps-macos-arm64-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: cmake-deps-macos-arm64-
+
       - name: Install cargo-c
         run: cargo install cargo-c
 
@@ -80,6 +92,9 @@ jobs:
           ffmpeg -y -ss 0 -t 5 -i bbb_sunflower_1080p_30fps_normal.mp4 \
             -c copy sample.mp4
 
+      # 2000 kbps = the HD live-action clean tier floor; 500 kbps was below
+      # any preset's target and didn't really exercise the rate-control path.
+      # Still a smoke test, not a quality gate.
       - name: Test encode
         run: ./build/vmavificient --blind --bitrate 2000 sample.mp4
         timeout-minutes: 15
