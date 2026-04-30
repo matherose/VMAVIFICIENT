@@ -59,6 +59,7 @@ on a clean checkout. macOS-only for now; Linux is deferred until
 - **Future** — Linux support (and a `.deb` generator) once `libdovi-dev`
   is in a stable distro most users actually run.
 
+
 ## [1.0.1] — 2026-04-29
 
 Polish + correctness pass on top of the v1.0.0 release. No behavior changes
