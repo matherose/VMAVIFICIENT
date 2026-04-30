@@ -114,26 +114,34 @@ Source MKV/REMUX
 
 ## Dependencies
 
-All major dependencies are built from source via CMake `ExternalProject`:
+Since v1.1.0 the build uses system-provided shared libraries via pkg-config by default. Three deps still build from source because they aren't in any distro repo:
 
-| Dependency | Version | Purpose |
-|---|---|---|
-| [FFmpeg](https://ffmpeg.org/) | n8.1 | Decode / mux / filter |
-| [SVT-AV1-HDR](https://github.com/juliobbv-p/svt-av1-hdr) | v4.1.0 | AV1 encoder with DV / HDR10+ + `--noise` |
-| [libdovi](https://github.com/quietvoid/dovi_tool) | 3.3.2 | Dolby Vision RPU parsing |
-| [libhdr10plus](https://github.com/quietvoid/hdr10plus_tool) | 2.1.5 | HDR10+ metadata |
-| [Opus](https://opus-codec.org/) | 1.5.2 | Audio codec |
-| [grav1synth](https://github.com/rust-av/grav1synth) | (pinned SHA) | Grain measurement |
-| [Tesseract](https://github.com/tesseract-ocr/tesseract) | 5.5.0 | OCR for PGS subs |
-| [cJSON](https://github.com/DaveGamble/cJSON) | 1.7.18 | TMDB JSON parsing |
+| Dependency | Version | Source | Why vendored |
+|---|---|---|---|
+| [SVT-AV1-HDR](https://github.com/juliobbv-p/svt-av1-hdr) | v4.1.0 | `ExternalProject_Add` | Need the HDR fork (`--noise`, DV/HDR10+ passthrough); Debian only ships upstream SVT-AV1 |
+| [libhdr10plus](https://github.com/quietvoid/hdr10plus_tool) | 2.1.5 | `cargo cinstall` | Not packaged in Debian; Homebrew formula installs the binary only |
+| [grav1synth](https://github.com/rust-av/grav1synth) | (pinned SHA) | `cargo install` | CLI tool, invoked as a subprocess for grain measurement |
 
-System requirements:
+Everything else comes from the system: FFmpeg (avformat/avcodec/avutil/avfilter/swscale/swresample), Opus, libdovi, Tesseract+Leptonica, libpng/jpeg/tiff, zlib, OpenSSL, libcurl, cJSON.
 
-- **Rust** toolchain (for libdovi / libhdr10plus via cargo-c)
-- **pkg-config**, **CMake** ≥ 3.24, **Ninja**
-- **curl** (for TMDB API)
+### System requirements
+
+- **macOS arm64** (Apple Silicon). Linux support is on the roadmap but
+  deferred — `libdovi-dev` only landed in Debian trixie / Ubuntu 25.04+,
+  and we don't want to ship a half-working Linux story.
+- **CMake** ≥ 3.24, **Ninja**, **pkg-config**
 - **LLVM/Clang** (the build forces it; gcc is not supported)
-- macOS or Linux (tested on macOS with Apple Silicon)
+- **Rust** toolchain (for libhdr10plus / grav1synth)
+- **cargo-c** (`cargo install cargo-c`) for libhdr10plus
+
+### Install build + runtime deps (macOS)
+
+```bash
+brew install \
+    ninja pkg-config nasm rust cargo-c \
+    ffmpeg opus dovi_tool tesseract leptonica \
+    jpeg-turbo libpng libtiff cjson openssl@3
+```
 
 ## Building
 
@@ -142,7 +150,27 @@ cmake -G Ninja -B build
 cmake --build build -j$(nproc)
 ```
 
-The build fetches and compiles all dependencies automatically. First build takes a while (FFmpeg + SVT-AV1 + Rust crates ≈ 15–30 min); subsequent builds are incremental.
+First build takes ~3 minutes (just SVT-AV1-HDR + libhdr10plus + grav1synth from source). Subsequent builds are incremental.
+
+### Static / vendored build
+
+For a fully static binary that depends on nothing at runtime — used for the GitHub release artifact — pass `-DVMAV_USE_SYSTEM_DEPS=OFF`:
+
+```bash
+cmake -G Ninja -B build -DVMAV_USE_SYSTEM_DEPS=OFF
+cmake --build build -j$(nproc)
+```
+
+This vendors and statically links every dependency. First build takes 15–30 minutes (FFmpeg + Tesseract + OpenSSL + the Rust crates from source). Use this only when you want a portable binary; otherwise the default system-deps mode is faster and produces a much smaller binary (~4 MB vs ~38 MB).
+
+### Sanitizer build
+
+```bash
+cmake -G Ninja -B build-asan -DVMAV_SANITIZE=ON
+cmake --build build-asan -j$(nproc)
+```
+
+Adds `-fsanitize=address,undefined` for catching memory / UB bugs locally. Used by CI on every push.
 
 ## Usage
 

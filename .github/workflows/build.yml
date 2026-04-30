@@ -25,22 +25,25 @@ jobs:
       - name: Check formatting
         run: clang-format-18 --dry-run -Werror src/*.c include/*.h
 
-  # ── Main build + smoke test ───────────────────────────────────────
-  build:
+<<<<<<< HEAD
+  # ── Default build: macOS + Homebrew system deps ───────────────────
+  # Verifies the recommended build path (VMAV_USE_SYSTEM_DEPS=ON, the
+  # default since v1.1.0). Fast: only SVT-AV1-HDR, libhdr10plus, and
+  # grav1synth build from source; everything else comes from Homebrew.
+  build-macos-system:
     runs-on: macos-14
-    timeout-minutes: 120
+    timeout-minutes: 60
     needs: format-check
 
     steps:
       - uses: actions/checkout@v4
 
-      # ── Dependencies ──────────────────────────────────────────────
-      # Build-tool-only installs. All runtime libraries (tesseract, leptonica,
-      # curl, openssl, zlib, ...) are built from source by CMake and linked
-      # statically so the final binary has no dependency on brew/apt packages.
-      - name: Install dependencies
+      - name: Install build + runtime deps via Homebrew
         run: |
-          brew install ninja pkg-config nasm ffmpeg
+          brew install \
+            ninja pkg-config nasm \
+            ffmpeg opus dovi_tool tesseract leptonica \
+            jpeg-turbo libpng libtiff cjson openssl@3
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -68,66 +71,48 @@ jobs:
       - name: Install cargo-c
         run: cargo install cargo-c
 
-      # ── Build ─────────────────────────────────────────────────────
-      - name: Configure
+      - name: Configure (system deps)
         run: |
           cmake -G Ninja -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CROSSCOMPILING=ON
+            -DCMAKE_CROSSCOMPILING=ON \
+            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)"
 
       - name: Build
         run: cmake --build build -j$(sysctl -n hw.ncpu)
 
-      - name: Verify binary
-        run: ./build/vmavificient --help
+      - name: Verify version banner
+        run: ./build/vmavificient --help | head -1
 
-      # ── Test ──────────────────────────────────────────────────────
       - name: Download test media (Big Buck Bunny 1080p)
         run: |
           curl -L -o bbb.mp4.zip \
             "https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_30fps_normal.mp4.zip"
           unzip bbb.mp4.zip
-          ls -lh bbb_sunflower_1080p_30fps_normal.mp4
-
-      - name: Extract 5-second sample
-        run: |
           ffmpeg -y -ss 0 -t 5 -i bbb_sunflower_1080p_30fps_normal.mp4 \
             -c copy sample.mp4
-          ls -lh sample.mp4
 
       # 2000 kbps = the HD live-action clean tier floor; 500 kbps was below
       # any preset's target and didn't really exercise the rate-control path.
       # Still a smoke test, not a quality gate.
       - name: Test encode
-        run: |
-          ./build/vmavificient --blind --bitrate 2000 sample.mp4
+        run: ./build/vmavificient --blind --bitrate 2000 sample.mp4
         timeout-minutes: 15
 
       - name: Verify output
         run: |
           OUTPUT=$(ls -1 *.mkv 2>/dev/null | head -1)
-          if [ -z "$OUTPUT" ]; then
-            echo "::error::No MKV output file produced"
-            exit 1
-          fi
+          [ -n "$OUTPUT" ] || { echo "::error::no MKV produced"; exit 1; }
           echo "Output: $OUTPUT ($(du -h "$OUTPUT" | cut -f1))"
 
-      # ── Package ───────────────────────────────────────────────────
-      - name: Package binary
-        run: |
-          mkdir -p dist
-          cp build/vmavificient dist/vmavificient-macos-arm64
-          chmod +x dist/vmavificient-macos-arm64
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: vmavificient-macos-arm64
-          path: dist/vmavificient-macos-arm64
+  # Linux CI is deferred until the dep surface is in a stable distro
+  # most users actually run (libdovi-dev only landed in Debian trixie /
+  # Ubuntu 25.04+). When we revisit, mirror build-macos-system on
+  # ubuntu-latest with apt-installed -dev packages.
 
   # ── Sanitizer build (ASAN/UBSAN) ──────────────────────────────────
-  # Separate job so the main release artifact stays optimization-free of
-  # sanitizer overhead. Reuses the same dep cache key as the build job.
+  # Uses vendored mode so the sanitizer interposes our static archives
+  # cleanly without bumping into Homebrew's signed dynamic libs.
   sanitizer:
     runs-on: macos-14
     timeout-minutes: 120
@@ -135,7 +120,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - name: Install dependencies
         run: brew install ninja pkg-config nasm ffmpeg
 
@@ -161,11 +145,12 @@ jobs:
       - name: Install cargo-c
         run: cargo install cargo-c
 
-      - name: Configure (sanitizer)
+      - name: Configure (sanitizer + vendored)
         run: |
           cmake -G Ninja -B build-asan \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CROSSCOMPILING=ON \
+            -DVMAV_USE_SYSTEM_DEPS=OFF \
             -DVMAV_SANITIZE=ON
 
       - name: Build (sanitizer)
@@ -187,13 +172,74 @@ jobs:
         env:
           ASAN_OPTIONS: halt_on_error=1:detect_leaks=0
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
-        run: |
-          ./build-asan/vmavificient --blind --bitrate 2000 sample.mp4
+        run: ./build-asan/vmavificient --blind --bitrate 2000 sample.mp4
         timeout-minutes: 30
 
-  # ── Release (on tag push) ───────────────────────────────────────
+  # ── Static binary build (tag-only, for the GitHub release) ────────
+  # Vendored mode: every dep statically linked into a single file users
+  # can `chmod +x` and run without installing anything else. Slow build
+  # so we only do this when cutting a release.
+  build-static:
+    runs-on: macos-14
+    timeout-minutes: 120
+    needs: format-check
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: brew install ninja pkg-config nasm ffmpeg
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-macos-arm64-${{ hashFiles('rust/**/Cargo.lock', 'rust/**/Cargo.toml') }}
+          restore-keys: cargo-macos-arm64-
+
+      # The big win: cache build/deps so FFmpeg, SVT-AV1, Tesseract et al.
+      # don't get rebuilt from scratch on every release run. Keyed on
+      # CMakeLists.txt so a dep version bump invalidates automatically.
+      - name: Cache ExternalProject builds
+        uses: actions/cache@v4
+        with:
+          path: build/deps
+          key: cmake-deps-static-macos-arm64-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: cmake-deps-static-macos-arm64-
+
+      - name: Install cargo-c
+        run: cargo install cargo-c
+
+      - name: Configure (vendored static)
+        run: |
+          cmake -G Ninja -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CROSSCOMPILING=ON \
+            -DVMAV_USE_SYSTEM_DEPS=OFF
+
+      - name: Build
+        run: cmake --build build -j$(sysctl -n hw.ncpu)
+
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp build/vmavificient dist/vmavificient-macos-arm64
+          chmod +x dist/vmavificient-macos-arm64
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vmavificient-macos-arm64
+          path: dist/vmavificient-macos-arm64
+
+  # ── Release (on tag push) ─────────────────────────────────────────
   release:
-    needs: [build, sanitizer]
+    needs: [build-macos-system, sanitizer, build-static]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
