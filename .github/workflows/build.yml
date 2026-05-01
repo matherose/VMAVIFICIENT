@@ -117,6 +117,10 @@ jobs:
           name: vmavificient-build
           path: dist/
 
+      # download-artifact may strip permissions; restore executable bit.
+      - name: Restore executable permissions
+        run: chmod +x "$GITHUB_WORKSPACE/dist/bin/vmavificient"
+
       # grav1synth must be on PATH for the installed binary to find it.
       - name: Prepare PATH
         run: |
