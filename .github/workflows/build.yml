@@ -107,6 +107,9 @@ jobs:
     needs: build-macos-system
 
     steps:
+      - name: Install test deps (ffmpeg, unzip)
+        run: brew install ffmpeg
+
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
