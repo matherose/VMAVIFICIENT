@@ -108,8 +108,11 @@ jobs:
     needs: build-macos-system
 
     steps:
-      - name: Install test deps (ffmpeg, unzip)
-        run: brew install ffmpeg
+      - name: Install runtime deps (same as build)
+        run: |
+          brew install \
+            ffmpeg opus dovi_tool tesseract leptonica \
+            jpeg-turbo libpng libtiff cjson openssl@3
 
       - name: Download build artifact
         uses: actions/download-artifact@v4
