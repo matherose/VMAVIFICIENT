@@ -25,7 +25,7 @@ jobs:
       - name: Check formatting
         run: clang-format-18 --dry-run -Werror src/*.c include/*.h
 
-  # ── Default build: macOS + Homebrew system deps ───────────────────
+  # ── Build: macOS + Homebrew system deps ──────────────────────────
   # Verifies the recommended build path (VMAV_USE_SYSTEM_DEPS=ON, the
   # default since v1.1.0). Fast: only SVT-AV1-HDR, libhdr10plus, and
   # grav1synth build from source; everything else comes from Homebrew.
@@ -37,7 +37,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build + runtime deps via Homebrew
+      # ── Brew update + install ─────────────────────────────────────
+      - name: Update Homebrew
+        run: brew update
+
+      - name: Install build + runtime deps
         run: |
           brew install \
             ninja pkg-config nasm \
@@ -56,10 +60,6 @@ jobs:
           key: cargo-macos-arm64-${{ hashFiles('rust/**/Cargo.lock', 'rust/**/Cargo.toml') }}
           restore-keys: cargo-macos-arm64-
 
-      # The big win: cache build/deps so FFmpeg, SVT-AV1, Tesseract et al.
-      # don't get rebuilt from scratch on every CI run. Keyed on
-      # CMakeLists.txt because that's where every version pin lives —
-      # bumping a dep invalidates the cache automatically.
       - name: Cache ExternalProject builds
         uses: actions/cache@v4
         with:
@@ -70,12 +70,14 @@ jobs:
       - name: Install cargo-c
         run: cargo install cargo-c
 
+      # ── Build ─────────────────────────────────────────────────────
       - name: Configure (system deps)
         run: |
           cmake -G Ninja -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CROSSCOMPILING=ON \
-            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)"
+            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
+            -DVMAV_GRAV1SYNTH_BIN_RUNTIME=grav1synth
 
       - name: Build
         run: cmake --build build -j$(sysctl -n hw.ncpu)
@@ -83,6 +85,40 @@ jobs:
       - name: Verify version banner
         run: ./build/vmavificient --help | head -1
 
+      # ── Package for downstream encode-test ────────────────────────
+      - name: Package for encode-test
+        run: |
+          mkdir -p dist
+          cmake --install build --prefix "$GITHUB_WORKSPACE/dist"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vmavificient-build
+          path: dist/
+          retention-days: 1
+
+  # ── Encode test: smoke test against installed binary ────────────
+  # Runs against the installed package (via cmake --install) to verify
+  # the packaging path works — binary + grav1synth side-by-side in bin/.
+  encode-test:
+    runs-on: macos-14
+    timeout-minutes: 30
+    needs: build-macos-system
+
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: vmavificient-build
+          path: dist/
+
+      # grav1synth must be on PATH for the installed binary to find it.
+      - name: Prepare PATH
+        run: |
+          echo "GRAV1_PATH=$(pwd)/dist/bin" >> "$GITHUB_ENV"
+
+      # ── Download test media ──────────────────────────────────────
       - name: Download test media (Big Buck Bunny 1080p)
         run: |
           curl -L -o bbb.mp4.zip \
@@ -91,11 +127,13 @@ jobs:
           ffmpeg -y -ss 0 -t 5 -i bbb_sunflower_1080p_30fps_normal.mp4 \
             -c copy sample.mp4
 
-      # 2000 kbps = the HD live-action clean tier floor; 500 kbps was below
-      # any preset's target and didn't really exercise the rate-control path.
-      # Still a smoke test, not a quality gate.
+      # ── Encode test ──────────────────────────────────────────────
+      # 2000 kbps = the HD live-action clean tier floor; exercises the
+      # rate-control path. Still a smoke test, not a quality gate.
       - name: Test encode
-        run: ./build/vmavificient --blind --bitrate 2000 sample.mp4
+        run: |
+          PATH="$GRAV1_PATH:$PATH" \
+            dist/bin/vmavificient --blind --bitrate 2000 sample.mp4
         timeout-minutes: 15
 
       - name: Verify output
@@ -110,8 +148,6 @@ jobs:
   # ubuntu-latest with apt-installed -dev packages.
 
   # ── Sanitizer build (ASAN/UBSAN) ──────────────────────────────────
-  # Uses vendored mode so the sanitizer interposes our static archives
-  # cleanly without bumping into Homebrew's signed dynamic libs.
   sanitizer:
     runs-on: macos-14
     timeout-minutes: 120
@@ -175,9 +211,6 @@ jobs:
         timeout-minutes: 30
 
   # ── Static binary build (tag-only, for the GitHub release) ────────
-  # Vendored mode: every dep statically linked into a single file users
-  # can `chmod +x` and run without installing anything else. Slow build
-  # so we only do this when cutting a release.
   build-static:
     runs-on: macos-14
     timeout-minutes: 120
@@ -238,7 +271,7 @@ jobs:
 
   # ── Release (on tag push) ─────────────────────────────────────────
   release:
-    needs: [build-macos-system, sanitizer, build-static]
+    needs: [build-macos-system, encode-test, sanitizer, build-static]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
