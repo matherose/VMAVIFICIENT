@@ -90,6 +90,7 @@ jobs:
         run: |
           mkdir -p dist
           cmake --install build --prefix "$GITHUB_WORKSPACE/dist"
+          chmod +x "$GITHUB_WORKSPACE/dist/bin/vmavificient"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
