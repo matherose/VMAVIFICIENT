@@ -4,12 +4,41 @@ Brief for future Claude sessions. The README.md covers user-facing context; this
 
 ## Project intent
 
-**VMAVIFICIENT targets the "HDLight / 4KLight" release tier**, not REMUX-faithful or fidelity-priority encodes. Bitrates are deliberately tight (4 Mbps for 4K HDR, 2 Mbps for HD). Every grain / quality decision in this codebase is calibrated for that tier — assumptions valid at 8 Mbps don't apply here.
+**VMAVIFICIENT targets the "HDLight / 4KLight" release tier**, not REMUX-faithful or fidelity-priority encodes. The pipeline uses `ab-av1 crf-search` to find the CRF that meets a per-preset VMAF target, then encodes in CRF mode. Every grain / quality decision in this codebase is calibrated for HDLight — assumptions valid at 8 Mbps don't apply here.
 
 The user (Joel) builds scene-quality AV1 encodes and knows video encoding deeply. Speak in terms of:
-- Bitrate tiers, not VMAF/perceptual scores (we tore out the CRF search; see Phase A history)
-- Tune modes, encoder knobs, grain mechanisms — concrete implementation
+- CRF + VMAF targets, encoder knobs, grain mechanisms — concrete implementation
 - French scene conventions for naming (MULTi.VFI / VFF / VFQ / VOF, DUAL.VFI, FRENCH, TRUEFRENCH)
+
+## Rate control: CRF search (current design)
+
+The default pipeline runs `ab-av1 crf-search` to find the CRF meeting a per-preset VMAF target, then encodes in `SVT_AV1_RC_MODE_CQP_OR_CRF`. VBR is only used when `--bitrate` is explicitly passed.
+
+**VMAF target table** (`get_vmaf_target()` in `encode_preset.c`):
+
+| Quality preset | 4K (≥2160p) | HD (<2160p) |
+|---|---|---|
+| Animation | 95 | 96 |
+| Live-action (digital) | 92 | 94 |
+| Super35 digital / IMAX digital | 92 | 93 |
+| Super35 analog / IMAX analog | 90 | 91 |
+
+**CRF search** (`src/crf_search.c`):
+- Invokes `ab-av1 crf-search -i <input> --preset <N> --min-vmaf <target> --svt key=value …`
+- Passes the **full preset** as `--svt` args (tune, tf-strength, ac-bias, variance-boost, cdef-scaling, grain/noise settings, etc.) so the probe encodes use the exact same encoder config as the real encode
+- `scd` is **not** passed via `--svt` — ab-av1 has its own `--scd` flag and rejects it there
+- stdout is captured to parse `crf <N>`; stderr is inherited so ab-av1 progress reaches the terminal
+- If `ab-av1` is not in PATH: hard error with install hint; bypass with `--crf <N>` or `--bitrate <kbps>`
+
+**Phase history — don't redo these:**
+
+1. **Phase A pinned flat VBR bitrates** (4000/3500/2500/2000 kbps by tier). This was the design before CRF search was added. `get_target_bitrate()` still exists for the `--bitrate` override path but is no longer the default.
+
+2. **Phase B was reverted.** We briefly fed grav1synth's measured grain table into SVT-AV1's `fgs_table` to "force faithful grain reproduction". On heavy-grain sources at HDLight bitrates, this produced mushy output. The lesson: *let the encoder pick light synth params*, don't force-feed measured ones.
+
+3. **`film_grain_denoise_apply=1` is correct for our tier**, even though the SVT-AV1-HDR fork's docs warn it loses detail. The detail loss is real, but at HDLight bitrates the alternative (apply=0) explodes the bitrate.
+
+4. **`--noise` is preferred over `--film-grain` for digital content** (PR #10). Don't switch digital presets back to `--film-grain` — `--noise` is content-agnostic and has zero analysis overhead.
 
 ## Encoder strategy (read this before touching grain code)
 
@@ -22,23 +51,14 @@ We use **SVT-AV1-HDR 4.1.0+** (juliobbv-p fork), which has TWO grain mechanisms:
 
 The choice is encoded as `EncodePreset.use_noise` (1 = `--noise`, 0 = `--film-grain`). Set per preset in `src/encode_preset.c`.
 
-**Critical history — don't redo these:**
-
-1. **Phase A removed CRF/VMAF search.** Bitrates are pinned by tier × content. The user has explicitly rejected VMAF/XPSNR/perceptual-search workflows. If you find yourself thinking "let's add a quality probe," stop — that's been tried.
-
-2. **Phase B was reverted.** We briefly fed grav1synth's measured grain table into SVT-AV1's `fgs_table` to "force faithful grain reproduction". On heavy-grain sources at HDLight bitrates, this produced mushy output. The lesson: at our bitrate target, *let the encoder pick light synth params*, don't force-feed measured ones.
-
-3. **`film_grain_denoise_apply=1` is correct for our tier**, even though the SVT-AV1-HDR fork's docs warn it loses detail. The detail loss is real, but at 4 Mbps the alternative (apply=0) explodes the bitrate. We pick HDLight tradeoffs.
-
-4. **`--noise` is preferred over `--film-grain` for digital content** (PR #10). Don't switch digital presets back to `--film-grain` — `--noise` is content-agnostic and has zero analysis overhead, which is exactly what HDLight wants.
-
 ## Architecture map
 
 | File | Role |
 |---|---|
 | `src/main.c` | CLI parsing, top-level orchestration, plan/done blocks |
 | `src/ui.c` + `include/ui.h` | Terminal UI helpers (sections, kv, stage status, progress, fmt helpers). Honors `NO_COLOR`. |
-| `src/encode_preset.{c,h}` | Per-quality / per-resolution preset table; bitrate tier table; grain level mapping |
+| `src/encode_preset.{c,h}` | Per-quality / per-resolution preset table; VMAF target table; grain level mapping; `get_target_bitrate()` (VBR override path only) |
+| `src/crf_search.{c,h}` | `run_crf_search()` — ab-av1 subprocess, full preset → `--svt` arg mapping, CRF output parsing |
 | `src/media_analysis.c` | Grain score analysis via grav1synth diff over windowed samples; emits per-window OK/FAIL via ui_stage_* |
 | `src/media_info.c` / `media_hdr.c` / `media_crop.c` / `media_tracks.c` | Source probing |
 | `src/media_naming.c` | Scene-style filename generation |
@@ -58,10 +78,12 @@ Progress bars across `audio_encode`, `rpu_extract`, `subtitle_convert`, `video_e
 | `--tmdb <id>` | Use TMDB for naming; requires a config file with `tmdb_api_key` (see `--config`) |
 | `--blind` | Skip TMDB; use input filename. No config file needed. |
 | `--config` | One-shot interactive setup. Writes `~/.config/vmavificient/config.ini` (chmod 0600). Run once after install. |
-| `--bitrate <kbps>` | Override the tier table |
+| `--crf <N>` | Skip crf-search; encode at this CRF directly (1–63) |
+| `--vmaf-target <N>` | Override the per-preset VMAF target for crf-search |
+| `--bitrate <kbps>` | Skip crf-search; encode VBR at this bitrate (manual override) |
 | `--srt <path>` | Add an external SRT (repeatable) |
-| `--dry-run` | Plan + exit. No files written. |
-| `--grain-only` | Plan + full encoder-knob dump + exit. For sanity-checking presets. |
+| `--dry-run` | Run analysis + crf-search + naming, print the encoding plan, then exit. No files written. |
+| `--grain-only` | Like `--dry-run` but skips crf-search; dumps encoder knobs for preset sanity-checking. |
 | `--quiet` | Compact output. Only banner + Plan + Done + stage status lines. |
 | `--verbose` | Forward SVT-AV1's own log to stderr (rate control, GOP layout, warnings). Composes with `--quiet`. |
 | `--animation` / `--super35_analog` / `--super35_digital` / `--imax_analog` / `--imax_digital` | Quality preset (default = liveaction) |
@@ -84,6 +106,8 @@ Progress bars across `audio_encode`, `rpu_extract`, `subtitle_convert`, `video_e
 - **OFF**: vendor and statically link everything via `ExternalProject_Add`. Slow (~30 min), big (~38 MB), used only by the GitHub-release static-binary CI job (tag pushes).
 
 Three deps stay vendored regardless of the toggle: SVT-AV1-HDR (we need the juliobbv-p HDR fork), libhdr10plus (not in Debian; brew formula installs binary only), grav1synth (CLI tool used as subprocess). The `posix_spawnp` call in `media_analysis.c` does PATH lookup when the compile-time `VMAV_GRAV1SYNTH_BIN` has no slash, so packagers can pass `-DVMAV_GRAV1SYNTH_BIN_RUNTIME=grav1synth` and ship the helper alongside the main binary in `bin/`.
+
+`ab-av1` is a runtime dependency (not vendored) — install via `brew install master-of-mint/tap/ab-av1`. Not needed if always using `--crf` or `--bitrate`.
 
 Local pkg-config tip: if you have both MacPorts and Homebrew installed, point CMake at Homebrew's pkg-config explicitly so it finds the right `.pc` files:
 
@@ -115,7 +139,7 @@ find build/deps/build -name CMakeCache.txt -exec sed -i '' \
 
 ## Commit conventions
 
-- **Trailer**: `Assisted-by: Claude Opus 4.7 <noreply@anthropic.com>` — *not* `Co-Authored-By`. The user is the author; Claude is the assistant. (Per user memory.)
+- **Trailer**: `Assisted-by: Claude Sonnet 4.6 <noreply@anthropic.com>` — *not* `Co-Authored-By`. The user is the author; Claude is the assistant.
 - **Stacked PRs are the norm.** When PRs are stacked, set `--base` to the parent branch in `gh pr create`. The user merges in order.
 - **Commit messages**: explain *why*, not just *what*. The user reviews these as encoder-design docs.
 
@@ -123,17 +147,16 @@ find build/deps/build -name CMakeCache.txt -exec sed -i '' \
 
 | Don't | Why |
 |---|---|
-| Re-add CRF/VMAF/XPSNR perceptual search | Phase A explicitly removed this. The user has tested and rejected it. |
 | Re-add `fgs_table` from grav1synth | Phase B reverted this. At HDLight bitrates it produces mush. |
 | Default to `--film-grain` for digital sources | PR #10 switched to `--noise`. Digital cameras don't have grain to reproduce. |
 | Add a `--log-file` flag | The user said no. They use shell `tee`. |
-| Modify CRF in the bitrate calculation | We use VBR with `target_bit_rate`. CRF mode is only used when `--crf <N>` is passed (which doesn't exist as a flag — internal-only). |
-| Add a perceptual quality metric to the pipeline | The user rejects metric-driven decisions. Bitrate is pinned by tier. |
+| Pass `scd` via `--svt` to ab-av1 | ab-av1 rejects it — it has its own `--scd` flag. Leave ab-av1 to manage SCD for sample encodes. |
 | Use upstream SVT-AV1 instead of juliobbv-p/svt-av1-hdr | We need the HDR fork's DV/HDR10+ passthrough + `--noise` (4.1.0+). |
 
 ## Resources
 
 - [SVT-AV1-HDR repo](https://github.com/juliobbv-p/svt-av1-hdr)
-- [SVT-AV1 Parameters doc](https://gitlab.com/AOMediaCodec/SVT-AV1/-/blob/master/Docs/Parameters.md)
+- [SVT-AV1 Parameters doc](https://gitlab.com/AOMediaCodec/SVT-AV1/-/blob/master/Docs/Parameters.md) — canonical source for `--svt key=value` arg names
 - [SVT-AV1 CommonQuestions](https://gitlab.com/AOMediaCodec/SVT-AV1/-/blob/master/Docs/CommonQuestions.md) — read the "Practical Advice on Grain Synthesis" section before changing grain code.
 - [Reddit thread on 4.1.0 noise feature](https://www.reddit.com/r/AV1/comments/1sw8cqt/svtav1hdr_410_chromedome_is_out/) — creator commentary on `--noise` semantics.
+- [ab-av1 docs](https://github.com/alexheretic/ab-av1) — `crf-search` CLI reference; `--svt` vs dedicated flags distinction.
