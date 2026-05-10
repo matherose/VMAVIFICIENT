@@ -424,9 +424,10 @@ int main(int argc, char *argv[]) {
 
   /* ---- CLI parsing ---- */
   int tmdb_id = 0;
-  int cli_bitrate = 0;     /* 0 = run crf-search (default path) */
-  int cli_crf = 0;         /* 0 = run crf-search; >0 = skip search, use directly */
-  int cli_vmaf_target = 0; /* 0 = use per-preset default from get_vmaf_target() */
+  int cli_bitrate = 0; /* 0 = run crf-search (default path) */
+  int cli_crf = 0;     /* 0 = run crf-search; >0 = skip search, use directly */
+  int cli_vmaf_target =
+      0; /* 0 = use per-preset default from get_vmaf_target() */
   bool dry_run = false;
   bool quiet = false;
   bool verbose = false;
