@@ -22,6 +22,7 @@
 
 #include "audio_encode.h"
 #include "config.h"
+#include "crf_search.h"
 #include "encode_preset.h"
 #include "final_mux.h"
 #include "media_analysis.h"
@@ -77,11 +78,14 @@ static void print_usage(const char *prog) {
       "                   $HOME/.config/vmavificient/config.ini with the TMDB\n"
       "                   API key and release group. Subsequent runs read it\n"
       "                   automatically.\n"
-      "  --bitrate <kbps> Override target video bitrate (e.g. 3500)\n"
+      "  --crf <N>        Skip CRF search; encode at this CRF directly\n"
+      "                   (1–63, lower = higher quality)\n"
+      "  --vmaf-target <N> Override the VMAF target for CRF search\n"
+      "                   (default: per-preset, 90–96)\n"
+      "  --bitrate <kbps> Skip CRF search; encode VBR at this bitrate\n"
       "  --srt <path>     Additional SRT subtitle file (can be repeated)\n"
-      "  --dry-run        Run analysis + naming, print the encoding plan,\n"
-      "                   then exit. No audio/RPU/video work, no files "
-      "written.\n"
+      "  --dry-run        Run analysis + CRF search + naming, print the\n"
+      "                   encoding plan, then exit. No files written.\n"
       "  --quiet          Compact output: hide informational sections, keep\n"
       "                   only stage status lines + the Plan / Done blocks.\n"
       "  --verbose        Forward SVT-AV1 encoder log messages to stderr\n"
@@ -420,7 +424,10 @@ int main(int argc, char *argv[]) {
 
   /* ---- CLI parsing ---- */
   int tmdb_id = 0;
-  int cli_bitrate = 0; /* 0 = auto-compute from resolution/grain */
+  int cli_bitrate = 0; /* 0 = run crf-search (default path) */
+  int cli_crf = 0;     /* 0 = run crf-search; >0 = skip search, use directly */
+  int cli_vmaf_target =
+      0; /* 0 = use per-preset default from get_vmaf_target() */
   bool dry_run = false;
   bool quiet = false;
   bool verbose = false;
@@ -485,11 +492,15 @@ int main(int argc, char *argv[]) {
        when it shows up alongside other flags. Placed at the end so its
        auto-incremented value can't collide with OPT_MULTI = 256 anchor. */
     OPT_CONFIG_SETUP,
+    OPT_CRF,
+    OPT_VMAF_TARGET,
   };
 
   static struct option long_options[] = {
       {"tmdb", required_argument, 0, OPT_TMDB},
       {"bitrate", required_argument, 0, OPT_BITRATE},
+      {"crf", required_argument, 0, OPT_CRF},
+      {"vmaf-target", required_argument, 0, OPT_VMAF_TARGET},
       {"srt", required_argument, 0, OPT_SRT},
       {"help", no_argument, 0, OPT_HELP},
       {"blind", no_argument, 0, OPT_BLIND},
@@ -547,6 +558,20 @@ int main(int argc, char *argv[]) {
       cli_bitrate = parse_int_or_zero(optarg);
       if (cli_bitrate <= 0) {
         fprintf(stderr, "Error: --bitrate must be a positive integer (kbps)\n");
+        return 1;
+      }
+      break;
+    case OPT_CRF:
+      cli_crf = parse_int_or_zero(optarg);
+      if (cli_crf < 1 || cli_crf > 63) {
+        fprintf(stderr, "Error: --crf must be in range 1–63\n");
+        return 1;
+      }
+      break;
+    case OPT_VMAF_TARGET:
+      cli_vmaf_target = parse_int_or_zero(optarg);
+      if (cli_vmaf_target < 1 || cli_vmaf_target > 100) {
+        fprintf(stderr, "Error: --vmaf-target must be in range 1–100\n");
         return 1;
       }
       break;
@@ -975,13 +1000,44 @@ int main(int argc, char *argv[]) {
   }
 
   if (naming_ok) {
-    /* ---- Encoding plan ---- */
-    int bitrate =
-        cli_bitrate > 0
-            ? cli_bitrate
-            : get_target_bitrate(info.height,
-                                 grain.error == 0 ? grain.grain_score : 0.0,
-                                 cli_quality);
+    /* ---- Rate control: CRF search or manual override ---- */
+    int crf = cli_crf;         /* 0 if not specified */
+    int bitrate = cli_bitrate; /* 0 if not specified; VBR only when set */
+    int vmaf_used = 0;
+
+    if (!grain_only && crf == 0 && bitrate == 0) {
+      /* Default path: probe CRF via ab-av1. */
+      vmaf_used = cli_vmaf_target > 0
+                      ? cli_vmaf_target
+                      : get_vmaf_target(cli_quality, info.height);
+      ui_section("CRF search");
+      CrfSearchResult csr =
+          run_crf_search(filepath, vmaf_used, enc_preset, film_grain);
+      if (csr.ab_av1_missing) {
+        ui_stage_fail("crf-search", "ab-av1 not found in PATH");
+        ui_hint("install: brew install master-of-mint/tap/ab-av1  "
+                "or bypass with --crf <N> or --bitrate <kbps>");
+        if (tracks.error == 0)
+          free_media_tracks(&tracks);
+        return 1;
+      }
+      if (csr.crf < 0) {
+        ui_stage_fail("crf-search",
+                      "ab-av1 exited with error or no CRF parsed");
+        ui_hint("re-run with --verbose; bypass with --crf <N> or "
+                "--bitrate <kbps>");
+        if (tracks.error == 0)
+          free_media_tracks(&tracks);
+        return 1;
+      }
+      char detail[64];
+      snprintf(detail, sizeof(detail), "CRF %d  (VMAF target %d)", csr.crf,
+               vmaf_used);
+      ui_stage_ok("crf-search", detail);
+      crf = csr.crf;
+    } else if (cli_vmaf_target > 0) {
+      vmaf_used = cli_vmaf_target;
+    }
 
     /* Plan + Dry-run notice always render — the user needs them to decide
        whether to let the encode proceed. */
@@ -994,16 +1050,22 @@ int main(int argc, char *argv[]) {
           enc_preset->preset, enc_preset->tune, enc_preset->keyint,
           enc_preset->ac_bias);
     if (grain.error == 0) {
-      int is_4k = info.height >= 2160;
       int is_anim = (cli_quality == QUALITY_ANIMATION);
       const char *content_tier =
           is_anim ? "animation"
                   : (grain.grain_score >= 0.08 ? "grainy" : "clean");
       ui_kv("Grain", "level %d  (%s tier)", film_grain, content_tier);
-      ui_kv("Bitrate", "%d kbps VBR  (%s %s tier)", bitrate,
-            is_4k ? "4K" : "HD", content_tier);
+    }
+    if (crf > 0) {
+      if (vmaf_used > 0)
+        ui_kv("CRF", "%d  (VMAF target %d)", crf, vmaf_used);
+      else
+        ui_kv("CRF", "%d  (manual)", crf);
+    } else if (bitrate > 0) {
+      ui_kv("Bitrate", "%d kbps VBR  (manual)", bitrate);
     } else {
-      ui_kv("Bitrate", "%d kbps VBR", bitrate);
+      /* grain_only + no --crf/--bitrate: search was skipped. */
+      ui_kv("CRF", "(use --dry-run to probe, or --crf <N> to set)");
     }
     ui_kv("Output", "%s%s", output_dir, output_name);
 
@@ -1397,6 +1459,7 @@ int main(int argc, char *argv[]) {
             .grain_score = grain.error == 0 ? grain.grain_score : 0.0,
             .grain_variance = grain.error == 0 ? grain.grain_variance : 0.0,
             .target_bitrate = bitrate,
+            .crf = crf,
             .info = &info,
             .crop = (crop.error == 0) ? &crop : NULL,
             .hdr = &hdr,

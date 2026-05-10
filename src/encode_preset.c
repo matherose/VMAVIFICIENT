@@ -988,3 +988,20 @@ const char *quality_type_to_string(QualityType quality) {
     return "Unknown";
   return names[quality];
 }
+
+int get_vmaf_target(QualityType quality, int video_height) {
+  int is_4k = (video_height >= 2160);
+  switch (quality) {
+  case QUALITY_ANIMATION:
+    return is_4k ? 95 : 96;
+  case QUALITY_SUPER35_DIGITAL:
+  case QUALITY_IMAX_DIGITAL:
+    return is_4k ? 92 : 93;
+  case QUALITY_SUPER35_ANALOG:
+  case QUALITY_IMAX_ANALOG:
+    return is_4k ? 90 : 91;
+  case QUALITY_LIVEACTION:
+  default:
+    return is_4k ? 92 : 94;
+  }
+}
