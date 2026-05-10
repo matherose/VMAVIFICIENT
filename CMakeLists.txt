@@ -872,6 +872,7 @@ add_executable(vmavificient
     src/media_naming.c
     src/audio_encode.c
     src/config.c
+    src/crf_search.c
     src/encode_preset.c
     src/rpu_extract.c
     src/video_encode.c
