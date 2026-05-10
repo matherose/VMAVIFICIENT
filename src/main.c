@@ -265,6 +265,20 @@ static SourceType ask_source(void) {
   }
 }
 
+/* ---- Track display helpers ---- */
+
+static const char *codec_short(const char *codec) {
+  if (strcmp(codec, "hdmv_pgs_subtitle") == 0)
+    return "pgs";
+  if (strcmp(codec, "subrip") == 0)
+    return "srt";
+  if (strcmp(codec, "dvd_subtitle") == 0)
+    return "vob";
+  if (strcmp(codec, "ass") == 0 || strcmp(codec, "ssa") == 0)
+    return "ass";
+  return codec;
+}
+
 /* ---- Track ordering helpers ---- */
 
 static int audio_lang_priority(const char *lang) {
@@ -799,18 +813,30 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    ui_kv("Subtitles", "%d source track%s", tracks.subtitle_count,
-          tracks.subtitle_count == 1 ? "" : "s");
+    int n_karaoke = 0;
+    for (int i = 0; i < tracks.subtitle_count; i++)
+      if (tracks.subtitles[i].is_karaoke)
+        n_karaoke++;
+    int n_visible = tracks.subtitle_count - n_karaoke;
+    if (n_karaoke > 0)
+      ui_kv("Subtitles", "%d source track%s  (%d karaoke excluded)",
+            n_visible, n_visible == 1 ? "" : "s", n_karaoke);
+    else
+      ui_kv("Subtitles", "%d source track%s", tracks.subtitle_count,
+            tracks.subtitle_count == 1 ? "" : "s");
     for (int i = 0; i < tracks.subtitle_count; i++) {
+      if (tracks.subtitles[i].is_karaoke)
+        continue;
       const char *type = "full";
       if (tracks.subtitles[i].is_forced)
         type = "forced";
       else if (tracks.subtitles[i].is_sdh)
         type = "sdh";
-      ui_row("    #%-2d  %-4s  %-7s  %-6s  %s", tracks.subtitles[i].index,
+      ui_row("    #%-2d  %-4s  %-3s  %-6s  %s", tracks.subtitles[i].index,
              tracks.subtitles[i].language[0] ? tracks.subtitles[i].language
                                              : "und",
-             tracks.subtitles[i].codec, type, tracks.subtitles[i].name);
+             codec_short(tracks.subtitles[i].codec), type,
+             tracks.subtitles[i].name);
     }
   }
 
@@ -1176,11 +1202,17 @@ int main(int argc, char *argv[]) {
 
       if (tracks.error == 0 && tracks.subtitle_count > 0) {
         ui_section("Subtitles");
-        ui_kv("Process", "%d source track%s", tracks.subtitle_count,
-              tracks.subtitle_count == 1 ? "" : "s");
+        int n_sub_process = 0;
+        for (int i = 0; i < tracks.subtitle_count; i++)
+          if (!tracks.subtitles[i].is_karaoke)
+            n_sub_process++;
+        ui_kv("Process", "%d source track%s", n_sub_process,
+              n_sub_process == 1 ? "" : "s");
 
         for (int i = 0; i < tracks.subtitle_count && srt_count < 48; i++) {
           TrackInfo *sub = &tracks.subtitles[i];
+          if (sub->is_karaoke)
+            continue;
           const char *lang = sub->language[0] ? sub->language : "und";
 
           /* Per-track French variant so VF2 sources keep VFF and VFQ

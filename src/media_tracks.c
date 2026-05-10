@@ -134,6 +134,15 @@ static bool title_indicates_sdh(const char *title) {
 }
 
 /**
+ * @brief Detect if a track title indicates karaoke content.
+ */
+static bool title_indicates_karaoke(const char *title) {
+  if (!title || !title[0])
+    return false;
+  return str_contains_ci(title, "karao") || str_contains_ci(title, "karaok");
+}
+
+/**
  * @brief Fill a TrackInfo from an AVStream.
  */
 static void fill_track(TrackInfo *t, AVStream *stream) {
@@ -177,6 +186,13 @@ static void fill_track(TrackInfo *t, AVStream *stream) {
   t->is_sdh = (stream->disposition & AV_DISPOSITION_HEARING_IMPAIRED) ? 1 : 0;
   if (!t->is_sdh && stream->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE)
     t->is_sdh = title_indicates_sdh(t->name) ? 1 : 0;
+
+  /* Karaoke: title keyword only. */
+  t->is_karaoke =
+      (stream->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE &&
+       title_indicates_karaoke(t->name))
+          ? 1
+          : 0;
 }
 
 MediaTracks get_media_tracks(const char *path) {
