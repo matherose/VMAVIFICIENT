@@ -185,4 +185,16 @@ int get_film_grain_from_score(double grain_score, double grain_variance,
  */
 const char *quality_type_to_string(QualityType quality);
 
+/**
+ * @brief Get the VMAF target for a given quality type and resolution.
+ *
+ * Used by crf-search to calibrate the CRF to the correct quality tier.
+ * Targets are calibrated for SVT-AV1-HDR @ HDLight bitrate levels.
+ *
+ * @param quality      Content quality type.
+ * @param video_height Video height in pixels (>= 2160 selects 4K tier).
+ * @return VMAF target score (integer, 90–96).
+ */
+int get_vmaf_target(QualityType quality, int video_height);
+
 #endif /* ENCODE_PRESET_H */
