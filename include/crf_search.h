@@ -9,9 +9,9 @@
 #include "encode_preset.h"
 
 typedef struct {
-  int crf;             /**< Found CRF (1–63), or -1 on error. */
-  int vmaf_target;     /**< The VMAF target used for this search. */
-  int ab_av1_missing;  /**< 1 if ab-av1 was not found in PATH. */
+  int crf;            /**< Found CRF (1–63), or -1 on error. */
+  int vmaf_target;    /**< The VMAF target used for this search. */
+  int ab_av1_missing; /**< 1 if ab-av1 was not found in PATH. */
 } CrfSearchResult;
 
 /**
