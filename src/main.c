@@ -1079,8 +1079,9 @@ int main(int argc, char *argv[]) {
       if (csr.crf < 0) {
         ui_stage_fail("crf-search",
                       "ab-av1 exited with error or no CRF parsed");
-        ui_hint("re-run with --verbose; bypass with --crf <N> or "
-                "--bitrate <kbps>");
+        ui_hint("if params changed since last run, clear stale cache: "
+                "rm -rf ~/.cache/ab-av1/");
+        ui_hint("bypass with --crf <N> or --bitrate <kbps>");
         if (tracks.error == 0)
           free_media_tracks(&tracks);
         return 1;
