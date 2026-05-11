@@ -120,10 +120,10 @@ CrfSearchResult run_crf_search(const char *input_path, int vmaf_target,
     ADD_SVT("enable-overlays=%d", p->enable_overlays);
   if (p->enable_restoration >= 0)
     ADD_SVT("enable-restoration=%d", p->enable_restoration);
-  if (p->min_qp >= 0)
-    ADD_SVT("min-qp=%d", p->min_qp);
-  if (p->max_qp >= 0)
-    ADD_SVT("max-qp=%d", p->max_qp);
+  /* min-qp / max-qp constrain per-frame QP and break the monotonic VMAF-CRF
+   * curve the binary search depends on.  Probe encodes run without them so
+   * the search converges cleanly; the final encode applies them through
+   * apply_preset_to_config(). */
   /* scd is a dedicated ab-av1 flag (--scd true|false); passing it via
    * --svt is rejected. For short sample encodes it doesn't affect CRF
    * calibration, so we leave it at ab-av1's default. */

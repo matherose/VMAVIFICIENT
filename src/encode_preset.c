@@ -156,8 +156,8 @@ static const EncodePreset presets_animation[2] = {
         .preset = 4,
         .keyint = 300,
         .tune = 0,
-        .ac_bias = 3.0,
-        .variance_boost = 1,
+        .ac_bias = 1.0,
+        .variance_boost = 2,
         .variance_octile = 4,
         .variance_curve = 1,
         .sharpness = 1,
@@ -171,10 +171,10 @@ static const EncodePreset presets_animation[2] = {
         .noise_norm_strength = 1,
         .noise_adaptive_filtering = 0,
         .enable_dlf = 2,
-        .cdef_scaling = 12,
+        .cdef_scaling = 8,
         .chroma_qm_min = 2,
         .chroma_qm_max = 8,
-        .qp_scale_compress_strength = 3.0,
+        .qp_scale_compress_strength = 1.0,
         .max_tx_size = 32,
         .hbd_mds = 2,
         .enable_overlays = UNSET,
@@ -187,7 +187,7 @@ static const EncodePreset presets_animation[2] = {
         .undershoot_pct = 25,
         .overshoot_pct = 50,
         .min_qp = 4,
-        .max_qp = 50,
+        .max_qp = 45,
         .enable_mfmv = UNSET,
         .unrestricted_mv = 1,
         .irefresh_type = 1,
@@ -218,8 +218,8 @@ static const EncodePreset presets_animation[2] = {
         .preset = 4,
         .keyint = 240,
         .tune = 0,
-        .ac_bias = 2.6,
-        .variance_boost = 1,
+        .ac_bias = 1.0,
+        .variance_boost = 2,
         .variance_octile = 4,
         .variance_curve = 1,
         .sharpness = 1,
@@ -236,7 +236,7 @@ static const EncodePreset presets_animation[2] = {
         .cdef_scaling = 12,
         .chroma_qm_min = 2,
         .chroma_qm_max = 8,
-        .qp_scale_compress_strength = 2.0,
+        .qp_scale_compress_strength = 1.0,
         .max_tx_size = 32,
         .hbd_mds = 1,
         .enable_overlays = UNSET,
@@ -993,7 +993,7 @@ int get_vmaf_target(QualityType quality, int video_height) {
   int is_4k = (video_height >= 2160);
   switch (quality) {
   case QUALITY_ANIMATION:
-    return is_4k ? 95 : 96;
+    return is_4k ? 95 : 95;
   case QUALITY_SUPER35_DIGITAL:
   case QUALITY_IMAX_DIGITAL:
     return is_4k ? 92 : 93;
