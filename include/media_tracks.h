@@ -12,6 +12,7 @@
 /**
  * @brief Metadata for a single audio or subtitle track.
  */
+// clang-format off
 typedef struct {
   int index;         /**< Stream index in the container. */
   char name[256];    /**< Track title (empty string if absent). */
@@ -19,12 +20,13 @@ typedef struct {
   char codec[64];    /**< Short codec name (e.g. "aac", "srt"). */
   int channels;      /**< Number of audio channels (0 for subtitles). */
   int64_t bitrate;   /**< Bitrate in bits/s (0 if unknown). */
-  int codec_id;  /**< AVCodecID value (for internal ranking, stored as int). */
-  int profile;   /**< Codec profile (e.g. DTS-HD MA vs plain DTS). */
-  int is_forced;   /**< 1 if track is forced (disposition or title hint). */
-  int is_sdh;      /**< 1 if track is SDH / closed captions. */
-  int is_karaoke;  /**< 1 if track title indicates karaoke content. */
+  int codec_id;      /**< AVCodecID value (for internal ranking, stored as int). */
+  int profile;       /**< Codec profile (e.g. DTS-HD MA vs plain DTS). */
+  int is_forced;     /**< 1 if track is forced (disposition or title hint). */
+  int is_sdh;        /**< 1 if track is SDH / closed captions. */
+  int is_karaoke;    /**< 1 if track title indicates karaoke content. */
 } TrackInfo;
+// clang-format on
 
 /**
  * @brief Collection of audio and subtitle tracks found in a media file.

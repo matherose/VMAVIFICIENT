@@ -188,11 +188,13 @@ static void fill_track(TrackInfo *t, AVStream *stream) {
     t->is_sdh = title_indicates_sdh(t->name) ? 1 : 0;
 
   /* Karaoke: title keyword only. */
+  // clang-format off
   t->is_karaoke =
       (stream->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE &&
        title_indicates_karaoke(t->name))
           ? 1
           : 0;
+  // clang-format on
 }
 
 MediaTracks get_media_tracks(const char *path) {
