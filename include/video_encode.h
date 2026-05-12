@@ -34,6 +34,8 @@ typedef struct {
   const MediaInfo *info; /**< Source media info. */
   const CropInfo *crop;  /**< Crop values (NULL if none). */
   const HdrInfo *hdr;    /**< HDR info. */
+  int scale_width;  /**< Target output width  after downscale (0 = native). */
+  int scale_height; /**< Target output height after downscale (0 = native). */
 } VideoEncodeConfig;
 
 /**
