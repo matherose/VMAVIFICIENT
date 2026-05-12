@@ -95,6 +95,15 @@ static void print_usage(const char *prog) {
       "                   resolved preset configures (grain mech, tune,\n"
       "                   ac-bias, filters, QMs). For sanity-checking what\n"
       "                   each tier actually does without a full encode.\n"
+      "  --companion-hd   After the 4K encode, produce a second 1080p HDLight\n"
+      "                   release from the same REMUX source. Requires a 4K\n"
+      "                   source. Audio and subtitles are shared between both\n"
+      "                   outputs. Dolby Vision is stripped from the HD "
+      "output.\n"
+      "  --scale-to-hd    Produce only a 1080p HDLight release (no 4K "
+      "output).\n"
+      "                   Requires a 4K source. Full independent pipeline.\n"
+      "                   Mutually exclusive with --companion-hd.\n"
       "  --help           Show this help\n"
       "\n"
       "Language flags (override auto-detection):\n"
@@ -446,6 +455,8 @@ int main(int argc, char *argv[]) {
   bool quiet = false;
   bool verbose = false;
   bool grain_only = false;
+  bool companion_hd = false;
+  bool scale_to_hd = false;
   LanguageTag cli_lang_tag = LANG_TAG_NONE;
   SourceType cli_source = SOURCE_UNKNOWN;
   QualityType cli_quality = QUALITY_LIVEACTION;
@@ -508,6 +519,8 @@ int main(int argc, char *argv[]) {
     OPT_CONFIG_SETUP,
     OPT_CRF,
     OPT_VMAF_TARGET,
+    OPT_COMPANION_HD,
+    OPT_SCALE_TO_HD,
   };
 
   static struct option long_options[] = {
@@ -559,6 +572,8 @@ int main(int argc, char *argv[]) {
       {"super35_digital", no_argument, 0, OPT_SUPER35_DIGITAL},
       {"imax_analog", no_argument, 0, OPT_IMAX_ANALOG},
       {"imax_digital", no_argument, 0, OPT_IMAX_DIGITAL},
+      {"companion-hd", no_argument, 0, OPT_COMPANION_HD},
+      {"scale-to-hd", no_argument, 0, OPT_SCALE_TO_HD},
       {0, 0, 0, 0},
   };
 
@@ -720,6 +735,12 @@ int main(int argc, char *argv[]) {
     case OPT_IMAX_DIGITAL:
       cli_quality = QUALITY_IMAX_DIGITAL;
       break;
+    case OPT_COMPANION_HD:
+      companion_hd = true;
+      break;
+    case OPT_SCALE_TO_HD:
+      scale_to_hd = true;
+      break;
     default:
       print_usage(argv[0]);
       return 1;
@@ -735,6 +756,13 @@ int main(int argc, char *argv[]) {
      Compatible with --quiet (compact our-output, raw encoder log). */
   if (verbose)
     ui_set_verbose(1);
+
+  if (companion_hd && scale_to_hd) {
+    fprintf(stderr,
+            "Error: --companion-hd and --scale-to-hd are mutually exclusive\n");
+    return 1;
+  }
+  int do_hd = companion_hd || scale_to_hd;
 
   const char *filepath = NULL;
   if (optind < argc)
@@ -907,11 +935,21 @@ int main(int argc, char *argv[]) {
 
   const EncodePreset *enc_preset = get_encode_preset(cli_quality, info.height);
 
+  if (do_hd && info.height < 2160) {
+    ui_stage_fail("Source",
+                  "--companion-hd / --scale-to-hd requires a 4K source "
+                  "(height >= 2160)");
+    return 1;
+  }
+
   /* ---- Naming setup (TMDB or --blind) ---- */
   char output_name[1024] = "";
   char base_name[1024] = "";
   char output_dir[2048] = "";
   char mkv_title[1024] = "";
+  /* Saved for HD companion naming (filled by TMDB branch below). */
+  char saved_tmdb_title[512] = "";
+  int saved_tmdb_year = 0;
   const char *video_language = "und";
   SourceType source = cli_source;
   FrenchVariant fv = FRENCH_VARIANT_UNKNOWN;
@@ -995,6 +1033,10 @@ int main(int argc, char *argv[]) {
       }
       resolved_lang_tag = lang_tag;
 
+      snprintf(saved_tmdb_title, sizeof(saved_tmdb_title), "%s",
+               tmdb.original_title);
+      saved_tmdb_year = tmdb.release_year;
+
       build_output_filename(output_name, sizeof(output_name),
                             tmdb.original_title, tmdb.release_year, lang_tag,
                             &info, &hdr, source);
@@ -1072,83 +1114,86 @@ int main(int argc, char *argv[]) {
     int bitrate = cli_bitrate; /* 0 if not specified; VBR only when set */
     int vmaf_used = 0;
 
-    if (!grain_only && crf == 0 && bitrate == 0) {
-      /* Default path: probe CRF via ab-av1. */
-      vmaf_used = cli_vmaf_target > 0
-                      ? cli_vmaf_target
-                      : get_vmaf_target(cli_quality, info.height);
-      ui_section("CRF search");
-      CrfSearchResult csr =
-          run_crf_search(filepath, vmaf_used, enc_preset, film_grain);
-      if (csr.ab_av1_missing) {
-        ui_stage_fail("crf-search", "ab-av1 not found in PATH");
-        ui_hint("install: brew install master-of-mint/tap/ab-av1  "
-                "or bypass with --crf <N> or --bitrate <kbps>");
+    if (!scale_to_hd) {
+      /* ---- 4K rate control + plan ---- */
+      if (!grain_only && crf == 0 && bitrate == 0) {
+        /* Default path: probe CRF via ab-av1 at source (4K) resolution. */
+        vmaf_used = cli_vmaf_target > 0
+                        ? cli_vmaf_target
+                        : get_vmaf_target(cli_quality, info.height);
+        ui_section("CRF search");
+        CrfSearchResult csr =
+            run_crf_search(filepath, vmaf_used, enc_preset, film_grain, NULL);
+        if (csr.ab_av1_missing) {
+          ui_stage_fail("crf-search", "ab-av1 not found in PATH");
+          ui_hint("install: brew install master-of-mint/tap/ab-av1  "
+                  "or bypass with --crf <N> or --bitrate <kbps>");
+          if (tracks.error == 0)
+            free_media_tracks(&tracks);
+          return 1;
+        }
+        if (csr.crf < 0) {
+          ui_stage_fail("crf-search",
+                        "ab-av1 exited with error or no CRF parsed");
+          ui_hint("if params changed since last run, clear stale cache: "
+                  "rm -rf ~/.cache/ab-av1/");
+          ui_hint("bypass with --crf <N> or --bitrate <kbps>");
+          if (tracks.error == 0)
+            free_media_tracks(&tracks);
+          return 1;
+        }
+        char detail[64];
+        snprintf(detail, sizeof(detail), "CRF %d  (VMAF target %d)", csr.crf,
+                 vmaf_used);
+        ui_stage_ok("crf-search", detail);
+        crf = csr.crf;
+      } else if (cli_vmaf_target > 0) {
+        vmaf_used = cli_vmaf_target;
+      }
+
+      /* Plan + Dry-run notice always render. */
+      int saved_quiet = ui_is_quiet();
+      ui_set_quiet(0);
+      ui_section("Encoding plan");
+      ui_kv("Preset", "%s  (%s)", quality_type_to_string(cli_quality),
+            info.height >= 2160 ? "4K" : "HD");
+      ui_kv("SVT-AV1", "preset %d, tune %d, keyint %d, ac-bias %.1f",
+            enc_preset->preset, enc_preset->tune, enc_preset->keyint,
+            enc_preset->ac_bias);
+      if (grain.error == 0) {
+        int is_anim = (cli_quality == QUALITY_ANIMATION);
+        const char *content_tier =
+            is_anim ? "animation"
+                    : (grain.grain_score >= 0.08 ? "grainy" : "clean");
+        ui_kv("Grain", "level %d  (%s tier)", film_grain, content_tier);
+      }
+      if (crf > 0) {
+        if (vmaf_used > 0)
+          ui_kv("CRF", "%d  (VMAF target %d)", crf, vmaf_used);
+        else
+          ui_kv("CRF", "%d  (manual)", crf);
+      } else if (bitrate > 0) {
+        ui_kv("Bitrate", "%d kbps VBR  (manual)", bitrate);
+      } else {
+        ui_kv("CRF", "(use --dry-run to probe, or --crf <N> to set)");
+      }
+      ui_kv("Output", "%s%s", output_dir, output_name);
+
+      if (grain_only)
+        print_encoder_knobs(enc_preset, film_grain);
+
+      /* For companion-hd, fall through so the HD plan section also renders
+         before exiting.  For solo dry-run / grain-only, exit here. */
+      if ((dry_run || grain_only) && !companion_hd) {
+        ui_section(grain_only ? "Grain-only" : "Dry run");
+        ui_row("No files written. Re-run without %s to encode.",
+               grain_only ? "--grain-only" : "--dry-run");
         if (tracks.error == 0)
           free_media_tracks(&tracks);
-        return 1;
+        return 0;
       }
-      if (csr.crf < 0) {
-        ui_stage_fail("crf-search",
-                      "ab-av1 exited with error or no CRF parsed");
-        ui_hint("if params changed since last run, clear stale cache: "
-                "rm -rf ~/.cache/ab-av1/");
-        ui_hint("bypass with --crf <N> or --bitrate <kbps>");
-        if (tracks.error == 0)
-          free_media_tracks(&tracks);
-        return 1;
-      }
-      char detail[64];
-      snprintf(detail, sizeof(detail), "CRF %d  (VMAF target %d)", csr.crf,
-               vmaf_used);
-      ui_stage_ok("crf-search", detail);
-      crf = csr.crf;
-    } else if (cli_vmaf_target > 0) {
-      vmaf_used = cli_vmaf_target;
-    }
-
-    /* Plan + Dry-run notice always render — the user needs them to decide
-       whether to let the encode proceed. */
-    int saved_quiet = ui_is_quiet();
-    ui_set_quiet(0);
-    ui_section("Encoding plan");
-    ui_kv("Preset", "%s  (%s)", quality_type_to_string(cli_quality),
-          info.height >= 2160 ? "4K" : "HD");
-    ui_kv("SVT-AV1", "preset %d, tune %d, keyint %d, ac-bias %.1f",
-          enc_preset->preset, enc_preset->tune, enc_preset->keyint,
-          enc_preset->ac_bias);
-    if (grain.error == 0) {
-      int is_anim = (cli_quality == QUALITY_ANIMATION);
-      const char *content_tier =
-          is_anim ? "animation"
-                  : (grain.grain_score >= 0.08 ? "grainy" : "clean");
-      ui_kv("Grain", "level %d  (%s tier)", film_grain, content_tier);
-    }
-    if (crf > 0) {
-      if (vmaf_used > 0)
-        ui_kv("CRF", "%d  (VMAF target %d)", crf, vmaf_used);
-      else
-        ui_kv("CRF", "%d  (manual)", crf);
-    } else if (bitrate > 0) {
-      ui_kv("Bitrate", "%d kbps VBR  (manual)", bitrate);
-    } else {
-      /* grain_only + no --crf/--bitrate: search was skipped. */
-      ui_kv("CRF", "(use --dry-run to probe, or --crf <N> to set)");
-    }
-    ui_kv("Output", "%s%s", output_dir, output_name);
-
-    if (grain_only)
-      print_encoder_knobs(enc_preset, film_grain);
-
-    if (dry_run || grain_only) {
-      ui_section(grain_only ? "Grain-only" : "Dry run");
-      ui_row("No files written. Re-run without %s to encode.",
-             grain_only ? "--grain-only" : "--dry-run");
-      if (tracks.error == 0)
-        free_media_tracks(&tracks);
-      return 0;
-    }
-    ui_set_quiet(saved_quiet);
+      ui_set_quiet(saved_quiet);
+    } /* !scale_to_hd */
 
     {
       /* ---- OPUS audio encoding ---- */
@@ -1166,7 +1211,7 @@ int main(int argc, char *argv[]) {
       char audio_names[32][256];
       int opus_count = 0;
 
-      if (enc_best && enc_best_count > 0) {
+      if (enc_best && enc_best_count > 0 && !dry_run && !grain_only) {
         ui_section("Audio");
         ui_kv("Encode", "%d track%s → OPUS", enc_best_count,
               enc_best_count == 1 ? "" : "s");
@@ -1242,7 +1287,8 @@ int main(int argc, char *argv[]) {
       int srt_count = 0;
       int sub_split_fre = (resolved_lang_tag == LANG_TAG_MULTI_VF2) ? 1 : 0;
 
-      if (tracks.error == 0 && tracks.subtitle_count > 0) {
+      if (tracks.error == 0 && tracks.subtitle_count > 0 && !dry_run &&
+          !grain_only) {
         ui_section("Subtitles");
         int n_sub_process = 0;
         for (int i = 0; i < tracks.subtitle_count; i++)
@@ -1487,206 +1533,533 @@ int main(int argc, char *argv[]) {
 
       /* ---- RPU extraction (Dolby Vision) ---- */
       char rpu_path[4096] = "";
-      if (hdr.error == 0 && hdr.has_dolby_vision) {
-        char rpu_name[2048];
-        build_rpu_filename(rpu_name, sizeof(rpu_name), base_name);
+      if (!scale_to_hd && !dry_run && !grain_only) { /* 4K encode block */
+        if (hdr.error == 0 && hdr.has_dolby_vision) {
+          char rpu_name[2048];
+          build_rpu_filename(rpu_name, sizeof(rpu_name), base_name);
 
-        snprintf(rpu_path, sizeof(rpu_path), "%s%s", output_dir, rpu_name);
+          snprintf(rpu_path, sizeof(rpu_path), "%s%s", output_dir, rpu_name);
 
-        ui_section("Dolby Vision RPU");
-        time_t rpu_t0 = time(NULL);
-        RpuExtractResult rpu_res = extract_rpu(filepath, rpu_path);
+          ui_section("Dolby Vision RPU");
+          time_t rpu_t0 = time(NULL);
+          RpuExtractResult rpu_res = extract_rpu(filepath, rpu_path);
 
-        if (rpu_res.skipped) {
-          ui_stage_skip(rpu_name, "already exists");
-        } else if (rpu_res.error == 0) {
-          char detail[64];
-          snprintf(detail, sizeof(detail), "%d RPUs in %s", rpu_res.rpu_count,
-                   ui_fmt_duration(difftime(time(NULL), rpu_t0)));
-          ui_stage_ok(rpu_name, detail);
-        } else {
-          char err[64];
-          snprintf(err, sizeof(err), "error %d", rpu_res.error);
-          ui_stage_fail(rpu_name, err);
-          ui_hint("source claims Dolby Vision but RPU extraction failed; "
-                  "encode will continue without DV metadata");
-          rpu_path[0] = '\0'; /* Don't use RPU on failure */
+          if (rpu_res.skipped) {
+            ui_stage_skip(rpu_name, "already exists");
+          } else if (rpu_res.error == 0) {
+            char detail[64];
+            snprintf(detail, sizeof(detail), "%d RPUs in %s", rpu_res.rpu_count,
+                     ui_fmt_duration(difftime(time(NULL), rpu_t0)));
+            ui_stage_ok(rpu_name, detail);
+          } else {
+            char err[64];
+            snprintf(err, sizeof(err), "error %d", rpu_res.error);
+            ui_stage_fail(rpu_name, err);
+            ui_hint("source claims Dolby Vision but RPU extraction failed; "
+                    "encode will continue without DV metadata");
+            rpu_path[0] = '\0'; /* Don't use RPU on failure */
+          }
         }
-      }
 
-      /* ---- AV1 video encoding ---- */
-      char av1_video_path[4096];
-      snprintf(av1_video_path, sizeof(av1_video_path), "%s%s.video.mkv",
-               output_dir, base_name);
-      time_t video_t0 = time(NULL);
-      VideoEncodeResult vr = {0};
+        /* ---- AV1 video encoding ---- */
+        char av1_video_path[4096];
+        snprintf(av1_video_path, sizeof(av1_video_path), "%s%s.video.mkv",
+                 output_dir, base_name);
+        time_t video_t0 = time(NULL);
+        VideoEncodeResult vr = {0};
 
-      {
-        ui_section("Video encoding");
+        {
+          ui_section("Video encoding");
 
-        VideoEncodeConfig vcfg = {
+          VideoEncodeConfig vcfg = {
+              .input_path = filepath,
+              .output_path = av1_video_path,
+              .rpu_path = rpu_path[0] ? rpu_path : NULL,
+              .preset = enc_preset,
+              .film_grain = film_grain,
+              .grain_score = grain.error == 0 ? grain.grain_score : 0.0,
+              .grain_variance = grain.error == 0 ? grain.grain_variance : 0.0,
+              .target_bitrate = bitrate,
+              .crf = crf,
+              .info = &info,
+              .crop = (crop.error == 0) ? &crop : NULL,
+              .hdr = &hdr,
+          };
+
+          vr = encode_video(&vcfg);
+
+          if (vr.skipped) {
+            ui_stage_skip("video.mkv", "already exists");
+          } else if (vr.error == 0) {
+            char detail[128];
+            snprintf(detail, sizeof(detail), "%lld frames, %s in %s",
+                     (long long)vr.frames_encoded,
+                     ui_fmt_bytes(vr.bytes_written),
+                     ui_fmt_duration(difftime(time(NULL), video_t0)));
+            ui_stage_ok("video.mkv", detail);
+          } else {
+            char err[64];
+            snprintf(err, sizeof(err), "error %d after %lld frames", vr.error,
+                     (long long)vr.frames_encoded);
+            ui_stage_fail("video.mkv", err);
+            ui_hint("re-run with --verbose to forward SVT-AV1's own log to "
+                    "stderr (rate control, GOP layout, fatal warnings)");
+          }
+        }
+
+        /* ---- Final MKV muxing ---- */
+        {
+          char final_path[4096];
+          snprintf(final_path, sizeof(final_path), "%s%s", output_dir,
+                   output_name);
+
+          /* Build mux audio descriptors */
+          MuxAudioTrack mux_audio[32];
+          for (int i = 0; i < opus_count && i < 32; i++) {
+            mux_audio[i].path = opus_paths[i];
+            mux_audio[i].language = enc_best ? enc_best[i].language : "und";
+            mux_audio[i].track_name = audio_names[i];
+            mux_audio[i].is_default = (i == 0) ? 1 : 0;
+          }
+
+          /* Build mux subtitle descriptors */
+          MuxSubtitleTrack mux_subs[64];
+          int sub_default_set = 0;
+          for (int i = 0; i < srt_count && i < 64; i++) {
+            mux_subs[i].path = srt_paths[i];
+            mux_subs[i].language = srt_langs[i];
+            mux_subs[i].track_name = srt_names[i];
+            mux_subs[i].is_forced = srt_is_forced[i];
+            mux_subs[i].is_sdh = srt_is_sdh[i];
+            /* Only the first French forced subtitle is default */
+            if (!sub_default_set && srt_is_forced[i] &&
+                (strcmp(srt_langs[i], "fre") == 0 ||
+                 strcmp(srt_langs[i], "fra") == 0)) {
+              mux_subs[i].is_default = 1;
+              sub_default_set = 1;
+            } else {
+              mux_subs[i].is_default = 0;
+            }
+          }
+
+          FinalMuxConfig mux_cfg = {
+              .video_path = av1_video_path,
+              .output_path = final_path,
+              .audio = mux_audio,
+              .audio_count = opus_count,
+              .subs = mux_subs,
+              .sub_count = srt_count,
+              .title = mkv_title,
+              .video_title = mkv_title,
+              .video_language = video_language,
+              .chapters_source_path = filepath,
+          };
+
+          ui_section("Final mux");
+          ui_kv("Inputs", "1 video + %d audio + %d subtitle track%s",
+                opus_count, srt_count, srt_count == 1 ? "" : "s");
+          time_t mux_t0 = time(NULL);
+          FinalMuxResult mr = final_mux(&mux_cfg);
+
+          if (mr.skipped) {
+            ui_stage_skip(output_name, "already exists");
+          } else if (mr.error == 0) {
+            char detail[64];
+            snprintf(detail, sizeof(detail), "%s",
+                     ui_fmt_duration(difftime(time(NULL), mux_t0)));
+            ui_stage_ok(output_name, detail);
+          } else {
+            char err[128];
+            snprintf(err, sizeof(err), "error %d (%d audio + %d sub inputs)",
+                     mr.error, opus_count, srt_count);
+            ui_stage_fail(output_name, err);
+            ui_hint("intermediates kept on disk; inspect them next to the "
+                    "source file before re-running");
+          }
+
+          /* Clean up intermediate files on success. Leaving sidecar .srt
+             files next to the final MKV causes players to auto-load them
+             as external subtitles, overriding the embedded defaults. */
+          int removed = 0;
+          if (mr.error == 0) {
+            /* For --companion-hd, audio/subtitle intermediates are reused by
+               the HD mux; defer their removal to the HD cleanup pass. */
+            if (!companion_hd) {
+              for (int i = 0; i < opus_count; i++)
+                if (remove(opus_paths[i]) == 0)
+                  removed++;
+              for (int i = 0; i < srt_count; i++) {
+                /* Skip user-supplied --srt files: they live outside output_dir
+                   or weren't created by us. Only remove SRTs we wrote into
+                   the output directory. */
+                if (strncmp(srt_paths[i], output_dir, strlen(output_dir)) == 0)
+                  if (remove(srt_paths[i]) == 0)
+                    removed++;
+              }
+            }
+            if (remove(av1_video_path) == 0)
+              removed++;
+            /* For --companion-hd the RPU is reused by the HD encode;
+               defer deletion to the HD cleanup pass. */
+            if (rpu_path[0] && !companion_hd && remove(rpu_path) == 0)
+              removed++;
+            if (removed > 0) {
+              char detail[64];
+              snprintf(detail, sizeof(detail), "%d intermediate file%s",
+                       removed, removed == 1 ? "" : "s");
+              ui_stage_ok("Cleanup", detail);
+            }
+          }
+
+          /* ---- Done receipt ---- */
+          if (mr.error == 0 && !mr.skipped) {
+            struct stat fst;
+            long long final_bytes = 0;
+            if (stat(final_path, &fst) == 0)
+              final_bytes = (long long)fst.st_size;
+
+            double elapsed = difftime(time(NULL), encode_start_time);
+            double avg_kbps = 0.0;
+            if (info.duration > 0.5 && final_bytes > 0)
+              avg_kbps = ((double)final_bytes * 8.0) / (info.duration * 1000.0);
+            double delta_pct =
+                bitrate > 0 ? (avg_kbps - bitrate) / bitrate * 100.0 : 0.0;
+            double speed = elapsed > 0.5 ? info.duration / elapsed : 0.0;
+
+            /* Done receipt always renders — it's the headline result. */
+            int saved_quiet_done = ui_is_quiet();
+            ui_set_quiet(0);
+            ui_section("Done");
+            ui_kv("Output", "%s", final_path);
+            ui_kv("Size", "%s", ui_fmt_bytes(final_bytes));
+            if (bitrate > 0 && avg_kbps > 0)
+              ui_kv("Bitrate", "%.0f kbps avg  (%+.1f%% vs %d kbps target)",
+                    avg_kbps, delta_pct, bitrate);
+            ui_kv("Duration", "%s  encoded in %s  (%.2f× realtime)",
+                  ui_fmt_duration(info.duration), ui_fmt_duration(elapsed),
+                  speed);
+            ui_set_quiet(saved_quiet_done);
+          }
+        }
+      } /* !scale_to_hd && !dry_run && !grain_only — end 4K encode block */
+
+      /* ================================================================== */
+      /* HD companion / scale-to-hd pass                                    */
+      /* ================================================================== */
+      if (do_hd) {
+        /* Compute HD output dimensions from cropped source aspect ratio.
+           Target width is always 1920; height is derived to preserve AR
+           (rounded down to even for YUV420). */
+        int hd_crop_w =
+            info.width - (crop.error == 0 ? crop.left + crop.right : 0);
+        int hd_crop_h =
+            info.height - (crop.error == 0 ? crop.top + crop.bottom : 0);
+        hd_crop_w = hd_crop_w & ~1;
+        hd_crop_h = hd_crop_h & ~1;
+        int hd_w = 1920;
+        int hd_h = (int)((double)hd_crop_h * hd_w / hd_crop_w) & ~1;
+        if (hd_h < 2)
+          hd_h = 2;
+
+        MediaInfo hd_info = info;
+        hd_info.width = hd_w;
+        hd_info.height = hd_h;
+
+        /* DV Profile 8.1 is resolution-independent; keep it for HD. */
+        HdrInfo hd_hdr = hdr;
+
+        const EncodePreset *hd_preset = get_encode_preset(cli_quality, hd_h);
+        int hd_vmaf_default = get_vmaf_target(cli_quality, hd_h);
+        int hd_film_grain = get_film_grain_from_score(
+            grain.error == 0 ? grain.grain_score : 0.0,
+            grain.error == 0 ? grain.grain_variance : 0.0, cli_quality);
+
+        /* HD output naming */
+        char hd_output_name[1024] = "";
+        char hd_base_name[1024] = "";
+        if (saved_tmdb_title[0]) {
+          build_output_filename(hd_output_name, sizeof(hd_output_name),
+                                saved_tmdb_title, saved_tmdb_year,
+                                resolved_lang_tag, &hd_info, &hd_hdr, source);
+          snprintf(hd_base_name, sizeof(hd_base_name), "%s", hd_output_name);
+          char *hd_ext = strrchr(hd_base_name, '.');
+          if (hd_ext && strcmp(hd_ext, ".mkv") == 0)
+            *hd_ext = '\0';
+        } else {
+          /* blind mode: append -HDLight to input stem */
+          snprintf(hd_base_name, sizeof(hd_base_name), "%s-HDLight", base_name);
+          snprintf(hd_output_name, sizeof(hd_output_name), "%s.mkv",
+                   hd_base_name);
+        }
+
+        /* ---- HD CRF search ---- */
+        int hd_crf = cli_crf;
+        int hd_vmaf_used = 0;
+        if (!grain_only && hd_crf == 0 && bitrate == 0) {
+          hd_vmaf_used =
+              cli_vmaf_target > 0 ? cli_vmaf_target : hd_vmaf_default;
+          ui_section(companion_hd ? "HD CRF search" : "CRF search");
+          CrfSearchResult hd_csr =
+              run_crf_search(filepath, hd_vmaf_used, hd_preset, hd_film_grain,
+                             "scale=1920:1080:flags=lanczos");
+          if (hd_csr.ab_av1_missing) {
+            ui_stage_fail("crf-search", "ab-av1 not found in PATH");
+            ui_hint("install: brew install master-of-mint/tap/ab-av1  "
+                    "or bypass with --crf <N> or --bitrate <kbps>");
+            if (tracks.error == 0)
+              free_media_tracks(&tracks);
+            return 1;
+          }
+          if (hd_csr.crf < 0) {
+            ui_stage_fail("crf-search",
+                          "ab-av1 exited with error or no CRF parsed");
+            ui_hint("if params changed since last run, clear stale cache: "
+                    "rm -rf ~/.cache/ab-av1/");
+            if (tracks.error == 0)
+              free_media_tracks(&tracks);
+            return 1;
+          }
+          char hd_csr_detail[64];
+          snprintf(hd_csr_detail, sizeof(hd_csr_detail),
+                   "CRF %d  (VMAF target %d)", hd_csr.crf, hd_vmaf_used);
+          ui_stage_ok("crf-search", hd_csr_detail);
+          hd_crf = hd_csr.crf;
+        } else if (cli_vmaf_target > 0) {
+          hd_vmaf_used = cli_vmaf_target;
+        }
+
+        /* ---- HD plan section ---- */
+        int hd_saved_quiet = ui_is_quiet();
+        ui_set_quiet(0);
+        ui_section(companion_hd ? "HD encoding plan" : "Encoding plan");
+        ui_kv("Preset", "%s  (HD)", quality_type_to_string(cli_quality));
+        ui_kv("SVT-AV1", "preset %d, tune %d, keyint %d, ac-bias %.1f",
+              hd_preset->preset, hd_preset->tune, hd_preset->keyint,
+              hd_preset->ac_bias);
+        ui_kv("Scale", "%d×%d  (from %d×%d 4K source)", hd_w, hd_h, info.width,
+              info.height);
+        if (grain.error == 0) {
+          int is_anim = (cli_quality == QUALITY_ANIMATION);
+          const char *content_tier =
+              is_anim ? "animation"
+                      : (grain.grain_score >= 0.08 ? "grainy" : "clean");
+          ui_kv("Grain", "level %d  (%s tier)", hd_film_grain, content_tier);
+        }
+        if (hd_crf > 0) {
+          if (hd_vmaf_used > 0)
+            ui_kv("CRF", "%d  (VMAF target %d)", hd_crf, hd_vmaf_used);
+          else
+            ui_kv("CRF", "%d  (manual)", hd_crf);
+        } else if (bitrate > 0) {
+          ui_kv("Bitrate", "%d kbps VBR  (manual)", bitrate);
+        } else {
+          ui_kv("CRF", "(use --dry-run to probe, or --crf <N> to set)");
+        }
+        ui_kv("Output", "%s%s", output_dir, hd_output_name);
+
+        if (grain_only)
+          print_encoder_knobs(hd_preset, hd_film_grain);
+
+        if (dry_run || grain_only) {
+          ui_section(grain_only ? "Grain-only" : "Dry run");
+          ui_row("No files written. Re-run without %s to encode.",
+                 grain_only ? "--grain-only" : "--dry-run");
+          if (tracks.error == 0)
+            free_media_tracks(&tracks);
+          return 0;
+        }
+        ui_set_quiet(hd_saved_quiet);
+
+        /* For --scale-to-hd the 4K encode block was skipped, so RPU hasn't
+           been extracted yet.  Do it here before the HD video encode. */
+        if (scale_to_hd && hdr.error == 0 && hdr.has_dolby_vision) {
+          char hd_rpu_name[2048];
+          build_rpu_filename(hd_rpu_name, sizeof(hd_rpu_name), hd_base_name);
+          snprintf(rpu_path, sizeof(rpu_path), "%s%s", output_dir, hd_rpu_name);
+
+          ui_section("Dolby Vision RPU");
+          time_t hd_rpu_t0 = time(NULL);
+          RpuExtractResult hd_rpu_res = extract_rpu(filepath, rpu_path);
+
+          if (hd_rpu_res.skipped) {
+            ui_stage_skip(hd_rpu_name, "already exists");
+          } else if (hd_rpu_res.error == 0) {
+            char hd_rpu_detail[64];
+            snprintf(hd_rpu_detail, sizeof(hd_rpu_detail), "%d RPUs in %s",
+                     hd_rpu_res.rpu_count,
+                     ui_fmt_duration(difftime(time(NULL), hd_rpu_t0)));
+            ui_stage_ok(hd_rpu_name, hd_rpu_detail);
+          } else {
+            char hd_rpu_err[64];
+            snprintf(hd_rpu_err, sizeof(hd_rpu_err), "error %d",
+                     hd_rpu_res.error);
+            ui_stage_fail(hd_rpu_name, hd_rpu_err);
+            ui_hint("source claims Dolby Vision but RPU extraction failed; "
+                    "encode will continue without DV metadata");
+            rpu_path[0] = '\0';
+          }
+        }
+
+        /* ---- HD video encode ---- */
+        char hd_av1_video_path[4096];
+        snprintf(hd_av1_video_path, sizeof(hd_av1_video_path), "%s%s.video.mkv",
+                 output_dir, hd_base_name);
+        time_t hd_video_t0 = time(NULL);
+
+        ui_section(companion_hd ? "HD video encoding" : "Video encoding");
+        VideoEncodeConfig hd_vcfg = {
             .input_path = filepath,
-            .output_path = av1_video_path,
+            .output_path = hd_av1_video_path,
             .rpu_path = rpu_path[0] ? rpu_path : NULL,
-            .preset = enc_preset,
-            .film_grain = film_grain,
+            .preset = hd_preset,
+            .film_grain = hd_film_grain,
             .grain_score = grain.error == 0 ? grain.grain_score : 0.0,
             .grain_variance = grain.error == 0 ? grain.grain_variance : 0.0,
             .target_bitrate = bitrate,
-            .crf = crf,
-            .info = &info,
+            .crf = hd_crf,
+            .info = &info, /* source 4K dims for decoder */
             .crop = (crop.error == 0) ? &crop : NULL,
-            .hdr = &hdr,
+            .hdr = &hd_hdr,
+            .scale_width = hd_w,
+            .scale_height = hd_h,
         };
+        VideoEncodeResult hd_vr = encode_video(&hd_vcfg);
 
-        vr = encode_video(&vcfg);
-
-        if (vr.skipped) {
+        if (hd_vr.skipped) {
           ui_stage_skip("video.mkv", "already exists");
-        } else if (vr.error == 0) {
-          char detail[128];
-          snprintf(detail, sizeof(detail), "%lld frames, %s in %s",
-                   (long long)vr.frames_encoded, ui_fmt_bytes(vr.bytes_written),
-                   ui_fmt_duration(difftime(time(NULL), video_t0)));
-          ui_stage_ok("video.mkv", detail);
+        } else if (hd_vr.error == 0) {
+          char hd_vdetail[128];
+          snprintf(hd_vdetail, sizeof(hd_vdetail), "%lld frames, %s in %s",
+                   (long long)hd_vr.frames_encoded,
+                   ui_fmt_bytes(hd_vr.bytes_written),
+                   ui_fmt_duration(difftime(time(NULL), hd_video_t0)));
+          ui_stage_ok("video.mkv", hd_vdetail);
         } else {
-          char err[64];
-          snprintf(err, sizeof(err), "error %d after %lld frames", vr.error,
-                   (long long)vr.frames_encoded);
-          ui_stage_fail("video.mkv", err);
+          char hd_verr[64];
+          snprintf(hd_verr, sizeof(hd_verr), "error %d after %lld frames",
+                   hd_vr.error, (long long)hd_vr.frames_encoded);
+          ui_stage_fail("video.mkv", hd_verr);
           ui_hint("re-run with --verbose to forward SVT-AV1's own log to "
-                  "stderr (rate control, GOP layout, fatal warnings)");
-        }
-      }
-
-      /* ---- Final MKV muxing ---- */
-      {
-        char final_path[4096];
-        snprintf(final_path, sizeof(final_path), "%s%s", output_dir,
-                 output_name);
-
-        /* Build mux audio descriptors */
-        MuxAudioTrack mux_audio[32];
-        for (int i = 0; i < opus_count && i < 32; i++) {
-          mux_audio[i].path = opus_paths[i];
-          mux_audio[i].language = enc_best ? enc_best[i].language : "und";
-          mux_audio[i].track_name = audio_names[i];
-          mux_audio[i].is_default = (i == 0) ? 1 : 0;
+                  "stderr");
         }
 
-        /* Build mux subtitle descriptors */
-        MuxSubtitleTrack mux_subs[64];
-        int sub_default_set = 0;
-        for (int i = 0; i < srt_count && i < 64; i++) {
-          mux_subs[i].path = srt_paths[i];
-          mux_subs[i].language = srt_langs[i];
-          mux_subs[i].track_name = srt_names[i];
-          mux_subs[i].is_forced = srt_is_forced[i];
-          mux_subs[i].is_sdh = srt_is_sdh[i];
-          /* Only the first French forced subtitle is default */
-          if (!sub_default_set && srt_is_forced[i] &&
-              (strcmp(srt_langs[i], "fre") == 0 ||
-               strcmp(srt_langs[i], "fra") == 0)) {
-            mux_subs[i].is_default = 1;
-            sub_default_set = 1;
+        /* ---- HD final mux (reuse opus + srt from this session) ---- */
+        {
+          char hd_final_path[4096];
+          snprintf(hd_final_path, sizeof(hd_final_path), "%s%s", output_dir,
+                   hd_output_name);
+
+          MuxAudioTrack hd_mux_audio[32];
+          for (int i = 0; i < opus_count && i < 32; i++) {
+            hd_mux_audio[i].path = opus_paths[i];
+            hd_mux_audio[i].language = enc_best ? enc_best[i].language : "und";
+            hd_mux_audio[i].track_name = audio_names[i];
+            hd_mux_audio[i].is_default = (i == 0) ? 1 : 0;
+          }
+
+          MuxSubtitleTrack hd_mux_subs[64];
+          int hd_sub_default_set = 0;
+          for (int i = 0; i < srt_count && i < 64; i++) {
+            hd_mux_subs[i].path = srt_paths[i];
+            hd_mux_subs[i].language = srt_langs[i];
+            hd_mux_subs[i].track_name = srt_names[i];
+            hd_mux_subs[i].is_forced = srt_is_forced[i];
+            hd_mux_subs[i].is_sdh = srt_is_sdh[i];
+            if (!hd_sub_default_set && srt_is_forced[i] &&
+                (strcmp(srt_langs[i], "fre") == 0 ||
+                 strcmp(srt_langs[i], "fra") == 0)) {
+              hd_mux_subs[i].is_default = 1;
+              hd_sub_default_set = 1;
+            } else {
+              hd_mux_subs[i].is_default = 0;
+            }
+          }
+
+          FinalMuxConfig hd_mux_cfg = {
+              .video_path = hd_av1_video_path,
+              .output_path = hd_final_path,
+              .audio = hd_mux_audio,
+              .audio_count = opus_count,
+              .subs = hd_mux_subs,
+              .sub_count = srt_count,
+              .title = mkv_title,
+              .video_title = mkv_title,
+              .video_language = video_language,
+              .chapters_source_path = filepath,
+          };
+
+          ui_section(companion_hd ? "HD final mux" : "Final mux");
+          ui_kv("Inputs", "1 video + %d audio + %d subtitle track%s",
+                opus_count, srt_count, srt_count == 1 ? "" : "s");
+          time_t hd_mux_t0 = time(NULL);
+          FinalMuxResult hd_mr = final_mux(&hd_mux_cfg);
+
+          if (hd_mr.skipped) {
+            ui_stage_skip(hd_output_name, "already exists");
+          } else if (hd_mr.error == 0) {
+            char hd_mux_detail[64];
+            snprintf(hd_mux_detail, sizeof(hd_mux_detail), "%s",
+                     ui_fmt_duration(difftime(time(NULL), hd_mux_t0)));
+            ui_stage_ok(hd_output_name, hd_mux_detail);
           } else {
-            mux_subs[i].is_default = 0;
+            char hd_mux_err[128];
+            snprintf(hd_mux_err, sizeof(hd_mux_err),
+                     "error %d (%d audio + %d sub inputs)", hd_mr.error,
+                     opus_count, srt_count);
+            ui_stage_fail(hd_output_name, hd_mux_err);
+            ui_hint("intermediates kept on disk; inspect them next to the "
+                    "source file before re-running");
+          }
+
+          int hd_removed = 0;
+          if (hd_mr.error == 0) {
+            /* For scale-to-hd, remove shared audio/subtitle intermediates
+               (companion-hd already removed them in the 4K cleanup pass). */
+            if (scale_to_hd) {
+              for (int i = 0; i < opus_count; i++)
+                if (remove(opus_paths[i]) == 0)
+                  hd_removed++;
+              for (int i = 0; i < srt_count; i++)
+                if (strncmp(srt_paths[i], output_dir, strlen(output_dir)) == 0)
+                  if (remove(srt_paths[i]) == 0)
+                    hd_removed++;
+            }
+            if (remove(hd_av1_video_path) == 0)
+              hd_removed++;
+            if (rpu_path[0] && remove(rpu_path) == 0)
+              hd_removed++;
+            if (hd_removed > 0) {
+              char hd_clean_detail[64];
+              snprintf(hd_clean_detail, sizeof(hd_clean_detail),
+                       "%d intermediate file%s", hd_removed,
+                       hd_removed == 1 ? "" : "s");
+              ui_stage_ok("Cleanup", hd_clean_detail);
+            }
+          }
+
+          /* HD Done receipt */
+          if (hd_mr.error == 0 && !hd_mr.skipped) {
+            struct stat hd_fst;
+            long long hd_final_bytes = 0;
+            if (stat(hd_final_path, &hd_fst) == 0)
+              hd_final_bytes = (long long)hd_fst.st_size;
+
+            double hd_elapsed = difftime(time(NULL), encode_start_time);
+            double hd_speed =
+                hd_elapsed > 0.5 ? hd_info.duration / hd_elapsed : 0.0;
+
+            int hd_done_quiet = ui_is_quiet();
+            ui_set_quiet(0);
+            ui_section(companion_hd ? "HD Done" : "Done");
+            ui_kv("Output", "%s", hd_final_path);
+            ui_kv("Size", "%s", ui_fmt_bytes(hd_final_bytes));
+            ui_kv("Duration", "%s  encoded in %s  (%.2f× realtime)",
+                  ui_fmt_duration(hd_info.duration),
+                  ui_fmt_duration(hd_elapsed), hd_speed);
+            ui_set_quiet(hd_done_quiet);
           }
         }
-
-        FinalMuxConfig mux_cfg = {
-            .video_path = av1_video_path,
-            .output_path = final_path,
-            .audio = mux_audio,
-            .audio_count = opus_count,
-            .subs = mux_subs,
-            .sub_count = srt_count,
-            .title = mkv_title,
-            .video_title = mkv_title,
-            .video_language = video_language,
-            .chapters_source_path = filepath,
-        };
-
-        ui_section("Final mux");
-        ui_kv("Inputs", "1 video + %d audio + %d subtitle track%s", opus_count,
-              srt_count, srt_count == 1 ? "" : "s");
-        time_t mux_t0 = time(NULL);
-        FinalMuxResult mr = final_mux(&mux_cfg);
-
-        if (mr.skipped) {
-          ui_stage_skip(output_name, "already exists");
-        } else if (mr.error == 0) {
-          char detail[64];
-          snprintf(detail, sizeof(detail), "%s",
-                   ui_fmt_duration(difftime(time(NULL), mux_t0)));
-          ui_stage_ok(output_name, detail);
-        } else {
-          char err[128];
-          snprintf(err, sizeof(err), "error %d (%d audio + %d sub inputs)",
-                   mr.error, opus_count, srt_count);
-          ui_stage_fail(output_name, err);
-          ui_hint("intermediates kept on disk; inspect them next to the "
-                  "source file before re-running");
-        }
-
-        /* Clean up intermediate files on success. Leaving sidecar .srt
-           files next to the final MKV causes players to auto-load them
-           as external subtitles, overriding the embedded defaults. */
-        int removed = 0;
-        if (mr.error == 0) {
-          for (int i = 0; i < opus_count; i++)
-            if (remove(opus_paths[i]) == 0)
-              removed++;
-          for (int i = 0; i < srt_count; i++) {
-            /* Skip user-supplied --srt files: they live outside output_dir
-               or weren't created by us. Only remove SRTs we wrote into
-               the output directory. */
-            if (strncmp(srt_paths[i], output_dir, strlen(output_dir)) == 0)
-              if (remove(srt_paths[i]) == 0)
-                removed++;
-          }
-          if (remove(av1_video_path) == 0)
-            removed++;
-          if (rpu_path[0] && remove(rpu_path) == 0)
-            removed++;
-          if (removed > 0) {
-            char detail[64];
-            snprintf(detail, sizeof(detail), "%d intermediate file%s", removed,
-                     removed == 1 ? "" : "s");
-            ui_stage_ok("Cleanup", detail);
-          }
-        }
-
-        /* ---- Done receipt ---- */
-        if (mr.error == 0 && !mr.skipped) {
-          struct stat fst;
-          long long final_bytes = 0;
-          if (stat(final_path, &fst) == 0)
-            final_bytes = (long long)fst.st_size;
-
-          double elapsed = difftime(time(NULL), encode_start_time);
-          double avg_kbps = 0.0;
-          if (info.duration > 0.5 && final_bytes > 0)
-            avg_kbps = ((double)final_bytes * 8.0) / (info.duration * 1000.0);
-          double delta_pct =
-              bitrate > 0 ? (avg_kbps - bitrate) / bitrate * 100.0 : 0.0;
-          double speed = elapsed > 0.5 ? info.duration / elapsed : 0.0;
-
-          /* Done receipt always renders — it's the headline result. */
-          int saved_quiet_done = ui_is_quiet();
-          ui_set_quiet(0);
-          ui_section("Done");
-          ui_kv("Output", "%s", final_path);
-          ui_kv("Size", "%s", ui_fmt_bytes(final_bytes));
-          if (bitrate > 0 && avg_kbps > 0)
-            ui_kv("Bitrate", "%.0f kbps avg  (%+.1f%% vs %d kbps target)",
-                  avg_kbps, delta_pct, bitrate);
-          ui_kv("Duration", "%s  encoded in %s  (%.2f× realtime)",
-                ui_fmt_duration(info.duration), ui_fmt_duration(elapsed),
-                speed);
-          ui_set_quiet(saved_quiet_done);
-        }
-      }
+      } /* do_hd */
 
       if (enc_best)
         free(enc_best);
