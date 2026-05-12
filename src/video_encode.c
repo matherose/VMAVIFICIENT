@@ -452,7 +452,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
 
   /* Downscale target: if scale_width/height set, encoder receives a smaller
      frame; sws_scale converts crop_w×crop_h → dst_w×dst_h in one pass. */
-  int dst_w = (config->scale_width  > 0) ? (config->scale_width  & ~1) : out_w;
+  int dst_w = (config->scale_width > 0) ? (config->scale_width & ~1) : out_w;
   int dst_h = (config->scale_height > 0) ? (config->scale_height & ~1) : out_h;
 
   /* SVT-AV1 internally pads dimensions up to superblock alignment (up to
@@ -461,8 +461,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   int padded_h = (dst_h + 63) & ~63;
 
   if (dst_w < 64 || dst_h < 64) {
-    fprintf(stderr, "  Video Error: output dimensions %dx%d too small\n",
-            dst_w, dst_h);
+    fprintf(stderr, "  Video Error: output dimensions %dx%d too small\n", dst_w,
+            dst_h);
     result.error = -1;
     return result;
   }
