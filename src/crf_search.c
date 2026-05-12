@@ -20,13 +20,14 @@ extern char **environ;
 
 /* Each --svt key=value pair costs 2 argv slots. Allow up to 64 --svt args
  * on top of the 8 base args (ab-av1 crf-search -i <in> --preset N --min-vmaf
- * N). One extra slot for the terminating NULL. */
+ * N) plus 2 slots for an optional --vfilter. One extra slot for NULL. */
 #define MAX_SVT_ARGS 64
 #define SVT_VAL_LEN 64
-#define MAX_ARGV (8 + MAX_SVT_ARGS * 2 + 1)
+#define MAX_ARGV (8 + MAX_SVT_ARGS * 2 + 2 + 1)
 
 CrfSearchResult run_crf_search(const char *input_path, int vmaf_target,
-                               const EncodePreset *p, int film_grain) {
+                               const EncodePreset *p, int film_grain,
+                               const char *vfilter) {
   CrfSearchResult result = {
       .crf = -1, .vmaf_target = vmaf_target, .ab_av1_missing = 0};
 
@@ -149,6 +150,11 @@ CrfSearchResult run_crf_search(const char *input_path, int vmaf_target,
   }
 
 #undef ADD_SVT
+
+  if (vfilter) {
+    argv[argc++] = "--vfilter";
+    argv[argc++] = (char *)vfilter;
+  }
 
   argv[argc] = NULL;
 

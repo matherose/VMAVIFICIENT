@@ -28,9 +28,13 @@ typedef struct {
  * @param vmaf_target  Target VMAF score (e.g., 93).
  * @param preset       Encoding preset (encoder args forwarded to ab-av1).
  * @param film_grain   Film grain level for the probe encode.
+ * @param vfilter      FFmpeg vfilter string passed as --vfilter (NULL = none).
+ *                     Applied to both encode samples and VMAF reference so
+ *                     scores reflect output quality at the filtered resolution.
  * @return CrfSearchResult.
  */
 CrfSearchResult run_crf_search(const char *input_path, int vmaf_target,
-                               const EncodePreset *preset, int film_grain);
+                               const EncodePreset *preset, int film_grain,
+                               const char *vfilter);
 
 #endif /* CRF_SEARCH_H */

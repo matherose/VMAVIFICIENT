@@ -450,14 +450,19 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   out_w &= ~1;
   out_h &= ~1;
 
+  /* Downscale target: if scale_width/height set, encoder receives a smaller
+     frame; sws_scale converts crop_w×crop_h → dst_w×dst_h in one pass. */
+  int dst_w = (config->scale_width  > 0) ? (config->scale_width  & ~1) : out_w;
+  int dst_h = (config->scale_height > 0) ? (config->scale_height & ~1) : out_h;
+
   /* SVT-AV1 internally pads dimensions up to superblock alignment (up to
      64 pixels). Allocate frame buffers with this padding so the encoder
      never reads past the end. */
-  int padded_h = (out_h + 63) & ~63;
+  int padded_h = (dst_h + 63) & ~63;
 
-  if (out_w < 64 || out_h < 64) {
-    fprintf(stderr, "  Video Error: cropped dimensions %dx%d too small\n",
-            out_w, out_h);
+  if (dst_w < 64 || dst_h < 64) {
+    fprintf(stderr, "  Video Error: output dimensions %dx%d too small\n",
+            dst_w, dst_h);
     result.error = -1;
     return result;
   }
@@ -518,7 +523,9 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   /* Always use swscale to copy frames into our padded buffer.
      This guarantees the buffer is large enough for SVT-AV1's internal
      alignment regardless of how FFmpeg allocated the decoder frame. */
-  sws_ctx = sws_getContext(out_w, out_h, dec_ctx->pix_fmt, out_w, out_h,
+  /* Input: cropped source dims. Output: dst dims (== cropped if no downscale,
+     or smaller when --companion-hd / --scale-to-hd is active). */
+  sws_ctx = sws_getContext(out_w, out_h, dec_ctx->pix_fmt, dst_w, dst_h,
                            target_pix_fmt, SWS_LANCZOS, NULL, NULL, NULL);
   if (!sws_ctx) {
     fprintf(stderr, "  Video Error: cannot create swscale context\n");
@@ -538,8 +545,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   }
 
   /* Set dimensions and framerate */
-  svt_config.source_width = (uint32_t)out_w;
-  svt_config.source_height = (uint32_t)out_h;
+  svt_config.source_width = (uint32_t)dst_w;
+  svt_config.source_height = (uint32_t)dst_h;
   svt_config.encoder_bit_depth = (uint32_t)bit_depth;
   svt_config.encoder_color_format = EB_YUV420;
 
@@ -700,8 +707,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
 
   out_stream->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
   out_stream->codecpar->codec_id = AV_CODEC_ID_AV1;
-  out_stream->codecpar->width = out_w;
-  out_stream->codecpar->height = out_h;
+  out_stream->codecpar->width = dst_w;
+  out_stream->codecpar->height = dst_h;
   out_stream->codecpar->format = target_pix_fmt;
   out_stream->codecpar->color_primaries = in_stream->codecpar->color_primaries;
   out_stream->codecpar->color_trc = in_stream->codecpar->color_trc;
@@ -740,9 +747,10 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
     goto cleanup;
   }
 
-  /* Allocate cropped frame buffer (padded to SVT-AV1 alignment) */
+  /* Allocate output frame buffer (padded to SVT-AV1 alignment).
+     Width/height reflect the final dst dimensions (after any downscale). */
   cropped_frame->format = target_pix_fmt;
-  cropped_frame->width = out_w;
+  cropped_frame->width = dst_w;
   cropped_frame->height = padded_h;
   ret = av_frame_get_buffer(cropped_frame, 32);
   if (ret < 0) {
@@ -832,7 +840,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
 
       input_buf.p_buffer = (uint8_t *)&io_fmt;
       input_buf.n_filled_len =
-          (uint32_t)(out_w * out_h * bytes_per_sample * 3 / 2);
+          (uint32_t)(dst_w * dst_h * bytes_per_sample * 3 / 2);
       input_buf.pts = frame_number;
       input_buf.pic_type = EB_AV1_INVALID_PICTURE;
       input_buf.flags = 0;
