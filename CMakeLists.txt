@@ -300,6 +300,29 @@ if(VMAV_USE_SYSTEM_DEPS)
     # don't want to ship a half-working Linux story. Revisit when it's
     # in a stable distro most users actually run.
     # -----------------------------------------------------------------------
+    # On macOS with both Homebrew and MacPorts installed, CMake's default
+    # PATH search picks up MacPorts' pkg-config first, which only knows
+    # about /opt/local libraries.  Explicitly prefer Homebrew's copy so
+    # that `cmake -G Ninja -B build` works without exporting PKG_CONFIG_PATH.
+    if(APPLE)
+      find_program(_brew_pkg_config pkg-config
+          PATHS /opt/homebrew/bin /usr/local/bin
+          NO_DEFAULT_PATH)
+      if(_brew_pkg_config)
+        set(PKG_CONFIG_EXECUTABLE "${_brew_pkg_config}" CACHE FILEPATH
+            "Homebrew pkg-config (preferred over MacPorts)" FORCE)
+        set(ENV{PKG_CONFIG_PATH}
+            "/opt/homebrew/lib/pkgconfig\
+:/opt/homebrew/opt/openssl@3/lib/pkgconfig\
+:/opt/homebrew/opt/jpeg-turbo/lib/pkgconfig\
+:$ENV{PKG_CONFIG_PATH}")
+        if(NOT DEFINED CACHE{OPENSSL_ROOT_DIR})
+          set(OPENSSL_ROOT_DIR "/opt/homebrew/opt/openssl@3" CACHE PATH
+              "Homebrew OpenSSL root" FORCE)
+        endif()
+      endif()
+    endif()
+
     find_package(PkgConfig REQUIRED)
     find_package(OpenSSL REQUIRED)
     find_package(ZLIB REQUIRED)
