@@ -289,10 +289,14 @@ jobs:
       contents: write
 
     steps:
-      - name: Download all artifacts
+      # Only fetch the static release binary — the vmavificient-build
+      # artifact (used by encode-test) contains a bin/ subdirectory that
+      # would cause `shasum -a 256 *` to fail with "Is a directory".
+      - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: vmavificient-macos-*
           merge-multiple: true
 
       # SHA256SUMS lives next to the binary in the GitHub release so
@@ -300,7 +304,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd artifacts
-          shasum -a 256 * > SHA256SUMS
+          find . -maxdepth 1 -type f | sort | xargs shasum -a 256 | sed 's|\./||' > SHA256SUMS
           cat SHA256SUMS
 
       - name: Create GitHub release
