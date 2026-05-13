@@ -1,34 +1,54 @@
 ---
+# clang-format configuration
+# Language: C (C11 strict) — do NOT set Standard: here, governed by compiler flags
+# AGENTS.md § 8.3 — ColumnLimit 100, LLVM base style
+# Wins over any project override that relaxes formatting
+
 BasedOnStyle: LLVM
-Language: Cpp
-Standard: c++17
+Language: C
 IndentWidth: 2
 TabWidth: 2
 UseTab: Never
 ContinuationIndentWidth: 4
-ColumnLimit: 80
+ColumnLimit: 100
+
+# Alignment
 AlignAfterOpenBracket: Align
 AlignEscapedNewlines: Left
 AlignTrailingComments: true
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+
+# Short form rules — conservative for safety-critical code
 AllowShortBlocksOnASingleLine: Empty
 AllowShortCaseLabelsOnASingleLine: false
 AllowShortFunctionsOnASingleLine: Empty
 AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
-AlwaysBreakAfterReturnType: None
+
+# Braces
+BreakBeforeBraces: Attach
+
+# Arguments and parameters
 BinPackArguments: true
 BinPackParameters: true
-BreakBeforeBraces: Attach
-Cpp11BracedListStyle: true
-DerivePointerAlignment: false
+AlwaysBreakAfterReturnType: None
+
+# Includes — sorted, preserved by block
 IncludeBlocks: Preserve
+SortIncludes: true
+
+# Indentation
 IndentCaseLabels: false
 IndentPPDirectives: None
 KeepEmptyLinesAtTheStartOfBlocks: false
 MaxEmptyLinesToKeep: 1
+
+# Pointers — right-aligned: int *ptr (matches AGENTS.md § 8.8)
 PointerAlignment: Right
-ReflowComments: true
-SortIncludes: true
+DerivePointerAlignment: false
+
+# Spaces
 SpaceAfterCStyleCast: false
 SpaceBeforeAssignmentOperators: true
 SpaceBeforeParens: ControlStatements
@@ -39,3 +59,6 @@ SpacesInCStyleCastParentheses: false
 SpacesInContainerLiterals: false
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
+
+# Comments
+ReflowComments: true
