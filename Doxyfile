@@ -1,0 +1,118 @@
+# Doxyfile — Doxygen configuration per AGENTS.md § 8.6
+# WARN_AS_ERROR=YES — zero warnings required
+# OUTPUT_DIRECTORY=docs/api — generated docs in version-controlled path
+
+PROJECT_NAME           = "VMAVIFICIENT"
+PROJECT_NUMBER         = "1.2.0"
+PROJECT_BRIEF          = "Video encoding utility with AV1, HDR, and subtitles support"
+
+OUTPUT_DIRECTORY       = docs/api
+INPUT                  = include src
+RECURSIVE              = YES
+
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+EXTRACT_LOCAL_METHODS  = NO
+EXTRACT_ANON_NSPACES   = NO
+
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+HIDE_FRIEND_COMPOUNDS  = NO
+HIDE_IN_BODY_DOCS      = NO
+INTERNAL_DOCS          = NO
+
+CASE_SENSE_NAMES       = YES
+HIDE_SCOPE_NAMES       = NO
+SHOW_INCLUDE_FILES     = YES
+SHOW_GROUPED_MEMB_INC  = NO
+
+INLINE_INFO            = YES
+INLINE_SORTED_MEMBERS  = YES
+INLINE_SIMPLE_STRUCTS  = NO
+
+TYPEDEF_HIDES_STRUCT   = NO
+
+SYMBOL_CACHE_SIZE      = 0
+LOOKUP_CACHE_SIZE      = 0
+
+EXTRACT_NAMED_SPACES   = NO
+EXTRACT_PACKAGE        = NO
+EXTRACT_TEMPLATE_SCOPE = NO
+EXTRACT_LOCAL_DEFINES  = YES
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_FILE_EXTENSION    = .html
+HTML_DYNAMIC_SECTIONS  = NO
+
+GENERATE_HTMLHELP      = NO
+GENERATE_DOCSET        = NO
+GENERATE_QHELP         = NO
+
+GENERATE_MAN           = NO
+MAN_OUTPUT             = man
+MAN_EXTENSION          = .3
+
+GENERATE_RTF           = NO
+GENERATE_LATEX         = NO
+GENERATE_XML           = NO
+
+GENERATE_AUTOGEN_DEF   = NO
+GENERATE_TESTDOC       = NO
+
+SUBGROUPING            = YES
+
+GENERATE_DOT           = NO
+CLASS_DIAGRAMS         = NO
+UML_LOOK               = NO
+TEMPLATE_RELATIONS     = NO
+
+INCLUDE_GRAPH          = NO
+INCLUDED_BY_GRAPH      = NO
+CALL_GRAPH             = NO
+CALLER_GRAPH           = NO
+
+DOT_NUM_THREADS        = 0
+DOT_FONTNAME           = FreeSans
+DOT_FONTSIZE           = 10
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = NO
+EXPAND_ONLY_PREDEF     = NO
+SEARCH_INCLUDES        = YES
+INCLUDE_PATH           =
+INCLUDE_FILE_PATTERNS  =
+PREDEFINED             =
+EXPAND_AS_DEFINED      =
+SKIP_FUNCTION_MACROS   = YES
+
+EXTERNAL_GROUPS        = YES
+EXTERNAL_PAGES         = YES
+
+CLASS_GRAPH            = NO
+COLLABORATION_GRAPH    = NO
+GROUP_GRAPHS           = NO
+
+EXCLUDE                =
+EXCLUDE_PATTERNS       = */build/* */deps/* */.git/*
+EXCLUDE_SYMBOLS        =
+
+EXAMPLE_PATH           =
+EXAMPLE_PATTERNS       = *
+EXAMPLE_RECURSIVE      = NO
+
+IMAGE_PATH             =
+
+INPUT_FILTER           =
+FILTER_PATTERNS        =
+FILTER_SOURCE_FILES    = NO
+
+WARN_LOGFILE           =
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO
+WARN_AS_ERROR          = YES
+WARN_FORMAT            = "$file:$line: $text"
+WARN_OUTPUT_CHANNEL    =

@@ -1,0 +1,285 @@
+name: CI — Quality Gates Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CC: clang
+  NINJA_VERSION: 1.12.1
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Jobs run in dependency order per AGENTS.md § 11 validation sequence:
+# 1. Format check (fastest, runs first)
+# 2. Static analysis (clang-tidy)
+# 3. Build + tests (debug)
+# 4. ASan + UBSan
+# 5. MSan (mutually exclusive with ASan)
+# 6. TSan (mutually exclusive with ASan/MSan)
+# 7. Coverage
+# 8. Doxygen
+# 9. ci-pass (gate requiring all above)
+# ──────────────────────────────────────────────────────────────────────────────
+
+jobs:
+  # ── Format check (clang-format) ─────────────────────────────────────────────
+  # Fast gate — runs on small Ubuntu image to fail quickly on style drift
+  format:
+    name: clang-format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pin to specific clang-format version for consistency
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format-18
+
+      # Check only .c and .h files in src/ and include/
+      - name: Check formatting
+        run: |
+          clang-format-18 --dry-run --Werror -style=file \
+            $(find src include -name "*.c" -o -name "*.h")
+
+  # ── Static analysis (clang-tidy) ────────────────────────────────────────────
+  tidy:
+    name: clang-tidy
+    runs-on: ubuntu-24.04
+    needs: format
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install dependencies
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang clang-tidy ninja-build cmake
+
+      # Configure debug build (generates compile_commands.json)
+      - name: Configure (debug preset)
+        run: cmake --preset debug
+
+      # Run clang-tidy on all src files
+      - name: Run clang-tidy
+        run: |
+          clang-tidy -p build/debug \
+            $(find src -name "*.c") \
+            -- -std=c11
+
+  # ── Build + tests (debug) ───────────────────────────────────────────────────
+  build-test:
+    name: build + test (debug)
+    runs-on: ubuntu-24.04
+    needs: format
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install dependencies
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build cmake libcriterion-dev
+
+      # Configure + build
+      - name: Configure + build
+        run: cmake --preset debug && cmake --build build/debug
+
+      # Run tests
+      - name: Run tests
+        run: ctest --preset debug --output-on-failure
+
+  # ── ASan + UBSan ────────────────────────────────────────────────────────────
+  asan:
+    name: ASan + UBSan
+    runs-on: ubuntu-24.04
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install dependencies
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build cmake libcriterion-dev
+
+      # Configure and build with sanitizers
+      - name: Build (asan preset)
+        run: cmake --preset asan && cmake --build build/asan
+
+      # Run tests with ASan options
+      - name: Run tests
+        env:
+          ASAN_OPTIONS: halt_on_error=1:detect_leaks=1:print_stacktrace=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --preset asan --output-on-failure
+
+  # ── MSan (mutually exclusive with ASan — runs in parallel) ──────────────────
+  msan:
+    name: MSan
+    runs-on: ubuntu-24.04
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install dependencies
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build cmake libcriterion-dev
+
+      # Configure and build with MSan
+      - name: Build (msan preset)
+        run: cmake --preset msan && cmake --build build/msan
+
+      # Run tests with MSan options
+      - name: Run tests
+        env:
+          MSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --preset msan --output-on-failure
+
+  # ── TSan (mutually exclusive with ASan/MSan — runs in parallel) ─────────────
+  tsan:
+    name: TSan
+    runs-on: ubuntu-24.04
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install dependencies
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build cmake libcriterion-dev
+
+      # Configure and build with TSan
+      - name: Build (tsan preset)
+        run: cmake --preset tsan && cmake --build build/tsan
+
+      # Run tests with TSan options
+      - name: Run tests
+        env:
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        run: ctest --preset tsan --output-on-failure
+
+  # ── Coverage ────────────────────────────────────────────────────────────────
+  coverage:
+    name: coverage
+    runs-on: ubuntu-24.04
+    needs: build-test
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install dependencies
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build cmake libcriterion-dev llvm
+
+      # Configure and build with coverage instrumentation
+      - name: Build (coverage preset)
+        run: cmake --preset coverage && cmake --build build/coverage
+
+      # Run tests and collect profiles
+      - name: Run tests + collect profiles
+        env:
+          LLVM_PROFILE_FILE: build/coverage/%p.profraw
+        run: ctest --preset coverage --output-on-failure
+
+      # Merge profiles and generate report
+      - name: Merge + report
+        run: |
+          # Find all profraw files
+          PROFRATS=$(find build/coverage -name '*.profraw' 2>/dev/null || true)
+
+          if [ -n "$PROFRATS" ]; then
+            llvm-profdata merge -sparse $PROFRATS \
+              -o build/coverage/merged.profdata
+          else
+            echo "No profile data found"
+            exit 1
+          fi
+
+          # Generate report (assuming binary at build/coverage/vmavificient)
+          llvm-cov report ./build/coverage/vmavificient \
+            -instr-profile=build/coverage/merged.profdata \
+            --ignore-filename-regex="tests/"
+
+      # Enforce coverage thresholds
+      - name: Enforce thresholds
+        run: |
+          PROFRATS=$(find build/coverage -name '*.profraw' 2>/dev/null || true)
+
+          if [ -n "$PROFRATS" ]; then
+            llvm-profdata merge -sparse $PROFRATS \
+              -o build/coverage/merged.profdata
+            
+            LINE=$(llvm-cov report ./build/coverage/vmavificient \
+              -instr-profile=build/coverage/merged.profdata \
+              --ignore-filename-regex="tests/" | \
+              grep TOTAL | awk '{print $NF}' | tr -d '%')
+            
+            LINE_INT=$(echo "$LINE" | cut -d. -f1)
+            if [ "$LINE_INT" -lt 80 ]; then
+              echo "ERROR: Line coverage ${LINE}% below 80% threshold"
+              exit 1
+            fi
+            
+            echo "Coverage check passed: ${LINE}% line coverage"
+          else
+            echo "No profile data found, skipping threshold check"
+          fi
+
+  # ── Doxygen ─────────────────────────────────────────────────────────────────
+  docs:
+    name: Doxygen
+    runs-on: ubuntu-24.04
+    needs: format
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install Doxygen and Graphviz
+      - name: Install Doxygen
+        run: sudo apt-get update && sudo apt-get install -y doxygen graphviz
+
+      # Generate docs and check for warnings
+      - name: Check Doxygen
+        run: |
+          doxygen Doxyfile 2>&1 | tee /tmp/doxygen.log
+          if grep -q "warning:" /tmp/doxygen.log; then
+            echo "ERROR: Doxygen found warnings"
+            grep "warning:" /tmp/doxygen.log
+            exit 1
+          fi
+          echo "Doxygen: zero warnings"
+
+  # ── All-green gate (required for merge) ──────────────────────────────────────
+  ci-pass:
+    name: CI passed
+    runs-on: ubuntu-24.04
+    needs: [format, tidy, build-test, asan, msan, tsan, coverage, docs]
+    if: always()
+    steps:
+      - name: Verify all jobs passed
+        if: needs.format.result != 'success' || \
+          needs.tidy.result != 'success' || \
+          needs.build-test.result != 'success' || \
+          needs.asan.result != 'success' || \
+          needs.msan.result != 'success' || \
+          needs.tsan.result != 'success' || \
+          needs.coverage.result != 'success' || \
+          needs.docs.result != 'success'
+        run: |
+          echo "Some CI jobs failed:"
+          echo "  format:   ${{ needs.format.result }}"
+          echo "  tidy:     ${{ needs.tidy.result }}"
+          echo "  build-test: ${{ needs.build-test.result }}"
+          echo "  asan:     ${{ needs.asan.result }}"
+          echo "  msan:     ${{ needs.msan.result }}"
+          echo "  tsan:     ${{ needs.tsan.result }}"
+          echo "  coverage: ${{ needs.coverage.result }}"
+          echo "  docs:     ${{ needs.docs.result }}"
+          exit 1
+
+      - name: All checks passed
+        run: echo "✓ All CI quality gates passed"
