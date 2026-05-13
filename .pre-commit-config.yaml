@@ -1,0 +1,59 @@
+# .pre-commit-config.yaml — Pre-commit hooks per AGENTS.md § 19.4
+# Local safeguards that run before commit (not a replacement for CI)
+
+repos:
+  - repo: local
+    hooks:
+      # ── clang-format check (formatting gate) ────────────────────────────────
+      # Runs clang-format --dry-run on changed .c and .h files
+      # Fails if any file would be reformatted
+      - id: clang-format-check
+        name: clang-format (changed files)
+        entry: bash -c 'clang-format --dry-run --Werror -style=file "$@"' --
+        language: system
+        files: \.(c|h)$
+        stages: [pre-commit]
+
+      # ── clang-tidy check (lint gate) ────────────────────────────────────────
+      # Runs clang-tidy on changed .c files (faster than CI full run)
+      # Checks only changed files, not the whole codebase
+      - id: clang-tidy-changed
+        name: clang-tidy (changed .c files)
+        entry: bash -c 'clang-tidy -p build/debug "$@" -- -std=c11' --
+        language: system
+        files: \.c$
+        stages: [pre-commit]
+
+      # ── Commit message format check ─────────────────────────────────────────
+      # Enforces commit message format from AGENTS.md § 12
+      # Pattern: <type>(<scope>): <imperative subject, max 72 chars>
+      - id: commit-msg-format
+        name: commit message format
+        entry: bash -c 'check-msg.sh "$1"'
+        language: system
+        stages: [commit-msg]
+        pass_filenames: false
+        additional_dependencies:
+          - check-msg.sh
+
+      # ── Doxygen check (documentation gate) ───────────────────────────────────
+      # Verifies no Doxygen warnings on changed header files
+      # Requires Doxyfile to be configured with WARN_AS_ERROR=YES
+      - id: doxygen-check
+        name: Doxygen (changed headers)
+        entry: bash -c 'check-doxygen.sh'
+        language: system
+        files: \.h$
+        stages: [pre-commit]
+        additional_dependencies:
+          - check-doxygen.sh
+
+      # ── CMake preset check ────────────────────────────────────────────────────
+      # Verifies CMakePresets.json is valid JSON
+      - id: cmake-presets-check
+        name: CMakePresets.json validity
+        entry: bash -c 'check-cmake-presets.sh'
+        language: system
+        stages: [pre-commit]
+        additional_dependencies:
+          - check-cmake-presets.sh

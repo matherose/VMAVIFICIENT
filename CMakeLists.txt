@@ -883,27 +883,27 @@ else()
 endif()
 
 # ===========================================================================
-# Executable
+# Executable (per AGENTS.md § 15: modular source structure)
 # ===========================================================================
 add_executable(vmavificient
-    src/main.c
-    src/media_info.c
-    src/media_tracks.c
-    src/media_hdr.c
-    src/media_crop.c
-    src/media_analysis.c
-    src/media_naming.c
-    src/audio_encode.c
-    src/config.c
-    src/crf_search.c
-    src/encode_preset.c
-    src/rpu_extract.c
-    src/video_encode.c
-    src/subtitle_convert.c
-    src/final_mux.c
-    src/tmdb.c
-    src/ui.c
-    src/utils.c
+    src/audio_encode/audio_encode.c
+    src/config/config.c
+    src/crf_search/crf_search.c
+    src/encode_preset/encode_preset.c
+    src/final_mux/final_mux.c
+    src/main/main.c
+    src/media_analysis/media_analysis.c
+    src/media_crop/media_crop.c
+    src/media_hdr/media_hdr.c
+    src/media_info/media_info.c
+    src/media_naming/media_naming.c
+    src/media_tracks/media_tracks.c
+    src/rpu_extract/rpu_extract.c
+    src/subtitle_convert/subtitle_convert.c
+    src/tmdb/tmdb.c
+    src/ui/ui.c
+    src/utils/utils.c
+    src/video_encode/video_encode.c
 )
 
 target_compile_options(vmavificient PRIVATE ${VMAV_OPT_FLAGS})
@@ -929,7 +929,7 @@ add_dependencies(vmavificient ep_grav1synth)
 set_target_properties(vmavificient PROPERTIES LINKER_LANGUAGE CXX)
 
 target_include_directories(vmavificient PRIVATE
-    "${CMAKE_SOURCE_DIR}/include"
+    "${CMAKE_SOURCE_DIR}/include/vmavificient"
     "${SVTAV1_INSTALL}/include"
 )
 if(NOT VMAV_USE_SYSTEM_DEPS)
