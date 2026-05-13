@@ -80,3 +80,63 @@ crfsearch/
 sample.mp4
 bbb.mp4.zip
 bbb_sunflower_*.mp4
+
+# ── Navigation artifacts (per AGENTS.md § 15.3) ────────────────────────
+# These directories are created during migration per AGENTS.md § 15.1
+# and should never be committed.
+
+docs/api/               # Doxygen-generated API docs
+docs/design/           # Design docs and ADRs (generated docs)
+build/debug/           # Debug preset build artifacts
+build/asan/            # ASan preset build artifacts
+build/msan/            # MSan preset build artifacts
+build/tsan/            # TSan preset build artifacts
+build/coverage/        # Coverage preset build artifacts
+build/release/         # Release preset build artifacts
+reports/analyzer/      # scan-build findings
+reports/coverage/      # llvm-cov HTML/LCOV reports
+.a5c/runs/             # Babysitter runtime state
+fuzz/corpus/           # Fuzz seed corpus (can be committed if small)
+
+# Optional (per AGENTS.md § 15.3):
+# .a5c/processes/       # Babysitter process definitions (commit these)
+# cmake/                # CMake helper modules (commit these)
+# scripts/              # Project scripts (commit these)
+# docs/                 # Project documentation (commit these, except docs/api/)
+
+# ── AI and personal config ────────────────────────────────────────────
+# Local AI session state (per AGENTS.md § 15.3):
+#(players, scripts, configs)—never commit.
+.a5c/
+.pi/
+
+# Model and configuration files—project-owned but sensitive.
+models.json
+model-router.json
+
+# Project-specific AI state
+.pi/agent/
+.pi/agent/config/
+.pi/agent/models/
+.pi/agent/contexts/
+.pi/agent/last-context
+.pi/agent/last-state
+.pi/agent/session-state
+.pi/agent/model-cache/
+.pi/agent/logs/
+.pi/agent/temp/
+
+# Babysitter runtime—local to each developer’s machine.
+a5c/runs/
+a5c/processes/
+.a5c/runs/
+.a5c/processes/
+.a5c/runner.state
+
+# Local AI session snapshots (never commit).
+.a5c/session-snapshots/
+.a5c/session-cache/
+.a5c/session-data/
+
+# Commit message templates—personal preference.
+.gitmessage
