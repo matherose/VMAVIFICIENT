@@ -1,0 +1,38 @@
+# <type>(<scope>): <imperative subject — max 72 chars>
+#
+# WHY this change exists. Not what — the diff shows that.
+# Reference ADR, issue, or design doc if relevant.
+#
+# ─── AI DISCLOSURE ──────────────────────────────────────────────────
+# If AI (any tier) touched the code, add the line below and fill it in.
+# Remove this block entirely if purely human-authored.
+#
+# Assisted-by: pi/tier<N>:<MODEL_ID> [clang-tidy] [scan-build]
+# Example: Assisted-by: pi/tier2:Qwen/Qwen2.5-Coder-32B-Instruct [clang-tidy]
+#
+# Rules:
+#   - Use the model ID from AGENTS.md § 14 (current weekly rotation)
+#   - List only tools that materially shaped this commit
+#   - Do NOT list: git, make, editors, ninja, cmake
+#   - Multiple tiers = one Assisted-by line per tier
+# ─────────────────────────────────────────────────────────────────────
+#
+# Signed-off-by: Your Name <your@email.com>
+#
+# ─── TYPES ───────────────────────────────────────────────────────────
+# feat      new feature or behavior
+# fix       bug fix
+# refactor  structural change, no behavior change
+# chore     build, toolchain, deps, config
+# docs      documentation only
+# test      test-only changes
+# perf      performance improvement
+#
+# ─── SCOPES ──────────────────────────────────────────────────────────
+# <module-name>   e.g., parser, allocator, simd
+# build           CMakeLists.txt, CMakePresets, cmake/
+# ci              .github/workflows/
+# docs            docs/, Doxyfile
+# tests           tests/
+# asm             Assembly-specific changes
+# agents          AGENTS.md, .clang-format, .clang-tidy

@@ -1,4 +1,10 @@
 ---
+# clang-tidy configuration
+# AGENTS.md § 8.5 — all warnings are errors, zero findings allowed
+# NASA Power of Ten enforcement: recursion check ON, return-value check ON,
+# unsafe buffer handling ON, strcpy ON
+# Naming convention: snake_case for all C identifiers, _t suffix for types
+
 Checks: >
   -*,
   bugprone-*,
@@ -10,39 +16,83 @@ Checks: >
   readability-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-narrowing-conversions,
-  -cert-err33-c,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -bugprone-assignment-in-if-condition,
   -misc-include-cleaner,
-  -misc-no-recursion,
   -readability-identifier-length,
   -readability-magic-numbers,
   -readability-function-cognitive-complexity,
   -readability-braces-around-statements,
   -readability-isolate-declaration,
   -readability-math-missing-parentheses,
-  -bugprone-implicit-widening-of-multiplication-result,
-  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
-  -clang-analyzer-security.insecureAPI.strcpy,
-  -bugprone-multi-level-implicit-pointer-conversion,
-  -bugprone-assignment-in-if-condition,
   -cert-msc30-c,
   -cert-msc50-cpp
 
-WarningsAsErrors: ''
+# AGENTS.md § 8.5: all warnings are errors — no silent passes
+WarningsAsErrors: '*'
+
+# Only lint headers under include/ and src/ — not third-party or system headers
 HeaderFilterRegex: '^(include|src)/.*\.h$'
+
+# Use the project .clang-format file for any formatting decisions
 FormatStyle: file
 
 CheckOptions:
+  # --- Naming conventions (AGENTS.md § 15) ---
+  # All C identifiers: snake_case
+  # Types (struct tags, enums, typedefs): snake_case with _t suffix
+  # Macros and enum constants: UPPER_CASE
+
   - key: readability-identifier-naming.FunctionCase
     value: lower_case
+
   - key: readability-identifier-naming.VariableCase
     value: lower_case
+
+  - key: readability-identifier-naming.ParameterCase
+    value: lower_case
+
+  - key: readability-identifier-naming.LocalVariableCase
+    value: lower_case
+
+  - key: readability-identifier-naming.GlobalVariableCase
+    value: lower_case
+
+  # Struct tags: snake_case (typedef adds _t)
   - key: readability-identifier-naming.StructCase
-    value: CamelCase
+    value: lower_case
+
+  # Enum tags: snake_case
   - key: readability-identifier-naming.EnumCase
-    value: CamelCase
+    value: lower_case
+
+  # Enum constants: UPPER_CASE
   - key: readability-identifier-naming.EnumConstantCase
     value: UPPER_CASE
+
+  # Typedefs: snake_case with mandatory _t suffix (AGENTS.md § 15: "snake_case_t")
+  - key: readability-identifier-naming.TypedefCase
+    value: lower_case
+  - key: readability-identifier-naming.TypedefSuffix
+    value: _t
+
+  # Macros: UPPER_CASE
   - key: readability-identifier-naming.MacroDefinitionCase
     value: UPPER_CASE
-  - key: readability-identifier-naming.TypedefCase
-    value: CamelCase
+
+  # --- NASA Power of Ten enforcement options ---
+
+  # Rule 4: function length — clang-tidy does not directly enforce line count;
+  # use readability-function-size for complexity budget instead
+  - key: readability-function-size.LineThreshold
+    value: '60'
+  - key: readability-function-size.StatementThreshold
+    value: '50'
+  - key: readability-function-size.BranchThreshold
+    value: '10'
+  - key: readability-function-size.NestingThreshold
+    value: '4'
+
+  # Suppress false-positives from cert-err33-c on well-known void-returning funcs
+  # Add per-site with: // NOLINT(cert-err33-c): <reason>
