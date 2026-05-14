@@ -6,8 +6,9 @@
 #ifndef ENCODE_PRESET_H
 #define ENCODE_PRESET_H
 
+#include <assert.h>
 #include <limits.h>
-#include <stdckdbool.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 /** Sentinel: parameter should use encoder default. */
@@ -102,7 +103,7 @@ static_assert(200 >= 0, "Noise chroma strength max valid");
  *
  * Fields set to -1 mean "use encoder default" (sentinel value).
  */
-*/ typedef struct {
+typedef struct {
   int preset;                        /**< Encoder speed preset (always 4). */
   int keyint;                        /**< Keyframe interval (300=4K, 240=HD). */
   int tune;                          /**< Tune mode: 0=VQ, 1=PSNR, 5=Film Grain. */
