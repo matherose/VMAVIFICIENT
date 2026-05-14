@@ -519,7 +519,6 @@ int main(int argc, char *argv[]) {
   bool grain_only = false;
   bool companion_hd = false;
   bool scale_to_hd = false;
-  bool keep_cache = false;
   char cli_cache_dir[4096] = ""; /* CLI-provided cache dir, optional */
   LanguageTag cli_lang_tag = LANG_TAG_NONE;
   SourceType cli_source = SOURCE_UNKNOWN;

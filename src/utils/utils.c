@@ -51,28 +51,6 @@ const char *get_svt_av1_version(void) {
   return svt_av1_get_version();
 }
 
-static inline bool str_contains_ci(const char *haystack, const char *needle) {
-  if (haystack == NULL || needle == NULL)
-    return false;
-
-  size_t hlen = strlen(haystack);
-  size_t nlen = strlen(needle);
-  if (nlen > hlen)
-    return false;
-  for (size_t i = 0; i <= hlen - nlen; i++) {
-    bool match = true;
-    for (size_t j = 0; j < nlen; j++) {
-      if (tolower((unsigned char)haystack[i + j]) != tolower((unsigned char)needle[j])) {
-        match = false;
-        break;
-      }
-    }
-    if (match)
-      return true;
-  }
-  return false;
-}
-
 void shell_quote_append(char *dst, size_t cap, size_t *pos, const char *src) {
   if (cap == 0)
     return;
