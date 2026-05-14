@@ -14,6 +14,9 @@
 #include <sys/wait.h>
 #include <time.h>
 
+/* Cache directory - file scope so helper functions can access it. */
+static char g_cache_dir[4096] = "";
+
 /* Defined by the build system (-DVMAV_VERSION=...). Fallback keeps
    non-CMake builds linkable, e.g. ad-hoc clang invocations. */
 #ifndef VMAV_VERSION
@@ -102,6 +105,12 @@ static void print_usage(const char *prog) {
           "output).\n"
           "                   Requires a 4K source. Full independent pipeline.\n"
           "                   Mutually exclusive with --companion-hd.\n"
+          "  --cache-dir <path>\n"
+          "                   Use specified directory for intermediate files\n"
+          "                   (grain analysis, CRF search results, extracted\n"
+          "                   audio/subtitles). Cache is deleted after successful\n"
+          "                   encode. Defaults to a hidden .vmavificient-cache folder\n"
+          "                   in the project root.\n"
           "  --help           Show this help\n"
           "\n"
           "Language flags (override auto-detection):\n"
@@ -285,6 +294,44 @@ static const char *codec_short(const char *codec) {
   return codec;
 }
 
+/**
+ * @brief Build a path inside the cache directory.
+ * Appends the given relative path to g_cache_dir with proper separator.
+ */
+static void build_cache_path(char *buf, size_t bufsize, const char *relative_path) {
+  if (strlen(g_cache_dir) > 0 && g_cache_dir[strlen(g_cache_dir) - 1] == '/')
+    snprintf(buf, bufsize, "%s%s", g_cache_dir, relative_path);
+  else
+    snprintf(buf, bufsize, "%s/%s", g_cache_dir, relative_path);
+}
+
+/**
+ * @brief Remove the entire cache directory and recreate it.
+ * Used after successful encode to cleanup all intermediate files.
+ */
+static void cleanup_cache_dir(void) {
+  /* Build the rm -rf command */
+  char cmd[4096];
+  /* Escape any special characters in cache_dir path */
+  char escaped_path[4096];
+  size_t j = 0;
+  for (size_t i = 0; i < strlen(g_cache_dir) && j < sizeof(escaped_path) - 2; i++) {
+    if (g_cache_dir[i] == '\'' || g_cache_dir[i] == '\\')
+      escaped_path[j++] = '\\';
+    escaped_path[j++] = g_cache_dir[i];
+  }
+  escaped_path[j] = '\0';
+  snprintf(cmd, sizeof(cmd), "rm -rf '%s'", escaped_path);
+  if (system(cmd) != 0) {
+    fprintf(stderr, "Warning: failed to cleanup cache directory '%s'\n", g_cache_dir);
+  }
+  /* Recreate empty cache directory */
+  if (mkdir(g_cache_dir, 0755) != 0 && errno != EEXIST) {
+    fprintf(stderr, "Warning: failed to recreate cache directory '%s' (errno %d)\n", g_cache_dir,
+            errno);
+  }
+}
+
 /* ---- Track ordering helpers ---- */
 
 static int audio_lang_priority(const char *lang) {
@@ -447,6 +494,8 @@ int main(int argc, char *argv[]) {
   bool grain_only = false;
   bool companion_hd = false;
   bool scale_to_hd = false;
+  bool keep_cache = false;
+  char cli_cache_dir[4096] = ""; /* CLI-provided cache dir, optional */
   LanguageTag cli_lang_tag = LANG_TAG_NONE;
   SourceType cli_source = SOURCE_UNKNOWN;
   QualityType cli_quality = QUALITY_LIVEACTION;
@@ -511,6 +560,7 @@ int main(int argc, char *argv[]) {
     OPT_VMAF_TARGET,
     OPT_COMPANION_HD,
     OPT_SCALE_TO_HD,
+    OPT_CACHE_DIR,
   };
 
   static struct option long_options[] = {
@@ -564,6 +614,7 @@ int main(int argc, char *argv[]) {
       {"imax_digital", no_argument, 0, OPT_IMAX_DIGITAL},
       {"companion-hd", no_argument, 0, OPT_COMPANION_HD},
       {"scale-to-hd", no_argument, 0, OPT_SCALE_TO_HD},
+      {"cache-dir", required_argument, 0, OPT_CACHE_DIR},
       {0, 0, 0, 0},
   };
 
@@ -730,6 +781,13 @@ int main(int argc, char *argv[]) {
     case OPT_SCALE_TO_HD:
       scale_to_hd = true;
       break;
+    case OPT_CACHE_DIR:
+      snprintf(cli_cache_dir, sizeof(cli_cache_dir), "%s", optarg);
+      if (strlen(cli_cache_dir) == 0) {
+        fprintf(stderr, "Error: --cache-dir requires a directory path\n");
+        return 1;
+      }
+      break;
     default:
       print_usage(argv[0]);
       return 1;
@@ -751,6 +809,22 @@ int main(int argc, char *argv[]) {
     return 1;
   }
   int do_hd = companion_hd || scale_to_hd;
+
+  /* ---- Cache directory setup ---- */
+  if (strlen(cli_cache_dir) > 0) {
+    /* User-provided cache directory */
+    snprintf(g_cache_dir, sizeof(g_cache_dir), "%s", cli_cache_dir);
+  } else {
+    /* Default: .vmavificient-cache in project root */
+    snprintf(g_cache_dir, sizeof(g_cache_dir), "./.vmavificient-cache");
+  }
+  if (mkdir(g_cache_dir, 0755) != 0 && errno != EEXIST) {
+    char err[128];
+    snprintf(err, sizeof(err), "failed to create cache directory '%s' (errno %d)", g_cache_dir,
+             errno);
+    ui_stage_fail("Cache", err);
+    return 1;
+  }
 
   const char *filepath = NULL;
   if (optind < argc)
@@ -1202,7 +1276,10 @@ int main(int argc, char *argv[]) {
           build_opus_filename(opus_name, sizeof(opus_name), base_name, enc_best[i].language,
                               track_fv);
 
-          snprintf(opus_paths[i], sizeof(opus_paths[i]), "%s%s", output_dir, opus_name);
+          /* Write opus to cache directory */
+          char opus_cache_path[4096];
+          build_cache_path(opus_cache_path, sizeof(opus_cache_path), opus_name);
+          snprintf(opus_paths[i], sizeof(opus_paths[i]), "%s", opus_cache_path);
 
           /* Build display name for MKV track */
           build_audio_track_name(audio_names[i], sizeof(audio_names[i]), enc_best[i].language,
@@ -1281,7 +1358,10 @@ int main(int argc, char *argv[]) {
             build_srt_filename(srt_fname, sizeof(srt_fname), base_name, lang, track_fv,
                                sub->is_forced, sub->is_sdh);
 
-            snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s%s", output_dir, srt_fname);
+            /* Write SRT to cache directory */
+            char srt_cache_path[4096];
+            build_cache_path(srt_cache_path, sizeof(srt_cache_path), srt_fname);
+            snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s", srt_cache_path);
 
             /* Build display name */
             build_subtitle_track_name(srt_names[srt_count], sizeof(srt_names[0]), lang, 1,
@@ -1358,7 +1438,10 @@ int main(int argc, char *argv[]) {
             build_srt_filename(srt_fname, sizeof(srt_fname), base_name, lang, track_fv,
                                sub->is_forced, sub->is_sdh);
 
-            snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s%s", output_dir, srt_fname);
+            /* Write SRT to cache directory */
+            char srt_cache_path[4096];
+            build_cache_path(srt_cache_path, sizeof(srt_cache_path), srt_fname);
+            snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s", srt_cache_path);
 
             build_subtitle_track_name(srt_names[srt_count], sizeof(srt_names[0]), lang, 1,
                                       sub->is_forced, sub->is_sdh, track_origin);
@@ -1473,7 +1556,10 @@ int main(int argc, char *argv[]) {
           char rpu_name[2048];
           build_rpu_filename(rpu_name, sizeof(rpu_name), base_name);
 
-          snprintf(rpu_path, sizeof(rpu_path), "%s%s", output_dir, rpu_name);
+          /* Write RPU to cache directory */
+          char rpu_cache_path[4096];
+          build_cache_path(rpu_cache_path, sizeof(rpu_cache_path), rpu_name);
+          snprintf(rpu_path, sizeof(rpu_path), "%s", rpu_cache_path);
 
           ui_section("Dolby Vision RPU");
           time_t rpu_t0 = time(NULL);
@@ -1497,8 +1583,12 @@ int main(int argc, char *argv[]) {
         }
 
         /* ---- AV1 video encoding ---- */
+        char av1_video_name[2048];
+        snprintf(av1_video_name, sizeof(av1_video_name), "%s.video.mkv", base_name);
+        char av1_video_cache_path[4096];
+        build_cache_path(av1_video_cache_path, sizeof(av1_video_cache_path), av1_video_name);
         char av1_video_path[4096];
-        snprintf(av1_video_path, sizeof(av1_video_path), "%s%s.video.mkv", output_dir, base_name);
+        snprintf(av1_video_path, sizeof(av1_video_path), "%s", av1_video_cache_path);
         time_t video_t0 = time(NULL);
         VideoEncodeResult vr = {0};
 
@@ -1639,6 +1729,9 @@ int main(int argc, char *argv[]) {
                        removed == 1 ? "" : "s");
               ui_stage_ok("Cleanup", detail);
             }
+            /* Clean up cache directory when everything succeeded */
+            if (mr.error == 0)
+              cleanup_cache_dir();
           }
 
           /* ---- Done receipt ---- */
@@ -1793,7 +1886,11 @@ int main(int argc, char *argv[]) {
         if (scale_to_hd && hdr.error == 0 && hdr.has_dolby_vision) {
           char hd_rpu_name[2048];
           build_rpu_filename(hd_rpu_name, sizeof(hd_rpu_name), hd_base_name);
-          snprintf(rpu_path, sizeof(rpu_path), "%s%s", output_dir, hd_rpu_name);
+
+          /* Write RPU to cache directory */
+          char hd_rpu_cache_path[4096];
+          build_cache_path(hd_rpu_cache_path, sizeof(hd_rpu_cache_path), hd_rpu_name);
+          snprintf(rpu_path, sizeof(rpu_path), "%s", hd_rpu_cache_path);
 
           ui_section("Dolby Vision RPU");
           time_t hd_rpu_t0 = time(NULL);
@@ -1817,9 +1914,13 @@ int main(int argc, char *argv[]) {
         }
 
         /* ---- HD video encode ---- */
+        char hd_av1_video_name[2048];
+        snprintf(hd_av1_video_name, sizeof(hd_av1_video_name), "%s.video.mkv", hd_base_name);
+        char hd_av1_video_cache_path[4096];
+        build_cache_path(hd_av1_video_cache_path, sizeof(hd_av1_video_cache_path),
+                         hd_av1_video_name);
         char hd_av1_video_path[4096];
-        snprintf(hd_av1_video_path, sizeof(hd_av1_video_path), "%s%s.video.mkv", output_dir,
-                 hd_base_name);
+        snprintf(hd_av1_video_path, sizeof(hd_av1_video_path), "%s", hd_av1_video_cache_path);
         time_t hd_video_t0 = time(NULL);
 
         ui_section(companion_hd ? "HD video encoding" : "Video encoding");
@@ -1946,6 +2047,9 @@ int main(int argc, char *argv[]) {
                        hd_removed, hd_removed == 1 ? "" : "s");
               ui_stage_ok("Cleanup", hd_clean_detail);
             }
+            /* Clean up cache directory when everything succeeded */
+            if (hd_mr.error == 0)
+              cleanup_cache_dir();
           }
 
           /* HD Done receipt */

@@ -29,18 +29,14 @@ int check_dependencies(void) {
     const char *name;
     unsigned int version;
   } fflibs[] = {
-      {"libavutil", avutil_version()},
-      {"libavcodec", avcodec_version()},
-      {"libavformat", avformat_version()},
-      {"libavfilter", avfilter_version()},
-      {"libswscale", swscale_version()},
-      {"libswresample", swresample_version()},
+      {"libavutil", avutil_version()},     {"libavcodec", avcodec_version()},
+      {"libavformat", avformat_version()}, {"libavfilter", avfilter_version()},
+      {"libswscale", swscale_version()},   {"libswresample", swresample_version()},
   };
 
   for (size_t i = 0; i < sizeof(fflibs) / sizeof(fflibs[0]); i++) {
     if (fflibs[i].version == 0) {
-      fprintf(stderr, "Error: %s did not report a valid version.\n",
-              fflibs[i].name);
+      fprintf(stderr, "Error: %s did not report a valid version.\n", fflibs[i].name);
       return -1;
     }
   }
@@ -56,14 +52,17 @@ const char *get_svt_av1_version(void) {
 }
 
 bool str_contains_ci(const char *haystack, const char *needle) {
-  size_t hlen = strlen(haystack), nlen = strlen(needle);
+  if (haystack == NULL || needle == NULL)
+    return false;
+
+  size_t hlen = strlen(haystack);
+  size_t nlen = strlen(needle);
   if (nlen > hlen)
     return false;
   for (size_t i = 0; i <= hlen - nlen; i++) {
     bool match = true;
     for (size_t j = 0; j < nlen; j++) {
-      if (tolower((unsigned char)haystack[i + j]) !=
-          tolower((unsigned char)needle[j])) {
+      if (tolower((unsigned char)haystack[i + j]) != tolower((unsigned char)needle[j])) {
         match = false;
         break;
       }
