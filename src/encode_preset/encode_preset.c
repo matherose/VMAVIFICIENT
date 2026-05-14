@@ -6,7 +6,8 @@
 #include "encode_preset.h"
 
 /** Sentinel: parameter should use encoder default. */
-#define UNSET (-1)
+#undef UNSET
+#define UNSET PRESET_UNSET
 
 /* ====================================================================== */
 /*  Grain-variance adaptation tunables                                    */
@@ -852,8 +853,7 @@ int get_target_bitrate(int height, double grain_score, QualityType quality) {
 /**
  * Linear interpolation helper.
  */
-static int lerp_grain(double score, double lo_score, double hi_score,
-                      int lo_val, int hi_val) {
+static int lerp_grain(double score, double lo_score, double hi_score, int lo_val, int hi_val) {
   double t = (score - lo_score) / (hi_score - lo_score);
   return lo_val + (int)(t * (hi_val - lo_val) + 0.5);
 }
@@ -927,8 +927,7 @@ static const double DIGITAL_BRACKETS[] = {0.05, 0.10, 0.15, 0.25, 1.00};
  *  bracket's width, return a score just past the upper edge so the curve
  *  dispatches into the next (grainier) bracket. Otherwise return @p score.
  *  Scores already above the last boundary are left alone (already at cap). */
-static double nudge_to_higher_bracket(double score, const double *boundaries,
-                                      int n) {
+static double nudge_to_higher_bracket(double score, const double *boundaries, int n) {
   for (int i = 0; i < n; i++) {
     if (score <= boundaries[i]) {
       double lower = (i == 0) ? 0.0 : boundaries[i - 1];
@@ -942,16 +941,14 @@ static double nudge_to_higher_bracket(double score, const double *boundaries,
   return score;
 }
 
-int get_film_grain_from_score(double grain_score, double grain_variance,
-                              QualityType quality) {
+int get_film_grain_from_score(double grain_score, double grain_variance, QualityType quality) {
   int nudge = grain_variance > GRAIN_VARIANCE_HIGH_THRESHOLD;
   switch (quality) {
   case QUALITY_SUPER35_ANALOG:
   case QUALITY_IMAX_ANALOG:
     if (nudge)
       grain_score = nudge_to_higher_bracket(grain_score, ANALOG_BRACKETS,
-                                            sizeof(ANALOG_BRACKETS) /
-                                                sizeof(ANALOG_BRACKETS[0]));
+                                            sizeof(ANALOG_BRACKETS) / sizeof(ANALOG_BRACKETS[0]));
     return film_grain_analog(grain_score);
 
   case QUALITY_ANIMATION:
@@ -965,8 +962,7 @@ int get_film_grain_from_score(double grain_score, double grain_variance,
   default:
     if (nudge)
       grain_score = nudge_to_higher_bracket(grain_score, DIGITAL_BRACKETS,
-                                            sizeof(DIGITAL_BRACKETS) /
-                                                sizeof(DIGITAL_BRACKETS[0]));
+                                            sizeof(DIGITAL_BRACKETS) / sizeof(DIGITAL_BRACKETS[0]));
     return film_grain_digital(grain_score);
   }
 }
@@ -977,12 +973,9 @@ int get_film_grain_from_score(double grain_score, double grain_variance,
 
 const char *quality_type_to_string(QualityType quality) {
   static const char *names[] = {
-      [QUALITY_LIVEACTION] = "Live-Action",
-      [QUALITY_ANIMATION] = "Animation",
-      [QUALITY_SUPER35_ANALOG] = "Super 35 Analog",
-      [QUALITY_SUPER35_DIGITAL] = "Super 35 Digital",
-      [QUALITY_IMAX_ANALOG] = "IMAX Analog",
-      [QUALITY_IMAX_DIGITAL] = "IMAX Digital",
+      [QUALITY_LIVEACTION] = "Live-Action",         [QUALITY_ANIMATION] = "Animation",
+      [QUALITY_SUPER35_ANALOG] = "Super 35 Analog", [QUALITY_SUPER35_DIGITAL] = "Super 35 Digital",
+      [QUALITY_IMAX_ANALOG] = "IMAX Analog",        [QUALITY_IMAX_DIGITAL] = "IMAX Digital",
   };
   if (quality < 0 || quality > QUALITY_IMAX_DIGITAL)
     return "Unknown";

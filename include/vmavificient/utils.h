@@ -6,8 +6,10 @@
 #ifndef UTILS_H
 #define UTILS_H
 
+#include <ctype.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h>
 
 /** @brief Default test media file used when no argument is provided. */
 #define DEFAULT_TEST_FILE "bbb_sunflower_1080p_30fps_normal.mp4"
@@ -29,8 +31,32 @@ int check_dependencies(void);
 
 /**
  * @brief Case-insensitive substring search (ASCII-safe).
+ *
+ * @param haystack String to search in.
+ * @param needle Substring to search for.
+ * @return true if @p needle is found in @p haystack, false otherwise.
  */
-bool str_contains_ci(const char *haystack, const char *needle);
+static inline bool str_contains_ci(const char *haystack, const char *needle) {
+  if (haystack == NULL || needle == NULL)
+    return false;
+
+  size_t hlen = strlen(haystack);
+  size_t nlen = strlen(needle);
+  if (nlen > hlen)
+    return false;
+  for (size_t i = 0; i <= hlen - nlen; i++) {
+    bool match = true;
+    for (size_t j = 0; j < nlen; j++) {
+      if (tolower((unsigned char)haystack[i + j]) != tolower((unsigned char)needle[j])) {
+        match = false;
+        break;
+      }
+    }
+    if (match)
+      return true;
+  }
+  return false;
+}
 
 /**
  * @brief Return the linked SVT-AV1-HDR version string.

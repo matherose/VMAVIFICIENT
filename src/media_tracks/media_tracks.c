@@ -114,10 +114,9 @@ static const char *guess_language_from_title(const char *title) {
  * @brief Detect if a track title indicates forced subtitles.
  *
  * Forced subtitles are typically shown only when the on-screen dialogue
- * is in a different language than the main audio track. In French releases,
- * VFF (Version Française Fully Dubbed) tracks act as forced subtitles
- * since they're the French track when the source is in another language.
- * VFQ (Québécois) and VFI (Impact) variants also serve this purpose.
+ * is in a different language than the main audio track. They should only
+ * be marked as forced if they explicitly contain "forced" in the title.
+ * VFF/VFQ/VFI are audio variants, NOT forced subtitles.
  */
 static bool title_indicates_forced(const char *title) {
   if (!title || !title[0])
@@ -126,12 +125,6 @@ static bool title_indicates_forced(const char *title) {
   /* Standard forced keywords */
   if (str_contains_ci(title, "forced") || str_contains_ci(title, "forc\xc3\xa9") || /* forcé */
       str_contains_ci(title, "force"))
-    return true;
-
-  /* French VFF/VFQ/VFI variants are effectively forced subtitles
-     in multi-language releases */
-  if (str_contains_ci(title, "VFF") || str_contains_ci(title, "VFQ") ||
-      str_contains_ci(title, "VFI") || str_contains_ci(title, "VFF ]"))
     return true;
 
   return false;
@@ -507,7 +500,9 @@ int detect_track_french_variant(const TrackInfo *track) {
     return 2; /* FRENCH_VARIANT_VFQ */
   if (str_contains_ci(t, "VFI"))
     return 3; /* FRENCH_VARIANT_VFI */
-  if (str_contains_ci(t, "VFF") || str_contains_ci(t, "VF "))
+  /* Match VFF with word boundary - "VFF " ensures we don't match "VFQ" or "VFI"
+     and avoids false positives from partial matches like "VF - " */
+  if (str_contains_ci(t, "VFF ") || str_contains_ci(t, "VFF]"))
     return 1; /* FRENCH_VARIANT_VFF */
   return 0;
 }

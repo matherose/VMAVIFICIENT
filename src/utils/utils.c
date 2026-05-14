@@ -51,7 +51,7 @@ const char *get_svt_av1_version(void) {
   return svt_av1_get_version();
 }
 
-bool str_contains_ci(const char *haystack, const char *needle) {
+static inline bool str_contains_ci(const char *haystack, const char *needle) {
   if (haystack == NULL || needle == NULL)
     return false;
 

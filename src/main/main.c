@@ -308,27 +308,52 @@ static void build_cache_path(char *buf, size_t bufsize, const char *relative_pat
 /**
  * @brief Remove the entire cache directory and recreate it.
  * Used after successful encode to cleanup all intermediate files.
+ *
+ * Atomic behavior: first renames the cache to a temporary name,
+ * then creates a new empty cache dir. If rename fails, creates
+ * cache dir in place. Old cache is deleted only after successful recreate.
  */
 static void cleanup_cache_dir(void) {
-  /* Build the rm -rf command */
-  char cmd[4096];
-  /* Escape any special characters in cache_dir path */
-  char escaped_path[4096];
-  size_t j = 0;
-  for (size_t i = 0; i < strlen(g_cache_dir) && j < sizeof(escaped_path) - 2; i++) {
-    if (g_cache_dir[i] == '\'' || g_cache_dir[i] == '\\')
-      escaped_path[j++] = '\\';
-    escaped_path[j++] = g_cache_dir[i];
-  }
-  escaped_path[j] = '\0';
-  snprintf(cmd, sizeof(cmd), "rm -rf '%s'", escaped_path);
-  if (system(cmd) != 0) {
-    fprintf(stderr, "Warning: failed to cleanup cache directory '%s'\n", g_cache_dir);
-  }
-  /* Recreate empty cache directory */
-  if (mkdir(g_cache_dir, 0755) != 0 && errno != EEXIST) {
-    fprintf(stderr, "Warning: failed to recreate cache directory '%s' (errno %d)\n", g_cache_dir,
-            errno);
+  char old_cache_path[4096];
+  pid_t pid = getpid();
+  snprintf(old_cache_path, sizeof(old_cache_path), "%s.tmp.%d", g_cache_dir, pid);
+
+  /* Try to atomically rename the cache directory */
+  if (rename(g_cache_dir, old_cache_path) == 0) {
+    /* Rename succeeded: create fresh cache dir */
+    if (mkdir(g_cache_dir, 0755) != 0 && errno != EEXIST) {
+      fprintf(stderr, "Warning: failed to recreate cache directory '%s' (errno %d)\n", g_cache_dir,
+              errno);
+      return;
+    }
+    /* Delete old cache in background (non-blocking) */
+    char cmd[4096];
+    char escaped_old[4096];
+    shell_quote_append(escaped_old, sizeof(escaped_old), &(size_t){0}, old_cache_path);
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s' &", escaped_old);
+    int ret = system(cmd);
+    (void)ret; /* Ignore background rm errors */
+  } else {
+    /* Rename failed (e.g., cache doesn't exist or is in use)
+     * Try to recreate in place */
+    char cmd[4096];
+    char escaped_path[4096];
+    size_t j = 0;
+    for (size_t i = 0; i < strlen(g_cache_dir) && j < sizeof(escaped_path) - 2; i++) {
+      if (g_cache_dir[i] == '\'' || g_cache_dir[i] == '\\')
+        escaped_path[j++] = '\\';
+      escaped_path[j++] = g_cache_dir[i];
+    }
+    escaped_path[j] = '\0';
+    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", escaped_path);
+    if (system(cmd) != 0) {
+      fprintf(stderr, "Warning: failed to cleanup cache directory '%s'\n", g_cache_dir);
+    }
+    /* Recreate empty cache directory */
+    if (mkdir(g_cache_dir, 0755) != 0 && errno != EEXIST) {
+      fprintf(stderr, "Warning: failed to recreate cache directory '%s' (errno %d)\n", g_cache_dir,
+              errno);
+    }
   }
 }
 

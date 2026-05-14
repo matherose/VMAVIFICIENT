@@ -17,12 +17,11 @@ static const struct {
   const char *iso1;
   const char *iso2b;
 } iso_map[] = {
-    {"en", "eng"}, {"fr", "fre"}, {"de", "ger"}, {"es", "spa"}, {"it", "ita"},
-    {"ja", "jpn"}, {"ko", "kor"}, {"zh", "chi"}, {"pt", "por"}, {"ru", "rus"},
-    {"ar", "ara"}, {"hi", "hin"}, {"nl", "dut"}, {"sv", "swe"}, {"no", "nor"},
-    {"da", "dan"}, {"fi", "fin"}, {"tr", "tur"}, {"pl", "pol"}, {"cs", "cze"},
-    {"hu", "hun"}, {"ro", "rum"}, {"th", "tha"}, {"vi", "vie"}, {"el", "gre"},
-    {"he", "heb"}, {"id", "ind"}, {"ms", "may"}, {"uk", "ukr"}, {"bg", "bul"},
+    {"en", "eng"}, {"fr", "fre"}, {"de", "ger"}, {"es", "spa"}, {"it", "ita"}, {"ja", "jpn"},
+    {"ko", "kor"}, {"zh", "chi"}, {"pt", "por"}, {"ru", "rus"}, {"ar", "ara"}, {"hi", "hin"},
+    {"nl", "dut"}, {"sv", "swe"}, {"no", "nor"}, {"da", "dan"}, {"fi", "fin"}, {"tr", "tur"},
+    {"pl", "pol"}, {"cs", "cze"}, {"hu", "hun"}, {"ro", "rum"}, {"th", "tha"}, {"vi", "vie"},
+    {"el", "gre"}, {"he", "heb"}, {"id", "ind"}, {"ms", "may"}, {"uk", "ukr"}, {"bg", "bul"},
     {"hr", "hrv"}, {"sk", "slo"}, {NULL, NULL},
 };
 
@@ -45,15 +44,13 @@ static bool is_french_code(const char *code) {
 
 /* ── Language tag determination ────────────────────────────────── */
 
-LanguageTag determine_language_tag(const MediaTracks *tracks,
-                                   const char *original_lang_iso1,
+LanguageTag determine_language_tag(const MediaTracks *tracks, const char *original_lang_iso1,
                                    FrenchVariant french_variant) {
   if (!tracks || tracks->audio_count == 0)
     return LANG_TAG_VO;
 
   const char *orig_3 = iso639_1_to_2b(original_lang_iso1);
-  bool orig_is_french =
-      original_lang_iso1 && strcmp(original_lang_iso1, "fr") == 0;
+  bool orig_is_french = original_lang_iso1 && strcmp(original_lang_iso1, "fr") == 0;
 
   bool has_original = false;
   bool has_french = false;
@@ -64,8 +61,7 @@ LanguageTag determine_language_tag(const MediaTracks *tracks,
   int seen_count = 0;
 
   for (int i = 0; i < tracks->audio_count; i++) {
-    const char *lang =
-        tracks->audio[i].language[0] ? tracks->audio[i].language : "und";
+    const char *lang = tracks->audio[i].language[0] ? tracks->audio[i].language : "und";
 
     /* Check if this language was already counted. */
     bool dup = false;
@@ -153,8 +149,8 @@ FrenchVariant detect_french_variant_from_filename(const char *filename) {
     return FRENCH_VARIANT_VFQ;
   if (str_contains_ci(filename, "VFI"))
     return FRENCH_VARIANT_VFI;
-  if (str_contains_ci(filename, "VFF") ||
-      str_contains_ci(filename, "TRUEFRENCH"))
+  /* Match VFF with word boundary to avoid false positives from "VFQ" or "VFI" */
+  if (str_contains_ci(filename, "VFF") || str_contains_ci(filename, "TRUEFRENCH"))
     return FRENCH_VARIANT_VFF;
 
   return FRENCH_VARIANT_UNKNOWN;
@@ -167,35 +163,29 @@ SourceType detect_source_from_filename(const char *filename) {
     return SOURCE_UNKNOWN;
 
   /* Order matters: more specific patterns before generic ones. */
-  if (str_contains_ci(filename, "BDREMUX") ||
-      str_contains_ci(filename, "BD-REMUX"))
+  if (str_contains_ci(filename, "BDREMUX") || str_contains_ci(filename, "BD-REMUX"))
     return SOURCE_REMUX;
 
   if (str_contains_ci(filename, "BDRIP") || str_contains_ci(filename, "BD-RIP"))
     return SOURCE_BDRIP;
 
-  if (str_contains_ci(filename, "BLURAY") ||
-      str_contains_ci(filename, "BLU-RAY"))
+  if (str_contains_ci(filename, "BLURAY") || str_contains_ci(filename, "BLU-RAY"))
     return SOURCE_BLURAY;
 
   if (str_contains_ci(filename, "REMUX"))
     return SOURCE_REMUX;
 
-  if (str_contains_ci(filename, "DVDREMUX") ||
-      str_contains_ci(filename, "DVD-REMUX"))
+  if (str_contains_ci(filename, "DVDREMUX") || str_contains_ci(filename, "DVD-REMUX"))
     return SOURCE_DVDREMUX;
 
-  if (str_contains_ci(filename, "DVDRIP") ||
-      str_contains_ci(filename, "DVD-RIP"))
+  if (str_contains_ci(filename, "DVDRIP") || str_contains_ci(filename, "DVD-RIP"))
     return SOURCE_DVDRIP;
 
-  if (str_contains_ci(filename, "WEBDL") ||
-      str_contains_ci(filename, "WEB-DL") ||
+  if (str_contains_ci(filename, "WEBDL") || str_contains_ci(filename, "WEB-DL") ||
       str_contains_ci(filename, "WEB DL"))
     return SOURCE_WEBDL;
 
-  if (str_contains_ci(filename, "WEBRIP") ||
-      str_contains_ci(filename, "WEB-RIP") ||
+  if (str_contains_ci(filename, "WEBRIP") || str_contains_ci(filename, "WEB-RIP") ||
       str_contains_ci(filename, "WEB RIP"))
     return SOURCE_WEBRIP;
 
@@ -211,8 +201,7 @@ SourceType detect_source_from_filename(const char *filename) {
   if (str_contains_ci(filename, "TVRIP") || str_contains_ci(filename, "TV-RIP"))
     return SOURCE_TVRIP;
 
-  if (str_contains_ci(filename, "VHSRIP") ||
-      str_contains_ci(filename, "VHS-RIP"))
+  if (str_contains_ci(filename, "VHSRIP") || str_contains_ci(filename, "VHS-RIP"))
     return SOURCE_VHSRIP;
 
   return SOURCE_UNKNOWN;
@@ -307,8 +296,8 @@ static void sanitize_title(char *out, size_t outsize, const char *title) {
     char c = title[i];
     if (c == ' ')
       out[j++] = '.';
-    else if (c == ':' || c == '/' || c == '\\' || c == '?' || c == '*' ||
-             c == '"' || c == '<' || c == '>' || c == '|')
+    else if (c == ':' || c == '/' || c == '\\' || c == '?' || c == '*' || c == '"' || c == '<' ||
+             c == '>' || c == '|')
       continue; /* skip unsafe chars */
     else
       out[j++] = c;
@@ -318,9 +307,9 @@ static void sanitize_title(char *out, size_t outsize, const char *title) {
 
 /* ── Filename builder ──────────────────────────────────────────── */
 
-int build_output_filename(char *buf, size_t bufsize, const char *title,
-                          int year, LanguageTag lang_tag, const MediaInfo *info,
-                          const HdrInfo *hdr, SourceType source) {
+int build_output_filename(char *buf, size_t bufsize, const char *title, int year,
+                          LanguageTag lang_tag, const MediaInfo *info, const HdrInfo *hdr,
+                          SourceType source) {
   char safe_title[512];
   sanitize_title(safe_title, sizeof(safe_title), title);
 
@@ -341,9 +330,9 @@ int build_output_filename(char *buf, size_t bufsize, const char *title,
   /* Assemble:
    * TITLE.YEAR.LANG.RES.FEATURE.SOURCE.QUALITY.10bit.AV1.OPUS-<group>.mkv */
   const VmavConfig *cfg = config_get();
-  snprintf(buf, bufsize, "%s.%d.%s.%s.%s.%s.%s.10bit.AV1.OPUS-%s.mkv",
-           safe_title, year, language_tag_to_string(lang_tag), resolution,
-           feature, source_to_string(source), quality, cfg->release_group);
+  snprintf(buf, bufsize, "%s.%d.%s.%s.%s.%s.%s.10bit.AV1.OPUS-%s.mkv", safe_title, year,
+           language_tag_to_string(lang_tag), resolution, feature, source_to_string(source), quality,
+           cfg->release_group);
 
   return 0;
 }
