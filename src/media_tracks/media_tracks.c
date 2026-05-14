@@ -445,11 +445,11 @@ void build_audio_track_name(char *buf, size_t bufsize, const char *language, int
 void build_subtitle_track_name(char *buf, size_t bufsize, const char *language, int is_srt,
                                int is_forced, int is_sdh, FrenchAudioOrigin fr_origin) {
   const char *format = is_srt ? "SRT" : "Text";
-  const char *suffix = "";
+  const char *type_label = "";
   if (is_forced)
-    suffix = " forced";
+    type_label = " (forced)";
   else if (is_sdh)
-    suffix = " sdh";
+    type_label = " (sdh)";
 
   int is_french = language && (strcmp(language, "fre") == 0 || strcmp(language, "fra") == 0);
   if (is_french) {
@@ -468,13 +468,12 @@ void build_subtitle_track_name(char *buf, size_t bufsize, const char *language, 
       variant = "VFF";
       break;
     }
-    snprintf(buf, bufsize,
-             "Fran\xc3\xa7"
-             "ais [%s] | %s%s",
-             variant, format, suffix);
+    const char *lang_label =
+        (fr_origin == FRENCH_AUDIO_VFQ) ? "Français (Québec)" : "Français (France)";
+    snprintf(buf, bufsize, "%s [%s]%s | %s", lang_label, variant, type_label, format);
   } else {
     const char *name = language_display_name(language);
-    snprintf(buf, bufsize, "%s | %s%s", name, format, suffix);
+    snprintf(buf, bufsize, "%s | %s%s", name, format, type_label);
   }
 }
 
