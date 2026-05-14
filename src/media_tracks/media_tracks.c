@@ -112,13 +112,29 @@ static const char *guess_language_from_title(const char *title) {
 
 /**
  * @brief Detect if a track title indicates forced subtitles.
+ *
+ * Forced subtitles are typically shown only when the on-screen dialogue
+ * is in a different language than the main audio track. In French releases,
+ * VFF (Version Française Fully Dubbed) tracks act as forced subtitles
+ * since they're the French track when the source is in another language.
+ * VFQ (Québécois) and VFI (Impact) variants also serve this purpose.
  */
 static bool title_indicates_forced(const char *title) {
   if (!title || !title[0])
     return false;
-  return str_contains_ci(title, "forced") ||
-         str_contains_ci(title, "forc\xc3\xa9") || /* forcé */
-         str_contains_ci(title, "force");
+
+  /* Standard forced keywords */
+  if (str_contains_ci(title, "forced") || str_contains_ci(title, "forc\xc3\xa9") || /* forcé */
+      str_contains_ci(title, "force"))
+    return true;
+
+  /* French VFF/VFQ/VFI variants are effectively forced subtitles
+     in multi-language releases */
+  if (str_contains_ci(title, "VFF") || str_contains_ci(title, "VFQ") ||
+      str_contains_ci(title, "VFI") || str_contains_ci(title, "VFF ]"))
+    return true;
+
+  return false;
 }
 
 /**
@@ -127,10 +143,8 @@ static bool title_indicates_forced(const char *title) {
 static bool title_indicates_sdh(const char *title) {
   if (!title || !title[0])
     return false;
-  return str_contains_ci(title, "sdh") ||
-         str_contains_ci(title, "closed caption") ||
-         str_contains_ci(title, "hearing impaired") ||
-         str_contains_ci(title, "malentendant");
+  return str_contains_ci(title, "sdh") || str_contains_ci(title, "closed caption") ||
+         str_contains_ci(title, "hearing impaired") || str_contains_ci(title, "malentendant");
 }
 
 /**
@@ -169,8 +183,7 @@ static void fill_track(TrackInfo *t, AVStream *stream) {
       snprintf(t->language, sizeof(t->language), "%s", guessed);
   }
 
-  snprintf(t->codec, sizeof(t->codec), "%s",
-           avcodec_get_name(stream->codecpar->codec_id));
+  snprintf(t->codec, sizeof(t->codec), "%s", avcodec_get_name(stream->codecpar->codec_id));
 
   t->channels = stream->codecpar->ch_layout.nb_channels;
   t->bitrate = stream->codecpar->bit_rate;
@@ -214,8 +227,7 @@ MediaTracks get_media_tracks(const char *path) {
   ret = avformat_find_stream_info(fmt_ctx, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "Error: cannot read stream info from '%s': %s\n", path,
-            errbuf);
+    fprintf(stderr, "Error: cannot read stream info from '%s': %s\n", path, errbuf);
     result.error = ret;
     avformat_close_input(&fmt_ctx);
     return result;
@@ -400,12 +412,11 @@ static const char *channels_to_layout(int channels) {
   }
 }
 
-void build_audio_track_name(char *buf, size_t bufsize, const char *language,
-                            int channels, FrenchAudioOrigin fr_origin) {
+void build_audio_track_name(char *buf, size_t bufsize, const char *language, int channels,
+                            FrenchAudioOrigin fr_origin) {
   const char *layout = channels_to_layout(channels);
 
-  if (language &&
-      (strcmp(language, "fre") == 0 || strcmp(language, "fra") == 0)) {
+  if (language && (strcmp(language, "fre") == 0 || strcmp(language, "fra") == 0)) {
     const char *variant;
     switch (fr_origin) {
     case FRENCH_AUDIO_VFQ:
@@ -431,9 +442,8 @@ void build_audio_track_name(char *buf, size_t bufsize, const char *language,
   }
 }
 
-void build_subtitle_track_name(char *buf, size_t bufsize, const char *language,
-                               int is_srt, int is_forced, int is_sdh,
-                               FrenchAudioOrigin fr_origin) {
+void build_subtitle_track_name(char *buf, size_t bufsize, const char *language, int is_srt,
+                               int is_forced, int is_sdh, FrenchAudioOrigin fr_origin) {
   const char *format = is_srt ? "SRT" : "Text";
   const char *suffix = "";
   if (is_forced)
@@ -441,8 +451,7 @@ void build_subtitle_track_name(char *buf, size_t bufsize, const char *language,
   else if (is_sdh)
     suffix = " sdh";
 
-  int is_french = language && (strcmp(language, "fre") == 0 ||
-                               strcmp(language, "fra") == 0);
+  int is_french = language && (strcmp(language, "fre") == 0 || strcmp(language, "fra") == 0);
   if (is_french) {
     const char *variant;
     switch (fr_origin) {
@@ -508,8 +517,7 @@ static int is_french_lang(const char *lang) {
   return lang && (strcmp(lang, "fre") == 0 || strcmp(lang, "fra") == 0);
 }
 
-TrackInfo *select_best_audio_per_language(const MediaTracks *tracks,
-                                          int split_french_variants,
+TrackInfo *select_best_audio_per_language(const MediaTracks *tracks, int split_french_variants,
                                           int *out_count) {
   *out_count = 0;
   if (!tracks || tracks->audio_count == 0)

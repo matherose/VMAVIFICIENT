@@ -34,9 +34,19 @@ static char *strip(char *s) {
 }
 
 static void copy_value(char *dst, size_t dstsize, const char *src) {
+  if (dst == NULL || dstsize == 0) {
+    if (dst != NULL && dstsize == 0)
+      dst[0] = '\0';
+    return;
+  }
+  if (src == NULL) {
+    dst[0] = '\0';
+    return;
+  }
+
   size_t len = strlen(src);
-  if (len >= 2 && ((src[0] == '"' && src[len - 1] == '"') ||
-                   (src[0] == '\'' && src[len - 1] == '\''))) {
+  if (len >= 2 &&
+      ((src[0] == '"' && src[len - 1] == '"') || (src[0] == '\'' && src[len - 1] == '\''))) {
     src++;
     len -= 2;
   }
@@ -52,7 +62,7 @@ static int parse_file(const char *path, VmavConfig *cfg) {
     return -1;
 
   char line[512];
-  while (fgets(line, sizeof(line), f)) {
+  while (fgets(line, sizeof(line), f) != NULL) {
     char *p = strip(line);
     if (*p == '\0' || *p == '#' || *p == ';' || *p == '[')
       continue;
@@ -69,6 +79,13 @@ static int parse_file(const char *path, VmavConfig *cfg) {
     else if (strcmp(key, "release_group") == 0)
       copy_value(cfg->release_group, sizeof(cfg->release_group), val);
   }
+
+  /* Check for read error (not EOF) */
+  if (ferror(f)) {
+    fclose(f);
+    return -1;
+  }
+
   fclose(f);
   return 0;
 }
@@ -114,8 +131,7 @@ void config_init(void) {
      packages (Homebrew, .deb, AUR) Just Work after `vmavificient --config`. */
   const char *home = getenv("HOME");
   if (home) {
-    snprintf(home_path, sizeof(home_path), "%s/.config/vmavificient/config.ini",
-             home);
+    snprintf(home_path, sizeof(home_path), "%s/.config/vmavificient/config.ini", home);
     if (parse_file(home_path, &g_config) == 0)
       found = 1;
   }
@@ -129,13 +145,11 @@ void config_init(void) {
     die_config("No config found.", home_path[0] ? home_path : NULL);
 
   /* Validate every required key is non-empty. */
-  for (size_t i = 0; i < sizeof(REQUIRED_KEYS) / sizeof(REQUIRED_KEYS[0]);
-       i++) {
+  for (size_t i = 0; i < sizeof(REQUIRED_KEYS) / sizeof(REQUIRED_KEYS[0]); i++) {
     const char *val = (const char *)&g_config + REQUIRED_KEYS[i].offset;
     if (val[0] == '\0') {
       char msg[256];
-      snprintf(msg, sizeof(msg),
-               "config: required key '%s' is missing or empty.",
+      snprintf(msg, sizeof(msg), "config: required key '%s' is missing or empty.",
                REQUIRED_KEYS[i].name);
       die_config(msg, NULL);
     }
@@ -156,15 +170,13 @@ const VmavConfig *config_get(void) {
  * @brief Read a line from stdin, strip the trailing newline, into @p buf.
  * @return 0 on success, -1 on EOF or empty input when @p required is non-zero.
  */
-static int prompt_line(const char *label, char *buf, size_t bufsize,
-                       int required) {
+static int prompt_line(const char *label, char *buf, size_t bufsize, int required) {
   printf("%s", label);
   fflush(stdout);
   if (!fgets(buf, (int)bufsize, stdin))
     return -1;
   size_t n = strlen(buf);
-  while (n > 0 &&
-         (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' '))
+  while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' '))
     buf[--n] = '\0';
   if (required && n == 0)
     return -1;
@@ -201,8 +213,7 @@ int config_interactive_setup(void) {
   }
 
   char config_path[1024];
-  snprintf(config_path, sizeof(config_path),
-           "%s/.config/vmavificient/config.ini", home);
+  snprintf(config_path, sizeof(config_path), "%s/.config/vmavificient/config.ini", home);
 
   /* If a config already exists, confirm before overwriting. */
   struct stat st;
@@ -222,29 +233,25 @@ int config_interactive_setup(void) {
          "  - Release group tag (e.g. \"matherose\")\n\n");
 
   char tmdb_api_key[128];
-  if (prompt_line("TMDB API key: ", tmdb_api_key, sizeof(tmdb_api_key), 1) !=
-      0) {
+  if (prompt_line("TMDB API key: ", tmdb_api_key, sizeof(tmdb_api_key), 1) != 0) {
     fprintf(stderr, "Error: TMDB API key cannot be empty.\n");
     return 1;
   }
 
   char release_group[64];
-  if (prompt_line("Release group: ", release_group, sizeof(release_group), 1) !=
-      0) {
+  if (prompt_line("Release group: ", release_group, sizeof(release_group), 1) != 0) {
     fprintf(stderr, "Error: release group cannot be empty.\n");
     return 1;
   }
 
   if (mkdir_p_for_file(config_path) != 0) {
-    fprintf(stderr, "Error: cannot create config directory: %s\n",
-            strerror(errno));
+    fprintf(stderr, "Error: cannot create config directory: %s\n", strerror(errno));
     return 1;
   }
 
   FILE *f = fopen(config_path, "w");
   if (!f) {
-    fprintf(stderr, "Error: cannot open %s for writing: %s\n", config_path,
-            strerror(errno));
+    fprintf(stderr, "Error: cannot open %s for writing: %s\n", config_path, strerror(errno));
     return 1;
   }
   fprintf(f, "# vmavificient config — written by `vmavificient --config`.\n");
@@ -254,8 +261,8 @@ int config_interactive_setup(void) {
 
   /* The TMDB key is sensitive; chmod 600 so it isn't world-readable. */
   if (chmod(config_path, S_IRUSR | S_IWUSR) != 0) {
-    fprintf(stderr, "Warning: could not set 0600 permissions on %s: %s\n",
-            config_path, strerror(errno));
+    fprintf(stderr, "Warning: could not set 0600 permissions on %s: %s\n", config_path,
+            strerror(errno));
   }
 
   printf("\nWrote %s\n", config_path);
