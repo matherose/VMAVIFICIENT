@@ -46,16 +46,14 @@ const char *iso639_to_tesseract_lang(const char *iso639) {
     const char *iso;
     const char *tess;
   } map[] = {
-      {"eng", "eng"},     {"fre", "fra"},     {"fra", "fra"}, {"ger", "deu"},
-      {"deu", "deu"},     {"spa", "spa"},     {"ita", "ita"}, {"por", "por"},
-      {"dut", "nld"},     {"nld", "nld"},     {"rus", "rus"}, {"jpn", "jpn"},
-      {"chi", "chi_sim"}, {"zho", "chi_sim"}, {"kor", "kor"}, {"ara", "ara"},
-      {"pol", "pol"},     {"swe", "swe"},     {"nor", "nor"}, {"dan", "dan"},
-      {"fin", "fin"},     {"tur", "tur"},     {"hin", "hin"}, {"cze", "ces"},
-      {"ces", "ces"},     {"hun", "hun"},     {"rum", "ron"}, {"ron", "ron"},
-      {"tha", "tha"},     {"vie", "vie"},     {"gre", "ell"}, {"ell", "ell"},
-      {"heb", "heb"},     {"ukr", "ukr"},     {"bul", "bul"}, {"hrv", "hrv"},
-      {NULL, NULL},
+      {"eng", "eng"}, {"fre", "fra"}, {"fra", "fra"},     {"ger", "deu"},     {"deu", "deu"},
+      {"spa", "spa"}, {"ita", "ita"}, {"por", "por"},     {"dut", "nld"},     {"nld", "nld"},
+      {"rus", "rus"}, {"jpn", "jpn"}, {"chi", "chi_sim"}, {"zho", "chi_sim"}, {"kor", "kor"},
+      {"ara", "ara"}, {"pol", "pol"}, {"swe", "swe"},     {"nor", "nor"},     {"dan", "dan"},
+      {"fin", "fin"}, {"tur", "tur"}, {"hin", "hin"},     {"cze", "ces"},     {"ces", "ces"},
+      {"hun", "hun"}, {"rum", "ron"}, {"ron", "ron"},     {"tha", "tha"},     {"vie", "vie"},
+      {"gre", "ell"}, {"ell", "ell"}, {"heb", "heb"},     {"ukr", "ukr"},     {"bul", "bul"},
+      {"hrv", "hrv"}, {NULL, NULL},
   };
 
   for (int i = 0; map[i].iso; i++) {
@@ -65,34 +63,38 @@ const char *iso639_to_tesseract_lang(const char *iso639) {
   return iso639;
 }
 
-void build_srt_filename(char *buf, size_t bufsize, const char *base_name,
-                        const char *language, FrenchVariant fv, int is_forced,
-                        int is_sdh) {
+void build_srt_filename(char *buf, size_t bufsize, const char *base_name, const char *language,
+                        FrenchVariant fv, int is_forced, int is_sdh) {
   const char *lang = (language && language[0]) ? language : "und";
   const char *lang_suffix = lang;
+  const char *type_suffix = ".full";
+  const char *variant = "";
 
-  /* French variants — same convention as audio */
+  /* French variants — include variant in filename for clarity */
   if (strcmp(lang, "fre") == 0 || strcmp(lang, "fra") == 0) {
     switch (fv) {
     case FRENCH_VARIANT_VFQ:
       lang_suffix = "fre.ca";
+      variant = ".";
       break;
     case FRENCH_VARIANT_VFI:
       lang_suffix = "fre.vfi";
+      variant = ".";
       break;
     default:
       lang_suffix = "fre.fr";
+      variant = ".";
       break;
     }
   }
 
-  const char *type_suffix = ".full";
+  /* Type suffix */
   if (is_forced)
     type_suffix = ".forced";
   else if (is_sdh)
     type_suffix = ".sdh";
 
-  snprintf(buf, bufsize, "%s.%s%s.srt", base_name, lang_suffix, type_suffix);
+  snprintf(buf, bufsize, "%s.%s%s%s.srt", base_name, lang_suffix, variant, type_suffix);
 }
 
 int is_pgs_subtitle(const TrackInfo *track) {
@@ -104,12 +106,9 @@ int is_pgs_subtitle(const TrackInfo *track) {
 int is_text_subtitle(const TrackInfo *track) {
   if (!track)
     return 0;
-  return (track->codec_id == AV_CODEC_ID_SUBRIP ||
-          track->codec_id == AV_CODEC_ID_ASS ||
-          track->codec_id == AV_CODEC_ID_SSA ||
-          track->codec_id == AV_CODEC_ID_WEBVTT ||
-          track->codec_id == AV_CODEC_ID_MOV_TEXT ||
-          track->codec_id == AV_CODEC_ID_TEXT);
+  return (track->codec_id == AV_CODEC_ID_SUBRIP || track->codec_id == AV_CODEC_ID_ASS ||
+          track->codec_id == AV_CODEC_ID_SSA || track->codec_id == AV_CODEC_ID_WEBVTT ||
+          track->codec_id == AV_CODEC_ID_MOV_TEXT || track->codec_id == AV_CODEC_ID_TEXT);
 }
 
 /* ====================================================================== */
@@ -125,8 +124,7 @@ static void format_srt_time(char *buf, size_t bufsize, int64_t ms) {
   ms %= 60000;
   int seconds = (int)(ms / 1000);
   int millis = (int)(ms % 1000);
-  snprintf(buf, bufsize, "%02d:%02d:%02d,%03d", hours, minutes, seconds,
-           millis);
+  snprintf(buf, bufsize, "%02d:%02d:%02d,%03d", hours, minutes, seconds, millis);
 }
 
 /* ====================================================================== */
@@ -198,8 +196,7 @@ static uint16_t read_be16(const uint8_t *p) {
  * Try to zlib-decompress data. Returns malloc'd buffer + sets *out_size.
  * Returns NULL if data is not zlib-compressed or decompression fails.
  */
-static uint8_t *try_zlib_decompress(const uint8_t *data, int data_size,
-                                    int *out_size) {
+static uint8_t *try_zlib_decompress(const uint8_t *data, int data_size, int *out_size) {
   if (data_size < 2 || data[0] != 0x78)
     return NULL;
 
@@ -234,8 +231,7 @@ static uint8_t *try_zlib_decompress(const uint8_t *data, int data_size,
   return buf;
 }
 
-static void parse_pgs_packet(PgsDisplaySet *ds, const uint8_t *data,
-                             int data_size) {
+static void parse_pgs_packet(PgsDisplaySet *ds, const uint8_t *data, int data_size) {
   /* Try zlib decompression (Matroska content compression) */
   int decomp_size = 0;
   uint8_t *decomp = try_zlib_decompress(data, data_size, &decomp_size);
@@ -365,8 +361,7 @@ static void parse_pgs_packet(PgsDisplaySet *ds, const uint8_t *data,
  *   - 0x00 + 10LLLLLL + CC: L pixels of color CC (1-63)
  *   - 0x00 + 11LLLLLL LLLLLLLL + CC: L pixels of color CC (64-16383)
  */
-static uint8_t *decode_pgs_rle(const uint8_t *rle, size_t rle_size, int w,
-                               int h) {
+static uint8_t *decode_pgs_rle(const uint8_t *rle, size_t rle_size, int w, int h) {
   uint8_t *bitmap = calloc(w * h, 1);
   if (!bitmap)
     return NULL;
@@ -438,8 +433,7 @@ static uint8_t *decode_pgs_rle(const uint8_t *rle, size_t rle_size, int w,
  * Binarizes: luminance Y > 127 → black text (0), else white (255).
  * Transparent pixels (alpha < 128) → white (255).
  */
-static PIX *pgs_bitmap_to_pix(const uint8_t *bitmap, int w, int h,
-                              const PgsPaletteEntry *palette) {
+static PIX *pgs_bitmap_to_pix(const uint8_t *bitmap, int w, int h, const PgsPaletteEntry *palette) {
   PIX *pix = pixCreate(w, h, 8);
   if (!pix)
     return NULL;
@@ -515,8 +509,7 @@ static PIX *prepare_pix_for_ocr(PIX *src) {
 
   /* Otsu binarization: produces a clean 1bpp image that Tesseract
      handles much better than raw grayscale for glyph discrimination */
-  PIX *binary = pixOtsuThreshOnBackgroundNorm(padded, NULL, 10, 15, 100, 50,
-                                              255, 2, 2, 0.1, NULL);
+  PIX *binary = pixOtsuThreshOnBackgroundNorm(padded, NULL, 10, 15, 100, 50, 255, 2, 2, 0.1, NULL);
   if (binary) {
     pixDestroy(&padded);
 
@@ -544,8 +537,8 @@ static void strip_whitespace(char *text) {
     return;
 
   size_t len = strlen(text);
-  while (len > 0 && (text[len - 1] == ' ' || text[len - 1] == '\n' ||
-                     text[len - 1] == '\r' || text[len - 1] == '\t'))
+  while (len > 0 && (text[len - 1] == ' ' || text[len - 1] == '\n' || text[len - 1] == '\r' ||
+                     text[len - 1] == '\t'))
     text[--len] = '\0';
 
   char *start = text;
@@ -560,12 +553,9 @@ static void strip_whitespace(char *text) {
 /*  Main conversion function                                              */
 /* ====================================================================== */
 
-SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
-                                         const TrackInfo *track,
-                                         const char *output_path,
-                                         const char *tesseract_lang) {
-  SubtitleConvertResult result = {
-      .error = 0, .skipped = 0, .subtitle_count = 0};
+SubtitleConvertResult convert_pgs_to_srt(const char *input_path, const TrackInfo *track,
+                                         const char *output_path, const char *tesseract_lang) {
+  SubtitleConvertResult result = {.error = 0, .skipped = 0, .subtitle_count = 0};
   snprintf(result.output_path, sizeof(result.output_path), "%s", output_path);
 
   /* Skip if output already exists. */
@@ -601,8 +591,7 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
 
   TessBaseAPI *tess = TessBaseAPICreate();
   if (TessBaseAPIInit3(tess, tessdata_path, tess_lang) != 0) {
-    fprintf(stderr, "  OCR Error: Tesseract init failed for lang '%s'\n",
-            tess_lang);
+    fprintf(stderr, "  OCR Error: Tesseract init failed for lang '%s'\n", tess_lang);
     fprintf(stderr, "  Make sure tessdata is installed for this language.\n");
     TessBaseAPIDelete(tess);
     result.error = -1;
@@ -635,8 +624,7 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
   }
 
   if (track->index < 0 || (unsigned)track->index >= ifmt_ctx->nb_streams) {
-    fprintf(stderr, "  OCR Error: stream index %d out of range\n",
-            track->index);
+    fprintf(stderr, "  OCR Error: stream index %d out of range\n", track->index);
     result.error = -1;
     goto cleanup;
   }
@@ -685,8 +673,7 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
     /* Get PTS in ms */
     int64_t pts_ms = 0;
     if (pkt->pts != AV_NOPTS_VALUE)
-      pts_ms =
-          av_rescale_q(pkt->pts, sub_stream->time_base, (AVRational){1, 1000});
+      pts_ms = av_rescale_q(pkt->pts, sub_stream->time_base, (AVRational){1, 1000});
 
     /* Parse PGS segments from this packet */
     parse_pgs_packet(&ds, pkt->data, pkt->size);
@@ -708,8 +695,7 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
             char start_str[32], end_str[32];
             format_srt_time(start_str, sizeof(start_str), prev_pts_ms);
             format_srt_time(end_str, sizeof(end_str), end_ms);
-            fprintf(srt_fp, "%d\n%s --> %s\n%s\n\n", sub_index, start_str,
-                    end_str, text);
+            fprintf(srt_fp, "%d\n%s --> %s\n%s\n\n", sub_index, start_str, end_str, text);
           }
         }
         if (text)
@@ -720,11 +706,9 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
       }
 
       /* Decode RLE bitmap */
-      uint8_t *bitmap =
-          decode_pgs_rle(ds.rle_data, ds.rle_size, ds.obj_width, ds.obj_height);
+      uint8_t *bitmap = decode_pgs_rle(ds.rle_data, ds.rle_size, ds.obj_width, ds.obj_height);
       if (bitmap) {
-        PIX *pix =
-            pgs_bitmap_to_pix(bitmap, ds.obj_width, ds.obj_height, ds.palette);
+        PIX *pix = pgs_bitmap_to_pix(bitmap, ds.obj_width, ds.obj_height, ds.palette);
         free(bitmap);
 
         if (pix) {
@@ -742,8 +726,7 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
       ds.valid = 0;
     } else if (!ds.valid && prev_pix && prev_pts_ms >= 0) {
       /* Display set with no bitmap = clearing event. End the previous sub. */
-      if (ds.composition_state == PCS_NORMAL ||
-          ds.composition_state == PCS_ACQ_POINT ||
+      if (ds.composition_state == PCS_NORMAL || ds.composition_state == PCS_ACQ_POINT ||
           ds.composition_state == PCS_EPOCH_START) {
         int64_t end_ms = pts_ms;
 
@@ -757,8 +740,7 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
             char start_str[32], end_str[32];
             format_srt_time(start_str, sizeof(start_str), prev_pts_ms);
             format_srt_time(end_str, sizeof(end_str), end_ms);
-            fprintf(srt_fp, "%d\n%s --> %s\n%s\n\n", sub_index, start_str,
-                    end_str, text);
+            fprintf(srt_fp, "%d\n%s --> %s\n%s\n\n", sub_index, start_str, end_str, text);
           }
         }
         if (text)
@@ -796,8 +778,7 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
         char start_str[32], end_str[32];
         format_srt_time(start_str, sizeof(start_str), prev_pts_ms);
         format_srt_time(end_str, sizeof(end_str), end_ms);
-        fprintf(srt_fp, "%d\n%s --> %s\n%s\n\n", sub_index, start_str, end_str,
-                text);
+        fprintf(srt_fp, "%d\n%s --> %s\n%s\n\n", sub_index, start_str, end_str, text);
       }
     }
     if (text)
