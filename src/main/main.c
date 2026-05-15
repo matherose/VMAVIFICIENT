@@ -1726,8 +1726,9 @@ int main(int argc, char *argv[]) {
              as external subtitles, overriding the embedded defaults. */
           int removed = 0;
           if (mr.error == 0) {
-            /* For --companion-hd, audio/subtitle intermediates are reused by
-               the HD mux; defer their removal to the HD cleanup pass. */
+            /* For --companion-hd and --scale-to-hd, audio/subtitle intermediates
+               are reused by the HD mux; defer their removal to the HD cleanup pass.
+               Only the 4K video.mkv and RPU (if not DV) are removed here. */
             if (!companion_hd) {
               for (int i = 0; i < opus_count; i++)
                 if (remove(opus_paths[i]) == 0)
@@ -1753,8 +1754,10 @@ int main(int argc, char *argv[]) {
                        removed == 1 ? "" : "s");
               ui_stage_ok("Cleanup", detail);
             }
-            /* Clean up cache directory when everything succeeded */
-            if (mr.error == 0)
+            /* Clean up cache directory when everything succeeded
+             * For companion-hd, defer cleanup to the HD mux pass (audio/subtitle
+             * intermediates are shared between 4K and HD muxes). */
+            if (mr.error == 0 && !companion_hd)
               cleanup_cache_dir();
           }
 
@@ -2050,9 +2053,9 @@ int main(int argc, char *argv[]) {
 
           int hd_removed = 0;
           if (hd_mr.error == 0) {
-            /* For scale-to-hd, remove shared audio/subtitle intermediates
-               (companion-hd already removed them in the 4K cleanup pass). */
-            if (scale_to_hd) {
+            /* For scale-to-hd and companion-hd, remove shared audio/subtitle
+               intermediates after HD mux. */
+            if (scale_to_hd || companion_hd) {
               for (int i = 0; i < opus_count; i++)
                 if (remove(opus_paths[i]) == 0)
                   hd_removed++;
