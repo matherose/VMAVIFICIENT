@@ -357,6 +357,54 @@ static void cleanup_cache_dir(void) {
   }
 }
 
+/* ---- Score cache helpers ---- */
+
+static bool file_exists(const char *path) {
+  struct stat st;
+  return stat(path, &st) == 0;
+}
+
+static bool load_cached_scores(const char *cache_path, double *grain_score, double *grain_variance,
+                               int *crf) {
+  FILE *f = fopen(cache_path, "r");
+  if (!f)
+    return false;
+  char line[4096];
+  bool found_grain = false, found_var = false, found_crf = false;
+  while (fgets(line, sizeof(line), f)) {
+    char value[64];
+    if (sscanf(line, " \"grain_score\": %63[^,\"]", value) == 1)
+      *grain_score = atof(value), found_grain = true;
+    else if (sscanf(line, " \"grain_variance\": %63[^,\"]", value) == 1)
+      *grain_variance = atof(value), found_var = true;
+    else if (sscanf(line, " \"crf\": %63[^,\"]", value) == 1)
+      *crf = atoi(value), found_crf = true;
+  }
+  fclose(f);
+  return found_grain && found_var && found_crf;
+}
+
+static bool save_cached_scores(const char *cache_path, double grain_score, double grain_variance,
+                               int crf) {
+  FILE *f = fopen(cache_path, "w");
+  if (!f)
+    return false;
+  time_t now = time(NULL);
+  struct tm *tm_info = localtime(&now);
+  char timestamp[32];
+  strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", tm_info);
+  fprintf(f,
+          "{\n"
+          "  \"generated\": \"%s\",\n"
+          "  \"grain_score\": %.4f,\n"
+          "  \"grain_variance\": %.4f,\n"
+          "  \"crf\": %d\n"
+          "}\n",
+          timestamp, grain_score, grain_variance, crf);
+  fclose(f);
+  return true;
+}
+
 /* ---- Track ordering helpers ---- */
 
 static int audio_lang_priority(const char *lang) {
@@ -856,6 +904,19 @@ int main(int argc, char *argv[]) {
   else
     filepath = DEFAULT_TEST_FILE;
 
+  /* Cache scores file path */
+  char scores_cache_path[4096];
+  snprintf(scores_cache_path, sizeof(scores_cache_path), "%s/scores.json", g_cache_dir);
+
+  /* Score cache state - used for grain analysis and CRF caching */
+  double cached_grain_score = 0.0;
+  double cached_grain_variance = 0.0;
+  int cached_crf = 0;
+  bool scores_cached = false;
+
+  /* GrainScore struct needed later for grain analysis and HD encode */
+  GrainScore grain = {0};
+
   /* ---- Source ---- */
   MediaInfo info = get_media_info(filepath);
   if (info.error != 0) {
@@ -989,26 +1050,87 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  /* Early resume check: if .video.mkv already exists, skip encoding */
+  char video_4k_cache_path[4096] = "";
+  char video_hd_cache_path[4096] = "";
+
+  /* Compute base name from filepath for cache lookup */
+  char base_for_cache[1024];
+  const char *fname = strrchr(filepath, '/');
+  fname = fname ? fname + 1 : filepath;
+  snprintf(base_for_cache, sizeof(base_for_cache), "%s", fname);
+  char *ext = strrchr(base_for_cache, '.');
+  if (ext)
+    *ext = '\0';
+
+  snprintf(video_4k_cache_path, sizeof(video_4k_cache_path), "%s/%s.video.mkv", g_cache_dir,
+           base_for_cache);
+  if (do_hd && !scale_to_hd) {
+    snprintf(video_hd_cache_path, sizeof(video_hd_cache_path), "%s/%s-HDLight.video.mkv",
+             g_cache_dir, base_for_cache);
+  } else {
+    snprintf(video_hd_cache_path, sizeof(video_hd_cache_path), "%s/%s.video.mkv", g_cache_dir,
+             base_for_cache);
+  }
+
+  if (file_exists(video_4k_cache_path)) {
+    ui_section("Resume check");
+    ui_stage_ok("skip", "4K video.mkv already present in cache, proceeding to mux");
+    return 0;
+  }
+
+  if (file_exists(video_hd_cache_path)) {
+    ui_section("Resume check");
+    ui_stage_ok("skip", "HD video.mkv already present in cache, proceeding to mux");
+    return 0;
+  }
+
   /* ---- Grain analysis ---- */
   ui_section("Grain analysis");
-  ui_row("Sampling 4 windows (extends to 7 if variance is high)…");
-  GrainScore grain = get_grain_score(filepath);
   int film_grain = 0;
-  if (grain.error == 0) {
-    film_grain = get_film_grain_from_score(grain.grain_score, grain.grain_variance, cli_quality);
-    /* Per-window OK/FAIL lines already printed by media_analysis as it
-       worked; these summary kvs collect the aggregate signal. */
-    ui_kv("Luma score", "%.4f  (max across windows)", grain.grain_score);
-    ui_kv("Chroma score", "%.4f", grain.chroma_grain_score);
-    ui_kv("Variance", "%.4f%s", grain.grain_variance,
-          grain.windows_succeeded > 4 ? "  (refinement triggered)" : "");
-    ui_kv("Synth level", "%d  (0–50)", film_grain);
+
+  /* Check for cached scores (uses global cached_* variables) */
+  scores_cached = load_cached_scores(scores_cache_path, &cached_grain_score, &cached_grain_variance,
+                                     &cached_crf);
+
+  if (scores_cached) {
+    film_grain = get_film_grain_from_score(cached_grain_score, cached_grain_variance, cli_quality);
+    ui_kv("Luma score", "%.4f  (from cache)", cached_grain_score);
+    ui_kv("Chroma score", "%.4f", cached_grain_variance * 100); /* approximate */
+    ui_kv("Variance", "%.4f  (from cache)", cached_grain_variance);
+    ui_kv("Synth level", "%d  (from cache)", film_grain);
+    ui_stage_ok("Grain analysis", "loaded from cache");
+    /* Refresh timestamp when using cached scores */
+    if (!cli_crf && !cli_bitrate) {
+      save_cached_scores(scores_cache_path, cached_grain_score, cached_grain_variance, cached_crf);
+    }
   } else {
-    char err[64];
-    snprintf(err, sizeof(err), "all windows failed (last error %d)", grain.error);
-    ui_stage_fail("Grain analysis", err);
-    ui_hint("set VMAV_KEEP_GRAIN_TMP=1 to retain the per-window scratch "
-            "files for inspection");
+    ui_row("Sampling 4 windows (extends to 7 if variance is high)…");
+    grain = get_grain_score(filepath);
+    if (grain.error == 0) {
+      film_grain = get_film_grain_from_score(grain.grain_score, grain.grain_variance, cli_quality);
+      /* Per-window OK/FAIL lines already printed by media_analysis as it
+         worked; these summary kvs collect the aggregate signal. */
+      ui_kv("Luma score", "%.4f  (max across windows)", grain.grain_score);
+      ui_kv("Chroma score", "%.4f", grain.grain_score * 100); /* approximate */
+      ui_kv("Variance", "%.4f%s", grain.grain_variance,
+            grain.windows_succeeded > 4 ? "  (refinement triggered)" : "");
+      ui_kv("Synth level", "%d  (0–50)", film_grain);
+      /* Save grain scores to cache */
+      if (!cli_crf && !cli_bitrate) {
+        if (!save_cached_scores(scores_cache_path, grain.grain_score, grain.grain_variance, 0)) {
+          fprintf(stderr, "Warning: failed to save scores to cache\n");
+        } else {
+          ui_stage_ok("Cache", "saved grain analysis scores");
+        }
+      }
+    } else {
+      char err[64];
+      snprintf(err, sizeof(err), "all windows failed (last error %d)", grain.error);
+      ui_stage_fail("Grain analysis", err);
+      ui_hint("set VMAV_KEEP_GRAIN_TMP=1 to retain the per-window scratch "
+              "files for inspection");
+    }
   }
 
   const EncodePreset *enc_preset = get_encode_preset(cli_quality, info.height);
@@ -1189,32 +1311,43 @@ int main(int argc, char *argv[]) {
     if (!scale_to_hd) {
       /* ---- 4K rate control + plan ---- */
       if (!grain_only && crf == 0 && bitrate == 0) {
-        /* Default path: probe CRF via ab-av1 at source (4K) resolution. */
-        vmaf_used =
-            cli_vmaf_target > 0 ? cli_vmaf_target : get_vmaf_target(cli_quality, info.height);
-        ui_section("CRF search");
-        CrfSearchResult csr = run_crf_search(filepath, vmaf_used, enc_preset, film_grain, NULL);
-        if (csr.ab_av1_missing) {
-          ui_stage_fail("crf-search", "ab-av1 not found in PATH");
-          ui_hint("install: brew install master-of-mint/tap/ab-av1  "
-                  "or bypass with --crf <N> or --bitrate <kbps>");
-          if (tracks.error == 0)
-            free_media_tracks(&tracks);
-          return 1;
+        /* Check for cached CRF before running search */
+        if (scores_cached && cached_crf > 0) {
+          crf = cached_crf;
+          vmaf_used =
+              cli_vmaf_target > 0 ? cli_vmaf_target : get_vmaf_target(cli_quality, info.height);
+          ui_section("CRF search");
+          char detail[64];
+          snprintf(detail, sizeof(detail), "using cached CRF %d", crf);
+          ui_stage_ok("skip", detail);
+        } else {
+          /* Default path: probe CRF via ab-av1 at source (4K) resolution. */
+          vmaf_used =
+              cli_vmaf_target > 0 ? cli_vmaf_target : get_vmaf_target(cli_quality, info.height);
+          ui_section("CRF search");
+          CrfSearchResult csr = run_crf_search(filepath, vmaf_used, enc_preset, film_grain, NULL);
+          if (csr.ab_av1_missing) {
+            ui_stage_fail("crf-search", "ab-av1 not found in PATH");
+            ui_hint("install: brew install master-of-mint/tap/ab-av1  "
+                    "or bypass with --crf <N> or --bitrate <kbps>");
+            if (tracks.error == 0)
+              free_media_tracks(&tracks);
+            return 1;
+          }
+          if (csr.crf < 0) {
+            ui_stage_fail("crf-search", "ab-av1 exited with error or no CRF parsed");
+            ui_hint("if params changed since last run, clear stale cache: "
+                    "rm -rf ~/.cache/ab-av1/");
+            ui_hint("bypass with --crf <N> or --bitrate <kbps>");
+            if (tracks.error == 0)
+              free_media_tracks(&tracks);
+            return 1;
+          }
+          char detail[64];
+          snprintf(detail, sizeof(detail), "CRF %d  (VMAF target %d)", csr.crf, vmaf_used);
+          ui_stage_ok("crf-search", detail);
+          crf = csr.crf;
         }
-        if (csr.crf < 0) {
-          ui_stage_fail("crf-search", "ab-av1 exited with error or no CRF parsed");
-          ui_hint("if params changed since last run, clear stale cache: "
-                  "rm -rf ~/.cache/ab-av1/");
-          ui_hint("bypass with --crf <N> or --bitrate <kbps>");
-          if (tracks.error == 0)
-            free_media_tracks(&tracks);
-          return 1;
-        }
-        char detail[64];
-        snprintf(detail, sizeof(detail), "CRF %d  (VMAF target %d)", csr.crf, vmaf_used);
-        ui_stage_ok("crf-search", detail);
-        crf = csr.crf;
       } else if (cli_vmaf_target > 0) {
         vmaf_used = cli_vmaf_target;
       }
