@@ -146,7 +146,8 @@ static bool title_indicates_sdh(const char *title) {
 static bool title_indicates_karaoke(const char *title) {
   if (!title || !title[0])
     return false;
-  return str_contains_ci(title, "karao") || str_contains_ci(title, "karaok");
+  return str_contains_ci(title, "karao") || str_contains_ci(title, "karaok") ||
+         str_contains_ci(title, "chanson") || str_contains_ci(title, "karaoké");
 }
 
 /**
