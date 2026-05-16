@@ -1022,6 +1022,57 @@ int main(int argc, char *argv[]) {
     else
       ui_kv("Subtitles", "%d source track%s", tracks.subtitle_count,
             tracks.subtitle_count == 1 ? "" : "s");
+
+    // Pre-compute which PGS subtitles will be skipped (already have text SRT)
+    // Two-pass: first collect all SRT tracks, then mark PGS as skipped
+    bool pgs_skipped[256] = {0}; // max 256 subtitle tracks
+    int pgs_skipped_count = 0;
+
+    // Track SRTs we've seen: (lang, variant, forced, sdh) for skip detection
+    int srt_seen_count = 0;
+    char srt_seen_lang[64][64];
+    int srt_seen_variant[64]; // FRENCH_VARIANT_* or 0 for non-French
+    int srt_seen_forced[64];
+    int srt_seen_sdh[64];
+
+    // PASS 1: Collect all SRT tracks
+    for (int i = 0; i < tracks.subtitle_count; i++) {
+      TrackInfo *sub = &tracks.subtitles[i];
+      if (sub->is_karaoke)
+        continue;
+      const char *lang = sub->language[0] ? sub->language : "und";
+
+      if (is_text_subtitle(sub)) {
+        if (srt_seen_count < 64) {
+          snprintf(srt_seen_lang[srt_seen_count], sizeof(srt_seen_lang[0]), "%s", lang);
+          srt_seen_variant[srt_seen_count] = detect_track_french_variant(sub);
+          srt_seen_forced[srt_seen_count] = sub->is_forced;
+          srt_seen_sdh[srt_seen_count] = sub->is_sdh;
+          srt_seen_count++;
+        }
+      }
+    }
+
+    // PASS 2: Mark PGS subtitles that have matching SRT (anywhere in list)
+    for (int i = 0; i < tracks.subtitle_count; i++) {
+      TrackInfo *sub = &tracks.subtitles[i];
+      if (sub->is_karaoke)
+        continue;
+
+      if (is_pgs_subtitle(sub)) {
+        const char *lang = sub->language[0] ? sub->language : "und";
+        int pgs_variant = detect_track_french_variant(sub);
+        for (int j = 0; j < srt_seen_count; j++) {
+          if (strcmp(srt_seen_lang[j], lang) == 0 && srt_seen_variant[j] == pgs_variant &&
+              srt_seen_forced[j] == sub->is_forced && srt_seen_sdh[j] == sub->is_sdh) {
+            pgs_skipped[sub->index] = true;
+            pgs_skipped_count++;
+            break;
+          }
+        }
+      }
+    }
+
     if (n_visible > 0) {
       // clang-format off
       ui_row("  \xe2\x94\x8c\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xac\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xac\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xac\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xac\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x90");
@@ -1030,16 +1081,33 @@ int main(int argc, char *argv[]) {
       ui_row("  \xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xa4");
       // clang-format on
       for (int i = 0; i < tracks.subtitle_count; i++) {
-        if (tracks.subtitles[i].is_karaoke)
-          continue;
         const char *type = tracks.subtitles[i].is_forced ? "forced"
                            : tracks.subtitles[i].is_sdh  ? "sdh"
                                                          : "full";
         const char *lang = tracks.subtitles[i].language[0] ? tracks.subtitles[i].language : "und";
+        const char *selection = "  ";
+
+        // Determine selection marker
+        if (tracks.subtitles[i].is_karaoke) {
+          // Karaoke tracks: Not selected (×)
+          selection = "\xc3\x97 ";
+        } else if (is_text_subtitle(&tracks.subtitles[i])) {
+          // Text SRT tracks: Selected for direct extraction (→)
+          selection = "\xe2\x86\x92 ";
+        } else if (is_pgs_subtitle(&tracks.subtitles[i])) {
+          // PGS tracks: check if skipped or needs OCR
+          if (pgs_skipped[tracks.subtitles[i].index]) {
+            // Has matching SRT - not selected (×)
+            selection = "\xc3\x97 ";
+          } else {
+            // Needs OCR conversion (O)
+            selection = "O ";
+          }
+        }
         // clang-format off
         ui_row(
-            "  \xe2\x94\x82 %2d \xe2\x94\x82 %-3s \xe2\x94\x82 %-3s \xe2\x94\x82 %-6s \xe2\x94\x82 %-20.20s \xe2\x94\x82",
-            tracks.subtitles[i].index, lang,
+            "%s\xe2\x94\x82 %2d \xe2\x94\x82 %-3s \xe2\x94\x82 %-3s \xe2\x94\x82 %-6s \xe2\x94\x82 %-20.20s \xe2\x94\x82",
+            selection, tracks.subtitles[i].index, lang,
             codec_short(tracks.subtitles[i].codec), type,
             tracks.subtitles[i].name);
         // clang-format on
@@ -1047,6 +1115,41 @@ int main(int argc, char *argv[]) {
       // clang-format off
       ui_row("  \xe2\x94\x94\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xb4\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xb4\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xb4\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xb4\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x98");
       // clang-format on
+
+      // Count subtitle types for display:
+      // - text_count: SRT tracks (selected for direct extraction)
+      // - pgs_count: PGS tracks that need OCR (not skipped)
+      int text_count = 0, pgs_ocr_count = 0;
+      for (int i = 0; i < tracks.subtitle_count; i++) {
+        if (tracks.subtitles[i].is_karaoke)
+          continue;
+        if (is_text_subtitle(&tracks.subtitles[i]))
+          text_count++;
+        else if (is_pgs_subtitle(&tracks.subtitles[i]) && !pgs_skipped[tracks.subtitles[i].index])
+          pgs_ocr_count++;
+      }
+      if (text_count > 0 || pgs_ocr_count > 0) {
+        char detail[128] = "";
+        size_t pos = 0;
+        if (text_count > 0) {
+          int n = snprintf(detail + pos, sizeof(detail) - pos, "%d direct SRT", text_count);
+          if (n > 0 && (size_t)n < sizeof(detail) - pos)
+            pos += (size_t)n;
+        }
+        if (pgs_ocr_count > 0) {
+          int n = snprintf(detail + pos, sizeof(detail) - pos,
+                           pos > 0 ? ", %d OCR PGS" : "%d OCR PGS", pgs_ocr_count);
+          if (n > 0 && (size_t)n < sizeof(detail) - pos)
+            pos += (size_t)n;
+          if (pgs_skipped_count > 0) {
+            n = snprintf(detail + pos, sizeof(detail) - pos, " (%d already available)",
+                         pgs_skipped_count);
+            if (n > 0 && (size_t)n < sizeof(detail) - pos)
+              pos += (size_t)n;
+          }
+        }
+        ui_kv("Processing", "%s", detail);
+      }
     }
   }
 
