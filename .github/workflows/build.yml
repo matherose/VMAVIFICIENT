@@ -23,7 +23,9 @@ jobs:
       - name: Install clang-format
         run: sudo apt-get update && sudo apt-get install -y clang-format-18
       - name: Check formatting
-        run: clang-format-18 --dry-run -Werror src/*.c include/*.h
+        run: |
+          clang-format-18 --dry-run -Werror \
+            $(find src include -name "*.c" -o -name "*.h")
 
   # ── Build: macOS + Homebrew system deps ──────────────────────────
   # Verifies the recommended build path (VMAV_USE_SYSTEM_DEPS=ON, the
@@ -44,8 +46,8 @@ jobs:
       - name: Install build + runtime deps
         run: |
           brew install \
-            ninja pkg-config nasm \
-            ffmpeg opus dovi_tool tesseract leptonica \
+            ninja pkg-config nasm meson \
+            ffmpeg opus dovi_tool tesseract leptonica libvmaf \
             jpeg-turbo libpng libtiff cjson openssl@3
 
       - name: Install Rust toolchain
@@ -111,7 +113,7 @@ jobs:
       - name: Install runtime deps (same as build)
         run: |
           brew install \
-            ffmpeg opus dovi_tool tesseract leptonica \
+            ffmpeg opus dovi_tool tesseract leptonica libvmaf \
             jpeg-turbo libpng libtiff cjson openssl@3
 
       - name: Download build artifact
@@ -167,7 +169,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: brew install ninja pkg-config nasm ffmpeg
+        run: brew install ninja pkg-config nasm meson ffmpeg
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -231,7 +233,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install build tools
-        run: brew install ninja pkg-config nasm ffmpeg
+        run: brew install ninja pkg-config nasm meson ffmpeg
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

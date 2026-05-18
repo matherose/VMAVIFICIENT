@@ -44,15 +44,15 @@
 /*  Tuning                                                                 */
 /* ====================================================================== */
 
-#define PROBE_SAMPLE_FRAMES   480   /* ~20s @ 24fps (matches ab-av1 default). */
-#define PROBE_INITIAL_CRF     30
-#define PROBE_MAX_TRIALS      4
-#define PROBE_CONVERGE_VMAF   0.5   /* |vmaf - target| <= this => done */
-#define PROBE_ESCALATE_VMAF   2.0   /* 1-sample acceptance band */
-#define PROBE_DEFAULT_SLOPE   0.6   /* VMAF drop per +1 CRF, initial guess */
+#define PROBE_SAMPLE_FRAMES 480 /* ~20s @ 24fps (matches ab-av1 default). */
+#define PROBE_INITIAL_CRF 30
+#define PROBE_MAX_TRIALS 4
+#define PROBE_CONVERGE_VMAF 0.5 /* |vmaf - target| <= this => done */
+#define PROBE_ESCALATE_VMAF 2.0 /* 1-sample acceptance band */
+#define PROBE_DEFAULT_SLOPE 0.6 /* VMAF drop per +1 CRF, initial guess */
 #define PROBE_LIBVMAF_THREADS 4
-#define PROBE_CRF_MIN         18
-#define PROBE_CRF_MAX         50
+#define PROBE_CRF_MIN 18
+#define PROBE_CRF_MAX 50
 
 /* ====================================================================== */
 /*  Helpers                                                                */
@@ -60,8 +60,10 @@
 
 static int round_clamp(double x, int lo, int hi) {
   int v = (int)lround(x);
-  if (v < lo) v = lo;
-  if (v > hi) v = hi;
+  if (v < lo)
+    v = lo;
+  if (v > hi)
+    v = hi;
   return v;
 }
 
@@ -71,25 +73,30 @@ static int round_clamp(double x, int lo, int hi) {
 
 typedef struct {
   AVFormatContext *ifmt;
-  AVCodecContext  *dec;
-  int              video_idx;
-  AVRational       fps;
-  int64_t          total_frames;
-  int              width;
-  int              height;
+  AVCodecContext *dec;
+  int video_idx;
+  AVRational fps;
+  int64_t total_frames;
+  int width;
+  int height;
 } Source;
 
 static void close_source(Source *s) {
-  if (!s) return;
-  if (s->dec)  avcodec_free_context(&s->dec);
-  if (s->ifmt) avformat_close_input(&s->ifmt);
+  if (!s)
+    return;
+  if (s->dec)
+    avcodec_free_context(&s->dec);
+  if (s->ifmt)
+    avformat_close_input(&s->ifmt);
   memset(s, 0, sizeof(*s));
 }
 
 static int open_source(const char *path, Source *s) {
   memset(s, 0, sizeof(*s));
-  if (avformat_open_input(&s->ifmt, path, NULL, NULL) < 0) return -1;
-  if (avformat_find_stream_info(s->ifmt, NULL) < 0) return -1;
+  if (avformat_open_input(&s->ifmt, path, NULL, NULL) < 0)
+    return -1;
+  if (avformat_find_stream_info(s->ifmt, NULL) < 0)
+    return -1;
 
   s->video_idx = -1;
   for (unsigned i = 0; i < s->ifmt->nb_streams; i++) {
@@ -98,27 +105,32 @@ static int open_source(const char *path, Source *s) {
       break;
     }
   }
-  if (s->video_idx < 0) return -1;
+  if (s->video_idx < 0)
+    return -1;
 
   AVStream *st = s->ifmt->streams[s->video_idx];
   const AVCodec *codec = avcodec_find_decoder(st->codecpar->codec_id);
-  if (!codec) return -1;
+  if (!codec)
+    return -1;
 
   s->dec = avcodec_alloc_context3(codec);
-  if (!s->dec) return -1;
-  if (avcodec_parameters_to_context(s->dec, st->codecpar) < 0) return -1;
+  if (!s->dec)
+    return -1;
+  if (avcodec_parameters_to_context(s->dec, st->codecpar) < 0)
+    return -1;
   s->dec->thread_count = 0;
-  if (avcodec_open2(s->dec, codec, NULL) < 0) return -1;
+  if (avcodec_open2(s->dec, codec, NULL) < 0)
+    return -1;
 
   s->fps = av_guess_frame_rate(s->ifmt, st, NULL);
-  if (s->fps.num == 0) s->fps = (AVRational){24000, 1001};
-  s->width  = s->dec->width;
+  if (s->fps.num == 0)
+    s->fps = (AVRational){24000, 1001};
+  s->width = s->dec->width;
   s->height = s->dec->height;
   s->total_frames =
       st->nb_frames > 0
           ? st->nb_frames
-          : (int64_t)(av_q2d(s->fps) *
-                      ((double)s->ifmt->duration / (double)AV_TIME_BASE));
+          : (int64_t)(av_q2d(s->fps) * ((double)s->ifmt->duration / (double)AV_TIME_BASE));
   return 0;
 }
 
@@ -137,16 +149,18 @@ static int seek_to_frame(Source *s, int64_t target_frame) {
 /* ====================================================================== */
 
 typedef struct {
-  AVFilterGraph   *graph;
+  AVFilterGraph *graph;
   AVFilterContext *src;
   AVFilterContext *sink;
-  int              out_w;
-  int              out_h;
+  int out_w;
+  int out_h;
 } VFilter;
 
 static void close_vfilter(VFilter *vf) {
-  if (vf && vf->graph) avfilter_graph_free(&vf->graph);
-  if (vf) memset(vf, 0, sizeof(*vf));
+  if (vf && vf->graph)
+    avfilter_graph_free(&vf->graph);
+  if (vf)
+    memset(vf, 0, sizeof(*vf));
 }
 
 /**
@@ -156,58 +170,62 @@ static int build_vfilter(Source *s, const char *vfilter_expr, VFilter *vf) {
   memset(vf, 0, sizeof(*vf));
 
   vf->graph = avfilter_graph_alloc();
-  if (!vf->graph) return -1;
+  if (!vf->graph)
+    return -1;
 
   AVStream *st = s->ifmt->streams[s->video_idx];
   AVRational tb = st->time_base;
-  AVRational sar = s->dec->sample_aspect_ratio.num ? s->dec->sample_aspect_ratio
-                                                   : (AVRational){1, 1};
+  AVRational sar =
+      s->dec->sample_aspect_ratio.num ? s->dec->sample_aspect_ratio : (AVRational){1, 1};
 
   char src_args[256];
   snprintf(src_args, sizeof(src_args),
-           "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d",
-           s->dec->width, s->dec->height, s->dec->pix_fmt, tb.num, tb.den,
-           sar.num, sar.den);
+           "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=%d/%d", s->dec->width,
+           s->dec->height, s->dec->pix_fmt, tb.num, tb.den, sar.num, sar.den);
 
-  const AVFilter *bsrc  = avfilter_get_by_name("buffer");
+  const AVFilter *bsrc = avfilter_get_by_name("buffer");
   const AVFilter *bsink = avfilter_get_by_name("buffersink");
-  if (!bsrc || !bsink) return -1;
+  if (!bsrc || !bsink)
+    return -1;
 
-  if (avfilter_graph_create_filter(&vf->src, bsrc, "in", src_args, NULL,
-                                   vf->graph) < 0) return -1;
-  if (avfilter_graph_create_filter(&vf->sink, bsink, "out", NULL, NULL,
-                                   vf->graph) < 0) return -1;
+  if (avfilter_graph_create_filter(&vf->src, bsrc, "in", src_args, NULL, vf->graph) < 0)
+    return -1;
+  if (avfilter_graph_create_filter(&vf->sink, bsink, "out", NULL, NULL, vf->graph) < 0)
+    return -1;
 
   enum AVPixelFormat pixfmts[] = {AV_PIX_FMT_YUV420P10LE, AV_PIX_FMT_NONE};
-  if (av_opt_set_int_list(vf->sink, "pix_fmts", pixfmts, AV_PIX_FMT_NONE,
-                          AV_OPT_SEARCH_CHILDREN) < 0) return -1;
+  if (av_opt_set_int_list(vf->sink, "pix_fmts", pixfmts, AV_PIX_FMT_NONE, AV_OPT_SEARCH_CHILDREN) <
+      0)
+    return -1;
 
   if (!vfilter_expr || !*vfilter_expr) {
-    if (avfilter_link(vf->src, 0, vf->sink, 0) < 0) return -1;
+    if (avfilter_link(vf->src, 0, vf->sink, 0) < 0)
+      return -1;
   } else {
     AVFilterInOut *outputs = avfilter_inout_alloc();
-    AVFilterInOut *inputs  = avfilter_inout_alloc();
+    AVFilterInOut *inputs = avfilter_inout_alloc();
     if (!outputs || !inputs) {
       avfilter_inout_free(&outputs);
       avfilter_inout_free(&inputs);
       return -1;
     }
-    outputs->name       = av_strdup("in");
+    outputs->name = av_strdup("in");
     outputs->filter_ctx = vf->src;
-    outputs->pad_idx    = 0;
-    outputs->next       = NULL;
-    inputs->name       = av_strdup("out");
+    outputs->pad_idx = 0;
+    outputs->next = NULL;
+    inputs->name = av_strdup("out");
     inputs->filter_ctx = vf->sink;
-    inputs->pad_idx    = 0;
-    inputs->next       = NULL;
-    int r = avfilter_graph_parse_ptr(vf->graph, vfilter_expr, &inputs,
-                                     &outputs, NULL);
+    inputs->pad_idx = 0;
+    inputs->next = NULL;
+    int r = avfilter_graph_parse_ptr(vf->graph, vfilter_expr, &inputs, &outputs, NULL);
     avfilter_inout_free(&outputs);
     avfilter_inout_free(&inputs);
-    if (r < 0) return -1;
+    if (r < 0)
+      return -1;
   }
 
-  if (avfilter_graph_config(vf->graph, NULL) < 0) return -1;
+  if (avfilter_graph_config(vf->graph, NULL) < 0)
+    return -1;
 
   vf->out_w = av_buffersink_get_w(vf->sink);
   vf->out_h = av_buffersink_get_h(vf->sink);
@@ -218,16 +236,14 @@ static int build_vfilter(Source *s, const char *vfilter_expr, VFilter *vf) {
 /*  Sample selection                                                       */
 /* ====================================================================== */
 
-static int pick_samples(int64_t total_frames, int n, int frames_per_sample,
-                        int64_t *out_starts) {
-  if (n < 1) n = 1;
+static int pick_samples(int64_t total_frames, int n, int frames_per_sample, int64_t *out_starts) {
+  if (n < 1)
+    n = 1;
   int64_t margin = total_frames / 10;
   int64_t lo = margin;
   int64_t hi = total_frames - margin - frames_per_sample;
   if (hi <= lo) {
-    out_starts[0] = total_frames > frames_per_sample
-                        ? (total_frames - frames_per_sample) / 2
-                        : 0;
+    out_starts[0] = total_frames > frames_per_sample ? (total_frames - frames_per_sample) / 2 : 0;
     return 1;
   }
   if (n == 1) {
@@ -235,7 +251,8 @@ static int pick_samples(int64_t total_frames, int n, int frames_per_sample,
     return 1;
   }
   int64_t step = (hi - lo) / (n - 1);
-  for (int i = 0; i < n; i++) out_starts[i] = lo + step * i;
+  for (int i = 0; i < n; i++)
+    out_starts[i] = lo + step * i;
   return n;
 }
 
@@ -245,21 +262,22 @@ static int pick_samples(int64_t total_frames, int n, int frames_per_sample,
 
 typedef struct {
   AVPacket **pkts;
-  int        num;
-  int        cap;
+  int num;
+  int cap;
 } PktList;
 
-static int pl_append(PktList *pl, const uint8_t *data, size_t len,
-                     int64_t pts) {
+static int pl_append(PktList *pl, const uint8_t *data, size_t len, int64_t pts) {
   if (pl->num == pl->cap) {
     int new_cap = pl->cap ? pl->cap * 2 : 64;
     AVPacket **p = realloc(pl->pkts, (size_t)new_cap * sizeof(*p));
-    if (!p) return -1;
+    if (!p)
+      return -1;
     pl->pkts = p;
     pl->cap = new_cap;
   }
   AVPacket *pkt = av_packet_alloc();
-  if (!pkt) return -1;
+  if (!pkt)
+    return -1;
   if (av_new_packet(pkt, (int)len) < 0) {
     av_packet_free(&pkt);
     return -1;
@@ -272,7 +290,8 @@ static int pl_append(PktList *pl, const uint8_t *data, size_t len,
 }
 
 static void pl_free(PktList *pl) {
-  for (int i = 0; i < pl->num; i++) av_packet_free(&pl->pkts[i]);
+  for (int i = 0; i < pl->num; i++)
+    av_packet_free(&pl->pkts[i]);
   free(pl->pkts);
   memset(pl, 0, sizeof(*pl));
 }
@@ -282,18 +301,18 @@ static void pl_free(PktList *pl) {
 /* ====================================================================== */
 
 static int copy_avframe_to_vmaf(const AVFrame *f, VmafPicture *pic) {
-  if (vmaf_picture_alloc(pic, VMAF_PIX_FMT_YUV420P, 10,
-                         (unsigned)f->width, (unsigned)f->height) < 0)
+  if (vmaf_picture_alloc(pic, VMAF_PIX_FMT_YUV420P, 10, (unsigned)f->width, (unsigned)f->height) <
+      0)
     return -1;
   const int planes_h[3] = {f->height, f->height / 2, f->height / 2};
-  const int planes_w[3] = {f->width,  f->width  / 2, f->width  / 2};
+  const int planes_w[3] = {f->width, f->width / 2, f->width / 2};
   for (int p = 0; p < 3; p++) {
     const uint8_t *src = f->data[p];
-    uint8_t *dst       = pic->data[p];
-    size_t row_bytes   = (size_t)planes_w[p] * 2;  /* 10-bit packed in 16 */
+    uint8_t *dst = pic->data[p];
+    size_t row_bytes = (size_t)planes_w[p] * 2; /* 10-bit packed in 16 */
     for (int y = 0; y < planes_h[p]; y++) {
-      memcpy(dst + (size_t)y * (size_t)pic->stride[p],
-             src + (size_t)y * (size_t)f->linesize[p], row_bytes);
+      memcpy(dst + (size_t)y * (size_t)pic->stride[p], src + (size_t)y * (size_t)f->linesize[p],
+             row_bytes);
     }
   }
   return 0;
@@ -303,69 +322,83 @@ static int copy_avframe_to_vmaf(const AVFrame *f, VmafPicture *pic) {
 /*  Probe encode — one sample → list of AV1 packets                        */
 /* ====================================================================== */
 
-static int encode_sample(const char *input_path, int64_t start_frame,
-                         int frames, const EncodePreset *p, int film_grain,
-                         int crf, const char *vfilter_expr, PktList *out) {
+static int encode_sample(const char *input_path, int64_t start_frame, int frames,
+                         const EncodePreset *p, int film_grain, int crf, const char *vfilter_expr,
+                         PktList *out) {
   int rc = -1;
-  Source  src = {0};
-  VFilter vf  = {0};
+  Source src = {0};
+  VFilter vf = {0};
   AVPacket *pkt = NULL;
-  AVFrame  *raw = NULL;
-  AVFrame  *flt = NULL;
+  AVFrame *raw = NULL;
+  AVFrame *flt = NULL;
   EbComponentType *svt = NULL;
   bool svt_inited = false;
 
-  if (open_source(input_path, &src) != 0) goto done;
-  if (seek_to_frame(&src, start_frame) != 0) goto done;
-  if (build_vfilter(&src, vfilter_expr, &vf) != 0) goto done;
+  if (open_source(input_path, &src) != 0)
+    goto done;
+  if (seek_to_frame(&src, start_frame) != 0)
+    goto done;
+  if (build_vfilter(&src, vfilter_expr, &vf) != 0)
+    goto done;
 
   EbSvtAv1EncConfiguration cfg;
   memset(&cfg, 0, sizeof(cfg));
-  if (svt_av1_enc_init_handle(&svt, &cfg) != EB_ErrorNone) goto done;
+  if (svt_av1_enc_init_handle(&svt, &cfg) != EB_ErrorNone)
+    goto done;
   svt_inited = true;
 
-  cfg.source_width  = (uint32_t)vf.out_w;
+  cfg.source_width = (uint32_t)vf.out_w;
   cfg.source_height = (uint32_t)vf.out_h;
   cfg.encoder_bit_depth = 10;
   cfg.encoder_color_format = EB_YUV420;
-  cfg.frame_rate_numerator   = (uint32_t)src.fps.num;
+  cfg.frame_rate_numerator = (uint32_t)src.fps.num;
   cfg.frame_rate_denominator = (uint32_t)src.fps.den;
 
   apply_preset_to_config(&cfg, p, film_grain, 0, crf);
   copy_color_info(&cfg, src.ifmt->streams[src.video_idx]->codecpar);
   set_hdr10_metadata(&cfg, src.ifmt->streams[src.video_idx]);
 
-  if (svt_av1_enc_set_parameter(svt, &cfg) != EB_ErrorNone) goto done;
-  if (svt_av1_enc_init(svt) != EB_ErrorNone) goto done;
+  if (svt_av1_enc_set_parameter(svt, &cfg) != EB_ErrorNone)
+    goto done;
+  if (svt_av1_enc_init(svt) != EB_ErrorNone)
+    goto done;
 
   pkt = av_packet_alloc();
   raw = av_frame_alloc();
   flt = av_frame_alloc();
-  if (!pkt || !raw || !flt) goto done;
+  if (!pkt || !raw || !flt)
+    goto done;
 
   int frames_pushed = 0;
   bool src_eof = false;
 
   while (frames_pushed < frames && !src_eof) {
     int r = av_read_frame(src.ifmt, pkt);
-    if (r == AVERROR_EOF) { src_eof = true; }
-    else if (r < 0) goto done;
+    if (r == AVERROR_EOF) {
+      src_eof = true;
+    } else if (r < 0)
+      goto done;
 
     if (r >= 0 && pkt->stream_index != src.video_idx) {
       av_packet_unref(pkt);
       continue;
     }
 
-    int sent = src_eof ? avcodec_send_packet(src.dec, NULL)
-                       : avcodec_send_packet(src.dec, pkt);
+    int sent = src_eof ? avcodec_send_packet(src.dec, NULL) : avcodec_send_packet(src.dec, pkt);
     av_packet_unref(pkt);
-    if (sent < 0 && sent != AVERROR_EOF) goto done;
+    if (sent < 0 && sent != AVERROR_EOF)
+      goto done;
 
     while (frames_pushed < frames) {
       int dr = avcodec_receive_frame(src.dec, raw);
-      if (dr == AVERROR(EAGAIN)) break;
-      if (dr == AVERROR_EOF) { src_eof = true; break; }
-      if (dr < 0) goto done;
+      if (dr == AVERROR(EAGAIN))
+        break;
+      if (dr == AVERROR_EOF) {
+        src_eof = true;
+        break;
+      }
+      if (dr < 0)
+        goto done;
 
       if (av_buffersrc_add_frame(vf.src, raw) < 0) {
         av_frame_unref(raw);
@@ -375,8 +408,10 @@ static int encode_sample(const char *input_path, int64_t start_frame,
 
       while (frames_pushed < frames) {
         int fr = av_buffersink_get_frame(vf.sink, flt);
-        if (fr == AVERROR(EAGAIN) || fr == AVERROR_EOF) break;
-        if (fr < 0) goto done;
+        if (fr == AVERROR(EAGAIN) || fr == AVERROR_EOF)
+          break;
+        if (fr < 0)
+          goto done;
 
         EbBufferHeaderType input_buf;
         memset(&input_buf, 0, sizeof(input_buf));
@@ -384,15 +419,14 @@ static int encode_sample(const char *input_path, int64_t start_frame,
 
         EbSvtIOFormat io_fmt;
         io_fmt.luma = flt->data[0];
-        io_fmt.cb   = flt->data[1];
-        io_fmt.cr   = flt->data[2];
-        io_fmt.y_stride  = (uint32_t)(flt->linesize[0] / 2);
+        io_fmt.cb = flt->data[1];
+        io_fmt.cr = flt->data[2];
+        io_fmt.y_stride = (uint32_t)(flt->linesize[0] / 2);
         io_fmt.cb_stride = (uint32_t)(flt->linesize[1] / 2);
         io_fmt.cr_stride = (uint32_t)(flt->linesize[2] / 2);
 
         input_buf.p_buffer = (uint8_t *)&io_fmt;
-        input_buf.n_filled_len =
-            (uint32_t)(flt->width * flt->height * 2 * 3 / 2);
+        input_buf.n_filled_len = (uint32_t)(flt->width * flt->height * 2 * 3 / 2);
         input_buf.pts = frames_pushed;
         input_buf.pic_type = EB_AV1_INVALID_PICTURE;
         input_buf.flags = 0;
@@ -410,10 +444,10 @@ static int encode_sample(const char *input_path, int64_t start_frame,
         for (;;) {
           EbBufferHeaderType *out_pkt = NULL;
           EbErrorType e = svt_av1_enc_get_packet(svt, &out_pkt, 0);
-          if (e != EB_ErrorNone || !out_pkt) break;
+          if (e != EB_ErrorNone || !out_pkt)
+            break;
           if (out_pkt->n_filled_len > 0)
-            pl_append(out, out_pkt->p_buffer, out_pkt->n_filled_len,
-                      out_pkt->pts);
+            pl_append(out, out_pkt->p_buffer, out_pkt->n_filled_len, out_pkt->pts);
           svt_av1_enc_release_out_buffer(&out_pkt);
         }
       }
@@ -431,12 +465,14 @@ static int encode_sample(const char *input_path, int64_t start_frame,
   for (;;) {
     EbBufferHeaderType *out_pkt = NULL;
     EbErrorType e = svt_av1_enc_get_packet(svt, &out_pkt, 1);
-    if (e != EB_ErrorNone || !out_pkt) break;
+    if (e != EB_ErrorNone || !out_pkt)
+      break;
     bool last = (out_pkt->flags & EB_BUFFERFLAG_EOS) != 0;
     if (out_pkt->n_filled_len > 0)
       pl_append(out, out_pkt->p_buffer, out_pkt->n_filled_len, out_pkt->pts);
     svt_av1_enc_release_out_buffer(&out_pkt);
-    if (last) break;
+    if (last)
+      break;
   }
 
   rc = 0;
@@ -446,9 +482,12 @@ done:
     svt_av1_enc_deinit(svt);
     svt_av1_enc_deinit_handle(svt);
   }
-  if (flt) av_frame_free(&flt);
-  if (raw) av_frame_free(&raw);
-  if (pkt) av_packet_free(&pkt);
+  if (flt)
+    av_frame_free(&flt);
+  if (raw)
+    av_frame_free(&raw);
+  if (pkt)
+    av_packet_free(&pkt);
   close_vfilter(&vf);
   close_source(&src);
   return rc;
@@ -458,62 +497,76 @@ done:
 /*  Score — open AV1 decoder, decode in lockstep with source, feed VMAF    */
 /* ====================================================================== */
 
-static int score_sample(const char *input_path, int64_t start_frame,
-                        int frames, const char *vfilter_expr,
-                        const PktList *av1, VmafContext *vmaf,
+static int score_sample(const char *input_path, int64_t start_frame, int frames,
+                        const char *vfilter_expr, const PktList *av1, VmafContext *vmaf,
                         unsigned base_index, int *frames_scored_out) {
   int rc = -1;
-  Source  src = {0};
-  VFilter vf  = {0};
+  Source src = {0};
+  VFilter vf = {0};
   AVCodecContext *av1_dec = NULL;
   AVPacket *pkt_src = NULL;
-  AVFrame  *raw_src = NULL;
-  AVFrame  *dec_av1 = NULL;
+  AVFrame *raw_src = NULL;
+  AVFrame *dec_av1 = NULL;
   AVFrame **src_buf = NULL;
   int src_count = 0;
   int frames_scored = 0;
 
-  if (open_source(input_path, &src) != 0) goto done;
-  if (seek_to_frame(&src, start_frame) != 0) goto done;
-  if (build_vfilter(&src, vfilter_expr, &vf) != 0) goto done;
+  if (open_source(input_path, &src) != 0)
+    goto done;
+  if (seek_to_frame(&src, start_frame) != 0)
+    goto done;
+  if (build_vfilter(&src, vfilter_expr, &vf) != 0)
+    goto done;
 
   const AVCodec *av1_codec = avcodec_find_decoder(AV_CODEC_ID_AV1);
-  if (!av1_codec) goto done;
+  if (!av1_codec)
+    goto done;
   av1_dec = avcodec_alloc_context3(av1_codec);
-  if (!av1_dec) goto done;
+  if (!av1_dec)
+    goto done;
   av1_dec->thread_count = 0;
-  if (avcodec_open2(av1_dec, av1_codec, NULL) < 0) goto done;
+  if (avcodec_open2(av1_dec, av1_codec, NULL) < 0)
+    goto done;
 
   pkt_src = av_packet_alloc();
   raw_src = av_frame_alloc();
   dec_av1 = av_frame_alloc();
-  if (!pkt_src || !raw_src || !dec_av1) goto done;
+  if (!pkt_src || !raw_src || !dec_av1)
+    goto done;
 
   /* ---- Pass A: pull `frames` filtered source frames into src_buf. ---- */
   src_buf = calloc((size_t)frames, sizeof(AVFrame *));
-  if (!src_buf) goto done;
+  if (!src_buf)
+    goto done;
 
   bool src_eof = false;
   while (src_count < frames && !src_eof) {
     int r = av_read_frame(src.ifmt, pkt_src);
-    if (r == AVERROR_EOF) src_eof = true;
-    else if (r < 0) goto done;
+    if (r == AVERROR_EOF)
+      src_eof = true;
+    else if (r < 0)
+      goto done;
 
     if (r >= 0 && pkt_src->stream_index != src.video_idx) {
       av_packet_unref(pkt_src);
       continue;
     }
 
-    int sent = src_eof ? avcodec_send_packet(src.dec, NULL)
-                       : avcodec_send_packet(src.dec, pkt_src);
+    int sent = src_eof ? avcodec_send_packet(src.dec, NULL) : avcodec_send_packet(src.dec, pkt_src);
     av_packet_unref(pkt_src);
-    if (sent < 0 && sent != AVERROR_EOF) goto done;
+    if (sent < 0 && sent != AVERROR_EOF)
+      goto done;
 
     while (src_count < frames) {
       int dr = avcodec_receive_frame(src.dec, raw_src);
-      if (dr == AVERROR(EAGAIN)) break;
-      if (dr == AVERROR_EOF) { src_eof = true; break; }
-      if (dr < 0) goto done;
+      if (dr == AVERROR(EAGAIN))
+        break;
+      if (dr == AVERROR_EOF) {
+        src_eof = true;
+        break;
+      }
+      if (dr < 0)
+        goto done;
 
       if (av_buffersrc_add_frame(vf.src, raw_src) < 0) {
         av_frame_unref(raw_src);
@@ -523,7 +576,8 @@ static int score_sample(const char *input_path, int64_t start_frame,
 
       while (src_count < frames) {
         AVFrame *out_frame = av_frame_alloc();
-        if (!out_frame) goto done;
+        if (!out_frame)
+          goto done;
         int fr = av_buffersink_get_frame(vf.sink, out_frame);
         if (fr == AVERROR(EAGAIN) || fr == AVERROR_EOF) {
           av_frame_free(&out_frame);
@@ -540,13 +594,17 @@ static int score_sample(const char *input_path, int64_t start_frame,
 
   /* ---- Pass B: feed all AV1 packets, then receive frames in display order ---- */
   for (int i = 0; i < av1->num; i++) {
-    if (avcodec_send_packet(av1_dec, av1->pkts[i]) < 0) goto done;
+    if (avcodec_send_packet(av1_dec, av1->pkts[i]) < 0)
+      goto done;
     /* Drain whatever frames are ready already. */
     while (frames_scored < src_count) {
       int dr = avcodec_receive_frame(av1_dec, dec_av1);
-      if (dr == AVERROR(EAGAIN)) break;
-      if (dr == AVERROR_EOF) goto flush_score;
-      if (dr < 0) goto done;
+      if (dr == AVERROR(EAGAIN))
+        break;
+      if (dr == AVERROR_EOF)
+        goto flush_score;
+      if (dr < 0)
+        goto done;
 
       VmafPicture pic_ref = {0};
       VmafPicture pic_dist = {0};
@@ -557,8 +615,7 @@ static int score_sample(const char *input_path, int64_t start_frame,
         av_frame_unref(dec_av1);
         goto done;
       }
-      if (vmaf_read_pictures(vmaf, &pic_ref, &pic_dist,
-                             base_index + (unsigned)frames_scored) < 0) {
+      if (vmaf_read_pictures(vmaf, &pic_ref, &pic_dist, base_index + (unsigned)frames_scored) < 0) {
         av_frame_unref(dec_av1);
         goto done;
       }
@@ -572,8 +629,10 @@ flush_score:
   avcodec_send_packet(av1_dec, NULL);
   while (frames_scored < src_count) {
     int dr = avcodec_receive_frame(av1_dec, dec_av1);
-    if (dr == AVERROR(EAGAIN) || dr == AVERROR_EOF) break;
-    if (dr < 0) goto done;
+    if (dr == AVERROR(EAGAIN) || dr == AVERROR_EOF)
+      break;
+    if (dr < 0)
+      goto done;
 
     VmafPicture pic_ref = {0};
     VmafPicture pic_dist = {0};
@@ -584,8 +643,7 @@ flush_score:
       av_frame_unref(dec_av1);
       goto done;
     }
-    if (vmaf_read_pictures(vmaf, &pic_ref, &pic_dist,
-                           base_index + (unsigned)frames_scored) < 0) {
+    if (vmaf_read_pictures(vmaf, &pic_ref, &pic_dist, base_index + (unsigned)frames_scored) < 0) {
       av_frame_unref(dec_av1);
       goto done;
     }
@@ -596,15 +654,21 @@ flush_score:
   rc = 0;
 
 done:
-  if (frames_scored_out) *frames_scored_out = frames_scored;
+  if (frames_scored_out)
+    *frames_scored_out = frames_scored;
   if (src_buf) {
-    for (int i = 0; i < src_count; i++) av_frame_free(&src_buf[i]);
+    for (int i = 0; i < src_count; i++)
+      av_frame_free(&src_buf[i]);
     free(src_buf);
   }
-  if (dec_av1) av_frame_free(&dec_av1);
-  if (raw_src) av_frame_free(&raw_src);
-  if (pkt_src) av_packet_free(&pkt_src);
-  if (av1_dec) avcodec_free_context(&av1_dec);
+  if (dec_av1)
+    av_frame_free(&dec_av1);
+  if (raw_src)
+    av_frame_free(&raw_src);
+  if (pkt_src)
+    av_packet_free(&pkt_src);
+  if (av1_dec)
+    avcodec_free_context(&av1_dec);
   close_vfilter(&vf);
   close_source(&src);
   return rc;
@@ -614,18 +678,18 @@ done:
 /*  One trial: encode + score N samples at a given CRF                     */
 /* ====================================================================== */
 
-static int run_trial(const char *input_path, const EncodePreset *p,
-                     int film_grain, int crf, const char *vfilter,
-                     const int64_t *sample_starts, int nsamples,
+static int run_trial(const char *input_path, const EncodePreset *p, int film_grain, int crf,
+                     const char *vfilter, const int64_t *sample_starts, int nsamples,
                      int frames_per_sample, double *out_vmaf) {
   VmafContext *vmaf = NULL;
-  VmafModel   *model = NULL;
+  VmafModel *model = NULL;
   VmafConfiguration cfg = {
       .log_level = VMAF_LOG_LEVEL_ERROR,
       .n_threads = PROBE_LIBVMAF_THREADS,
       .n_subsample = 1,
   };
-  if (vmaf_init(&vmaf, cfg) < 0) return -1;
+  if (vmaf_init(&vmaf, cfg) < 0)
+    return -1;
 
   VmafModelConfig mcfg = {.name = "vmaf"};
   if (vmaf_model_load(&model, &mcfg, "vmaf_v0.6.1") < 0) {
@@ -642,15 +706,15 @@ static int run_trial(const char *input_path, const EncodePreset *p,
   int trial_rc = 0;
   for (int s = 0; s < nsamples; s++) {
     PktList av1 = {0};
-    if (encode_sample(input_path, sample_starts[s], frames_per_sample, p,
-                      film_grain, crf, vfilter, &av1) != 0) {
+    if (encode_sample(input_path, sample_starts[s], frames_per_sample, p, film_grain, crf, vfilter,
+                      &av1) != 0) {
       pl_free(&av1);
       trial_rc = -1;
       break;
     }
     int scored = 0;
-    int sr = score_sample(input_path, sample_starts[s], frames_per_sample,
-                          vfilter, &av1, vmaf, total_scored, &scored);
+    int sr = score_sample(input_path, sample_starts[s], frames_per_sample, vfilter, &av1, vmaf,
+                          total_scored, &scored);
     pl_free(&av1);
     if (sr != 0) {
       trial_rc = -1;
@@ -664,15 +728,16 @@ static int run_trial(const char *input_path, const EncodePreset *p,
 
   double score = 0;
   if (trial_rc == 0 && total_scored > 0) {
-    if (vmaf_score_pooled(vmaf, model, VMAF_POOL_METHOD_HARMONIC_MEAN, &score,
-                          0, total_scored - 1) < 0)
+    if (vmaf_score_pooled(vmaf, model, VMAF_POOL_METHOD_HARMONIC_MEAN, &score, 0,
+                          total_scored - 1) < 0)
       trial_rc = -1;
   }
 
   vmaf_model_destroy(model);
   vmaf_close(vmaf);
 
-  if (trial_rc != 0 || total_scored == 0) return -1;
+  if (trial_rc != 0 || total_scored == 0)
+    return -1;
   *out_vmaf = score;
   return 0;
 }
@@ -681,25 +746,23 @@ static int run_trial(const char *input_path, const EncodePreset *p,
 /*  Binary search driver                                                   */
 /* ====================================================================== */
 
-static int next_crf_guess(int crf_a, double vmaf_a, int crf_b, double vmaf_b,
-                          int target) {
+static int next_crf_guess(int crf_a, double vmaf_a, int crf_b, double vmaf_b, int target) {
   double slope;
   if (crf_b != crf_a && fabs(vmaf_b - vmaf_a) > 0.1)
     slope = (vmaf_b - vmaf_a) / (double)(crf_b - crf_a);
   else
     slope = -PROBE_DEFAULT_SLOPE;
-  if (slope > -0.05) slope = -PROBE_DEFAULT_SLOPE;
+  if (slope > -0.05)
+    slope = -PROBE_DEFAULT_SLOPE;
   double next = (double)crf_b + ((double)target - vmaf_b) / slope;
   return round_clamp(next, PROBE_CRF_MIN, PROBE_CRF_MAX);
 }
 
-static int search_with_n_samples(const char *input_path,
-                                 const EncodePreset *p, int film_grain,
-                                 int vmaf_target, const char *vfilter,
-                                 const int64_t *sample_starts, int nsamples,
-                                 int frames_per_sample, int *out_crf,
+static int search_with_n_samples(const char *input_path, const EncodePreset *p, int film_grain,
+                                 int vmaf_target, const char *vfilter, const int64_t *sample_starts,
+                                 int nsamples, int frames_per_sample, int *out_crf,
                                  double *out_vmaf) {
-  int    history_crf[PROBE_MAX_TRIALS] = {0};
+  int history_crf[PROBE_MAX_TRIALS] = {0};
   double history_vmaf[PROBE_MAX_TRIALS] = {0};
   int n_history = 0;
 
@@ -712,17 +775,21 @@ static int search_with_n_samples(const char *input_path,
   for (int trial = 0; trial < PROBE_MAX_TRIALS; trial++) {
     bool dup = false;
     for (int i = 0; i < n_history; i++) {
-      if (history_crf[i] == next_crf) { dup = true; break; }
+      if (history_crf[i] == next_crf) {
+        dup = true;
+        break;
+      }
     }
-    if (dup) break;
+    if (dup)
+      break;
 
     double vmaf = 0.0;
-    if (run_trial(input_path, p, film_grain, next_crf, vfilter, sample_starts,
-                  nsamples, frames_per_sample, &vmaf) != 0)
+    if (run_trial(input_path, p, film_grain, next_crf, vfilter, sample_starts, nsamples,
+                  frames_per_sample, &vmaf) != 0)
       return -1;
 
-    ui_kv("Probe", "CRF %d → VMAF %.2f  (target %d, %d sample%s)", next_crf,
-          vmaf, vmaf_target, nsamples, nsamples == 1 ? "" : "s");
+    ui_kv("Probe", "CRF %d → VMAF %.2f  (target %d, %d sample%s)", next_crf, vmaf, vmaf_target,
+          nsamples, nsamples == 1 ? "" : "s");
 
     history_crf[n_history] = next_crf;
     history_vmaf[n_history] = vmaf;
@@ -753,30 +820,26 @@ static int search_with_n_samples(const char *input_path,
     }
 
     if (n_history >= 2) {
-      next_crf = next_crf_guess(history_crf[n_history - 2],
-                                history_vmaf[n_history - 2],
-                                history_crf[n_history - 1],
-                                history_vmaf[n_history - 1], vmaf_target);
+      next_crf =
+          next_crf_guess(history_crf[n_history - 2], history_vmaf[n_history - 2],
+                         history_crf[n_history - 1], history_vmaf[n_history - 1], vmaf_target);
     } else {
       double delta = (vmaf - (double)vmaf_target) / PROBE_DEFAULT_SLOPE;
-      next_crf = round_clamp((double)next_crf + delta, PROBE_CRF_MIN,
-                             PROBE_CRF_MAX);
+      next_crf = round_clamp((double)next_crf + delta, PROBE_CRF_MIN, PROBE_CRF_MAX);
     }
   }
 
-  if (best_crf < 0) return -1;
+  if (best_crf < 0)
+    return -1;
   *out_crf = best_crf;
   *out_vmaf = best_vmaf;
   return 0;
 }
 
-CrfSearchResult run_crf_search(const char *input_path, int vmaf_target,
-                               const EncodePreset *preset, int film_grain,
-                               const char *vfilter) {
-  CrfSearchResult result = {.crf = -1,
-                            .vmaf_target = vmaf_target,
-                            .vmaf_result = 0.0,
-                            .error = NULL};
+CrfSearchResult run_crf_search(const char *input_path, int vmaf_target, const EncodePreset *preset,
+                               int film_grain, const char *vfilter) {
+  CrfSearchResult result = {
+      .crf = -1, .vmaf_target = vmaf_target, .vmaf_result = 0.0, .error = NULL};
 
   Source src = {0};
   if (open_source(input_path, &src) != 0) {
@@ -794,11 +857,10 @@ CrfSearchResult run_crf_search(const char *input_path, int vmaf_target,
   int64_t starts1[1];
   pick_samples(total_frames, 1, PROBE_SAMPLE_FRAMES, starts1);
 
-  int    crf1  = -1;
+  int crf1 = -1;
   double vmaf1 = 0.0;
-  if (search_with_n_samples(input_path, preset, film_grain, vmaf_target,
-                            vfilter, starts1, 1, PROBE_SAMPLE_FRAMES, &crf1,
-                            &vmaf1) != 0) {
+  if (search_with_n_samples(input_path, preset, film_grain, vmaf_target, vfilter, starts1, 1,
+                            PROBE_SAMPLE_FRAMES, &crf1, &vmaf1) != 0) {
     result.error = "probe encode or scoring failed";
     return result;
   }
@@ -814,11 +876,10 @@ CrfSearchResult run_crf_search(const char *input_path, int vmaf_target,
   /* Pass 2 — 3 samples. */
   int64_t starts3[3];
   int n3 = pick_samples(total_frames, 3, PROBE_SAMPLE_FRAMES, starts3);
-  int    crf3  = -1;
+  int crf3 = -1;
   double vmaf3 = 0.0;
-  if (search_with_n_samples(input_path, preset, film_grain, vmaf_target,
-                            vfilter, starts3, n3, PROBE_SAMPLE_FRAMES, &crf3,
-                            &vmaf3) != 0) {
+  if (search_with_n_samples(input_path, preset, film_grain, vmaf_target, vfilter, starts3, n3,
+                            PROBE_SAMPLE_FRAMES, &crf3, &vmaf3) != 0) {
     result.error = "probe encode or scoring failed (3-sample refinement)";
     return result;
   }

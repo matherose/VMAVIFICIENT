@@ -24,8 +24,8 @@ static int is_french(const char *lang) {
   return strcmp(lang, "fre") == 0 || strcmp(lang, "fra") == 0;
 }
 
-void build_opus_filename(char *buf, size_t bufsize, const char *base_name,
-                         const char *language, FrenchVariant fv) {
+void build_opus_filename(char *buf, size_t bufsize, const char *base_name, const char *language,
+                         FrenchVariant fv) {
   if (is_french(language)) {
     const char *suffix;
     switch (fv) {
@@ -99,8 +99,8 @@ int verify_opus_file(const char *path) {
 /**
  * @brief Drain encoded packets from the encoder and write to output.
  */
-static int drain_encoder(AVCodecContext *enc_ctx, AVFormatContext *ofmt_ctx,
-                         AVPacket *pkt, AVStream *out_stream) {
+static int drain_encoder(AVCodecContext *enc_ctx, AVFormatContext *ofmt_ctx, AVPacket *pkt,
+                         AVStream *out_stream) {
   int ret;
   while ((ret = avcodec_receive_packet(enc_ctx, pkt)) == 0) {
     pkt->stream_index = out_stream->index;
@@ -118,15 +118,12 @@ static int drain_encoder(AVCodecContext *enc_ctx, AVFormatContext *ofmt_ctx,
 /**
  * @brief Feed samples from the FIFO to the encoder in frame_size chunks.
  */
-static int encode_from_fifo(AVAudioFifo *fifo, AVCodecContext *enc_ctx,
-                            AVFormatContext *ofmt_ctx, AVPacket *pkt,
-                            AVStream *out_stream, int64_t *next_pts,
-                            int flush) {
+static int encode_from_fifo(AVAudioFifo *fifo, AVCodecContext *enc_ctx, AVFormatContext *ofmt_ctx,
+                            AVPacket *pkt, AVStream *out_stream, int64_t *next_pts, int flush) {
   int frame_size = enc_ctx->frame_size;
   int ret;
 
-  while (av_audio_fifo_size(fifo) >= frame_size ||
-         (flush && av_audio_fifo_size(fifo) > 0)) {
+  while (av_audio_fifo_size(fifo) >= frame_size || (flush && av_audio_fifo_size(fifo) > 0)) {
     int samples_to_read = av_audio_fifo_size(fifo);
     if (samples_to_read > frame_size)
       samples_to_read = frame_size;
@@ -146,8 +143,7 @@ static int encode_from_fifo(AVAudioFifo *fifo, AVCodecContext *enc_ctx,
       return ret;
     }
 
-    int read =
-        av_audio_fifo_read(fifo, (void **)enc_frame->data, samples_to_read);
+    int read = av_audio_fifo_read(fifo, (void **)enc_frame->data, samples_to_read);
     if (read < samples_to_read) {
       av_frame_free(&enc_frame);
       return AVERROR(EIO);
@@ -174,8 +170,7 @@ static int encode_from_fifo(AVAudioFifo *fifo, AVCodecContext *enc_ctx,
  *
  * Speed is audio seconds encoded per wall-clock second.
  */
-static void fmt_audio_middle(char *out, size_t cap, int64_t current_pts,
-                             time_t start_time) {
+static void fmt_audio_middle(char *out, size_t cap, int64_t current_pts, time_t start_time) {
   double elapsed = difftime(time(NULL), start_time);
   if (elapsed > 1.0) {
     double audio_secs = (double)current_pts / 48000.0;
@@ -186,8 +181,7 @@ static void fmt_audio_middle(char *out, size_t cap, int64_t current_pts,
   }
 }
 
-OpusEncodeResult encode_track_to_opus(const char *input_path,
-                                      const TrackInfo *track,
+OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *track,
                                       const char *output_path) {
   OpusEncodeResult result = {.error = 0, .skipped = 0};
   snprintf(result.output_path, sizeof(result.output_path), "%s", output_path);
@@ -291,8 +285,7 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
   /* libopus only supports standard channel layouts. Map the decoder's
      layout to a default one with the same channel count so that
      variants like 5.1(side) are accepted. */
-  av_channel_layout_default(&enc_ctx->ch_layout,
-                            dec_ctx->ch_layout.nb_channels);
+  av_channel_layout_default(&enc_ctx->ch_layout, dec_ctx->ch_layout.nb_channels);
 
   av_opt_set(enc_ctx->priv_data, "application", "audio", 0);
   av_opt_set(enc_ctx->priv_data, "vbr", "on", 0);
@@ -310,9 +303,9 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
   }
 
   /* ── Set up resampler ── */
-  ret = swr_alloc_set_opts2(&swr, &enc_ctx->ch_layout, AV_SAMPLE_FMT_FLT, 48000,
-                            &dec_ctx->ch_layout, dec_ctx->sample_fmt,
-                            dec_ctx->sample_rate, 0, NULL);
+  ret =
+      swr_alloc_set_opts2(&swr, &enc_ctx->ch_layout, AV_SAMPLE_FMT_FLT, 48000, &dec_ctx->ch_layout,
+                          dec_ctx->sample_fmt, dec_ctx->sample_rate, 0, NULL);
   if (ret < 0 || !swr) {
     fprintf(stderr, "  Error: cannot allocate resampler\n");
     result.error = ret < 0 ? ret : AVERROR(ENOMEM);
@@ -327,8 +320,8 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
   }
 
   /* ── Audio FIFO ── */
-  fifo = av_audio_fifo_alloc(AV_SAMPLE_FMT_FLT, enc_ctx->ch_layout.nb_channels,
-                             enc_ctx->frame_size);
+  fifo =
+      av_audio_fifo_alloc(AV_SAMPLE_FMT_FLT, enc_ctx->ch_layout.nb_channels, enc_ctx->frame_size);
   if (!fifo) {
     result.error = AVERROR(ENOMEM);
     goto cleanup;
@@ -384,11 +377,9 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
   /* Total samples at output rate for progress tracking. */
   int64_t total_samples = 0;
   if (ifmt_ctx->duration > 0)
-    total_samples =
-        (int64_t)((double)ifmt_ctx->duration / AV_TIME_BASE * 48000);
+    total_samples = (int64_t)((double)ifmt_ctx->duration / AV_TIME_BASE * 48000);
   else if (in_stream->duration > 0)
-    total_samples = av_rescale_q(in_stream->duration, in_stream->time_base,
-                                 (AVRational){1, 48000});
+    total_samples = av_rescale_q(in_stream->duration, in_stream->time_base, (AVRational){1, 48000});
 
   time_t start_time = time(NULL);
   UiProgress progress;
@@ -424,21 +415,18 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
       }
 
       /* Push resampled data into FIFO. */
-      ret = av_audio_fifo_realloc(fifo, av_audio_fifo_size(fifo) +
-                                            resampled->nb_samples);
+      ret = av_audio_fifo_realloc(fifo, av_audio_fifo_size(fifo) + resampled->nb_samples);
       if (ret < 0) {
         av_frame_unref(resampled);
         result.error = ret;
         goto cleanup;
       }
 
-      av_audio_fifo_write(fifo, (void **)resampled->data,
-                          resampled->nb_samples);
+      av_audio_fifo_write(fifo, (void **)resampled->data, resampled->nb_samples);
       av_frame_unref(resampled);
 
       /* Encode full frames from FIFO. */
-      ret = encode_from_fifo(fifo, enc_ctx, ofmt_ctx, out_pkt, out_stream,
-                             &next_pts, 0);
+      ret = encode_from_fifo(fifo, enc_ctx, ofmt_ctx, out_pkt, out_stream, &next_pts, 0);
       if (ret < 0) {
         result.error = ret;
         goto cleanup;
@@ -465,10 +453,8 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
     ret = swr_convert_frame(swr, resampled, frame);
     av_frame_unref(frame);
     if (ret >= 0) {
-      if (av_audio_fifo_realloc(fifo, av_audio_fifo_size(fifo) +
-                                          resampled->nb_samples) >= 0) {
-        av_audio_fifo_write(fifo, (void **)resampled->data,
-                            resampled->nb_samples);
+      if (av_audio_fifo_realloc(fifo, av_audio_fifo_size(fifo) + resampled->nb_samples) >= 0) {
+        av_audio_fifo_write(fifo, (void **)resampled->data, resampled->nb_samples);
       }
       av_frame_unref(resampled);
     }
@@ -485,17 +471,14 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
       av_frame_unref(resampled);
       break;
     }
-    if (av_audio_fifo_realloc(fifo, av_audio_fifo_size(fifo) +
-                                        resampled->nb_samples) >= 0) {
-      av_audio_fifo_write(fifo, (void **)resampled->data,
-                          resampled->nb_samples);
+    if (av_audio_fifo_realloc(fifo, av_audio_fifo_size(fifo) + resampled->nb_samples) >= 0) {
+      av_audio_fifo_write(fifo, (void **)resampled->data, resampled->nb_samples);
     }
     av_frame_unref(resampled);
   }
 
   /* ── Flush FIFO remainder ── */
-  ret = encode_from_fifo(fifo, enc_ctx, ofmt_ctx, out_pkt, out_stream,
-                         &next_pts, 1);
+  ret = encode_from_fifo(fifo, enc_ctx, ofmt_ctx, out_pkt, out_stream, &next_pts, 1);
   if (ret < 0) {
     result.error = ret;
     goto cleanup;
@@ -521,8 +504,7 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
   /* ── Verify output ── */
   ret = verify_opus_file(output_path);
   if (ret < 0) {
-    fprintf(stderr, "  Warning: output verification failed for '%s'\n",
-            output_path);
+    fprintf(stderr, "  Warning: output verification failed for '%s'\n", output_path);
     result.error = ret;
   }
 

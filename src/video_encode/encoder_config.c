@@ -19,8 +19,7 @@
 
 #define UNSET (-1)
 
-void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg,
-                            const EncodePreset *p, int film_grain,
+void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg, const EncodePreset *p, int film_grain,
                             int target_bitrate_kbps, int crf) {
   cfg->enc_mode = (int8_t)p->preset;
   cfg->intra_period_length = p->keyint;
@@ -110,16 +109,13 @@ void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg,
 
   if (p->temporal_layer_chroma_qindex_offset != UNSET)
     for (int i = 0; i < EB_MAX_TEMPORAL_LAYERS; i++)
-      cfg->chroma_qindex_offsets[i] =
-          (int32_t)p->temporal_layer_chroma_qindex_offset;
+      cfg->chroma_qindex_offsets[i] = (int32_t)p->temporal_layer_chroma_qindex_offset;
 
   /* Keyframe QP offsets — mode 2 = apply on top of CRF-derived QP. */
-  if (p->key_frame_qindex_offset != 0 ||
-      p->key_frame_chroma_qindex_offset != 0) {
+  if (p->key_frame_qindex_offset != 0 || p->key_frame_chroma_qindex_offset != 0) {
     cfg->use_fixed_qindex_offsets = 2;
     cfg->key_frame_qindex_offset = (int32_t)p->key_frame_qindex_offset;
-    cfg->key_frame_chroma_qindex_offset =
-        (int32_t)p->key_frame_chroma_qindex_offset;
+    cfg->key_frame_chroma_qindex_offset = (int32_t)p->key_frame_chroma_qindex_offset;
   }
 
   if (crf <= 0) {
@@ -148,19 +144,15 @@ void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg,
   }
 }
 
-void copy_color_info(EbSvtAv1EncConfiguration *cfg,
-                     const AVCodecParameters *codecpar) {
+void copy_color_info(EbSvtAv1EncConfiguration *cfg, const AVCodecParameters *codecpar) {
   cfg->color_primaries = (EbColorPrimaries)codecpar->color_primaries;
-  cfg->transfer_characteristics =
-      (EbTransferCharacteristics)codecpar->color_trc;
+  cfg->transfer_characteristics = (EbTransferCharacteristics)codecpar->color_trc;
   cfg->matrix_coefficients = (EbMatrixCoefficients)codecpar->color_space;
-  cfg->color_range = (codecpar->color_range == AVCOL_RANGE_JPEG)
-                         ? EB_CR_FULL_RANGE
-                         : EB_CR_STUDIO_RANGE;
+  cfg->color_range =
+      (codecpar->color_range == AVCOL_RANGE_JPEG) ? EB_CR_FULL_RANGE : EB_CR_STUDIO_RANGE;
 }
 
-void set_hdr10_metadata(EbSvtAv1EncConfiguration *cfg,
-                        const AVStream *stream) {
+void set_hdr10_metadata(EbSvtAv1EncConfiguration *cfg, const AVStream *stream) {
   const AVCodecParameters *par = stream->codecpar;
 
   const AVPacketSideData *mdcv_sd = NULL;
@@ -173,37 +165,25 @@ void set_hdr10_metadata(EbSvtAv1EncConfiguration *cfg,
   }
 
   if (mdcv_sd && mdcv_sd->size >= (int)sizeof(AVMasteringDisplayMetadata)) {
-    const AVMasteringDisplayMetadata *mdcv =
-        (const AVMasteringDisplayMetadata *)mdcv_sd->data;
+    const AVMasteringDisplayMetadata *mdcv = (const AVMasteringDisplayMetadata *)mdcv_sd->data;
     if (mdcv->has_primaries) {
-      cfg->mastering_display.r.x =
-          (uint16_t)(av_q2d(mdcv->display_primaries[0][0]) * 50000 + 0.5);
-      cfg->mastering_display.r.y =
-          (uint16_t)(av_q2d(mdcv->display_primaries[0][1]) * 50000 + 0.5);
-      cfg->mastering_display.g.x =
-          (uint16_t)(av_q2d(mdcv->display_primaries[1][0]) * 50000 + 0.5);
-      cfg->mastering_display.g.y =
-          (uint16_t)(av_q2d(mdcv->display_primaries[1][1]) * 50000 + 0.5);
-      cfg->mastering_display.b.x =
-          (uint16_t)(av_q2d(mdcv->display_primaries[2][0]) * 50000 + 0.5);
-      cfg->mastering_display.b.y =
-          (uint16_t)(av_q2d(mdcv->display_primaries[2][1]) * 50000 + 0.5);
-      cfg->mastering_display.white_point.x =
-          (uint16_t)(av_q2d(mdcv->white_point[0]) * 50000 + 0.5);
-      cfg->mastering_display.white_point.y =
-          (uint16_t)(av_q2d(mdcv->white_point[1]) * 50000 + 0.5);
+      cfg->mastering_display.r.x = (uint16_t)(av_q2d(mdcv->display_primaries[0][0]) * 50000 + 0.5);
+      cfg->mastering_display.r.y = (uint16_t)(av_q2d(mdcv->display_primaries[0][1]) * 50000 + 0.5);
+      cfg->mastering_display.g.x = (uint16_t)(av_q2d(mdcv->display_primaries[1][0]) * 50000 + 0.5);
+      cfg->mastering_display.g.y = (uint16_t)(av_q2d(mdcv->display_primaries[1][1]) * 50000 + 0.5);
+      cfg->mastering_display.b.x = (uint16_t)(av_q2d(mdcv->display_primaries[2][0]) * 50000 + 0.5);
+      cfg->mastering_display.b.y = (uint16_t)(av_q2d(mdcv->display_primaries[2][1]) * 50000 + 0.5);
+      cfg->mastering_display.white_point.x = (uint16_t)(av_q2d(mdcv->white_point[0]) * 50000 + 0.5);
+      cfg->mastering_display.white_point.y = (uint16_t)(av_q2d(mdcv->white_point[1]) * 50000 + 0.5);
     }
     if (mdcv->has_luminance) {
-      cfg->mastering_display.max_luma =
-          (uint32_t)(av_q2d(mdcv->max_luminance) * 10000 + 0.5);
-      cfg->mastering_display.min_luma =
-          (uint32_t)(av_q2d(mdcv->min_luminance) * 10000 + 0.5);
+      cfg->mastering_display.max_luma = (uint32_t)(av_q2d(mdcv->max_luminance) * 10000 + 0.5);
+      cfg->mastering_display.min_luma = (uint32_t)(av_q2d(mdcv->min_luminance) * 10000 + 0.5);
     }
   }
 
   if (cll_sd && cll_sd->size >= (int)sizeof(AVContentLightMetadata)) {
-    const AVContentLightMetadata *cll =
-        (const AVContentLightMetadata *)cll_sd->data;
+    const AVContentLightMetadata *cll = (const AVContentLightMetadata *)cll_sd->data;
     cfg->content_light_level.max_cll = (uint16_t)cll->MaxCLL;
     cfg->content_light_level.max_fall = (uint16_t)cll->MaxFALL;
   }

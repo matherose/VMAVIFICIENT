@@ -14,10 +14,10 @@
 #include "encode_preset.h"
 
 typedef struct {
-  int crf;             /**< Found CRF (1–63), or -1 on error. */
-  int vmaf_target;     /**< Target VMAF passed in by the caller. */
-  double vmaf_result;  /**< Actual VMAF measured at the chosen CRF. */
-  const char *error;   /**< Static string describing failure (NULL on success). */
+  int crf;            /**< Found CRF (1–63), or -1 on error. */
+  int vmaf_target;    /**< Target VMAF passed in by the caller. */
+  double vmaf_result; /**< Actual VMAF measured at the chosen CRF. */
+  const char *error;  /**< Static string describing failure (NULL on success). */
 } CrfSearchResult;
 
 /**
@@ -41,8 +41,7 @@ typedef struct {
  *                     the output resolution (e.g., HD companion encodes).
  * @return CrfSearchResult — crf >= 1 on success, -1 with error set on failure.
  */
-CrfSearchResult run_crf_search(const char *input_path, int vmaf_target,
-                               const EncodePreset *preset, int film_grain,
-                               const char *vfilter);
+CrfSearchResult run_crf_search(const char *input_path, int vmaf_target, const EncodePreset *preset,
+                               int film_grain, const char *vfilter);
 
 #endif /* CRF_SEARCH_H */

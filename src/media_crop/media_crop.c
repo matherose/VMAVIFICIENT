@@ -35,8 +35,8 @@ static int cmp_int(const void *a, const void *b) {
  *
  * @return 1 if valid crop values were found, 0 otherwise.
  */
-static int read_crop_metadata(AVFrame *filt_frame, int frame_w, int frame_h,
-                              int *top, int *bottom, int *left, int *right) {
+static int read_crop_metadata(AVFrame *filt_frame, int frame_w, int frame_h, int *top, int *bottom,
+                              int *left, int *right) {
   AVDictionaryEntry *e;
   int cw = 0, ch = 0, cx = 0, cy = 0;
 
@@ -70,10 +70,8 @@ static int read_crop_metadata(AVFrame *filt_frame, int frame_w, int frame_h,
  * format conversion when the source format (e.g. yuv420p10le) is not
  * natively supported by cropdetect.
  */
-static int build_cropdetect_graph(AVFilterGraph **graph,
-                                  AVFilterContext **src_ctx,
-                                  AVFilterContext **sink_ctx,
-                                  AVCodecContext *dec_ctx) {
+static int build_cropdetect_graph(AVFilterGraph **graph, AVFilterContext **src_ctx,
+                                  AVFilterContext **sink_ctx, AVCodecContext *dec_ctx) {
   *graph = avfilter_graph_alloc();
   if (!*graph)
     return AVERROR(ENOMEM);
@@ -85,17 +83,15 @@ static int build_cropdetect_graph(AVFilterGraph **graph,
   snprintf(args, sizeof(args),
            "video_size=%dx%d:pix_fmt=%d:time_base=1/25:pixel_aspect=1/1"
            ":colorspace=%d:range=%d",
-           dec_ctx->width, dec_ctx->height, dec_ctx->pix_fmt,
-           dec_ctx->colorspace, dec_ctx->color_range);
+           dec_ctx->width, dec_ctx->height, dec_ctx->pix_fmt, dec_ctx->colorspace,
+           dec_ctx->color_range);
 
   int ret;
-  ret = avfilter_graph_create_filter(src_ctx, buffersrc, "in", args, NULL,
-                                     *graph);
+  ret = avfilter_graph_create_filter(src_ctx, buffersrc, "in", args, NULL, *graph);
   if (ret < 0)
     return ret;
 
-  ret = avfilter_graph_create_filter(sink_ctx, buffersink, "out", NULL, NULL,
-                                     *graph);
+  ret = avfilter_graph_create_filter(sink_ctx, buffersink, "out", NULL, NULL, *graph);
   if (ret < 0)
     return ret;
 
@@ -117,8 +113,7 @@ static int build_cropdetect_graph(AVFilterGraph **graph,
   inputs->pad_idx = 0;
   inputs->next = NULL;
 
-  ret = avfilter_graph_parse_ptr(*graph, "cropdetect=round=2", &inputs,
-                                 &outputs, NULL);
+  ret = avfilter_graph_parse_ptr(*graph, "cropdetect=round=2", &inputs, &outputs, NULL);
   avfilter_inout_free(&inputs);
   avfilter_inout_free(&outputs);
   if (ret < 0)
@@ -147,8 +142,7 @@ CropInfo get_crop_info(const char *path) {
   ret = avformat_find_stream_info(fmt_ctx, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "Error: cannot read stream info from '%s': %s\n", path,
-            errbuf);
+    fprintf(stderr, "Error: cannot read stream info from '%s': %s\n", path, errbuf);
     info.error = ret;
     goto cleanup;
   }
@@ -196,8 +190,7 @@ CropInfo get_crop_info(const char *path) {
   int sample_count = 0;
 
   for (int s = 0; s < CROP_SAMPLES && sample_count < CROP_SAMPLES; s++) {
-    int64_t target =
-        duration / 10 + (int64_t)(duration * 0.8 / CROP_SAMPLES) * s;
+    int64_t target = duration / 10 + (int64_t)(duration * 0.8 / CROP_SAMPLES) * s;
 
     av_seek_frame(fmt_ctx, -1, target, AVSEEK_FLAG_BACKWARD);
     avcodec_flush_buffers(dec_ctx);
@@ -225,8 +218,7 @@ CropInfo get_crop_info(const char *path) {
       avcodec_send_packet(dec_ctx, pkt);
       av_packet_unref(pkt);
 
-      while (decoded < WARMUP_FRAMES &&
-             avcodec_receive_frame(dec_ctx, frame) == 0) {
+      while (decoded < WARMUP_FRAMES && avcodec_receive_frame(dec_ctx, frame) == 0) {
         if (av_buffersrc_add_frame(src_ctx, frame) < 0) {
           av_frame_unref(frame);
           break;
@@ -234,9 +226,8 @@ CropInfo get_crop_info(const char *path) {
         av_frame_unref(frame);
 
         while (av_buffersink_get_frame(sink_ctx, filt_frame) == 0) {
-          if (read_crop_metadata(filt_frame, dec_ctx->width, dec_ctx->height,
-                                 &last_top, &last_bottom, &last_left,
-                                 &last_right))
+          if (read_crop_metadata(filt_frame, dec_ctx->width, dec_ctx->height, &last_top,
+                                 &last_bottom, &last_left, &last_right))
             got_result = 1;
           av_frame_unref(filt_frame);
           decoded++;

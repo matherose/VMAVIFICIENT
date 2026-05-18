@@ -25,11 +25,9 @@
 static void detect_dovi(AVCodecParameters *codecpar, HdrInfo *info) {
   for (int i = 0; i < codecpar->nb_coded_side_data; i++) {
     if (codecpar->coded_side_data[i].type == AV_PKT_DATA_DOVI_CONF &&
-        codecpar->coded_side_data[i].size >=
-            sizeof(AVDOVIDecoderConfigurationRecord)) {
+        codecpar->coded_side_data[i].size >= sizeof(AVDOVIDecoderConfigurationRecord)) {
       const AVDOVIDecoderConfigurationRecord *dovi =
-          (const AVDOVIDecoderConfigurationRecord *)codecpar->coded_side_data[i]
-              .data;
+          (const AVDOVIDecoderConfigurationRecord *)codecpar->coded_side_data[i].data;
       info->has_dolby_vision = 1;
       info->dv_profile = dovi->dv_profile;
       info->dv_level = dovi->dv_level;
@@ -43,8 +41,7 @@ static void detect_dovi(AVCodecParameters *codecpar, HdrInfo *info) {
  *
  * Only called when the video uses PQ transfer characteristics.
  */
-static void detect_hdr10plus(AVFormatContext *fmt_ctx, int stream_idx,
-                             HdrInfo *info) {
+static void detect_hdr10plus(AVFormatContext *fmt_ctx, int stream_idx, HdrInfo *info) {
   AVStream *stream = fmt_ctx->streams[stream_idx];
   const AVCodec *decoder = avcodec_find_decoder(stream->codecpar->codec_id);
   if (!decoder)
@@ -118,8 +115,7 @@ HdrInfo get_hdr_info(const char *path) {
   ret = avformat_find_stream_info(fmt_ctx, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "Error: cannot read stream info from '%s': %s\n", path,
-            errbuf);
+    fprintf(stderr, "Error: cannot read stream info from '%s': %s\n", path, errbuf);
     info.error = ret;
     avformat_close_input(&fmt_ctx);
     return info;

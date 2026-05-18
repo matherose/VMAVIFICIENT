@@ -23,19 +23,19 @@ typedef struct {
   const char *rpu_path;       /**< Dolby Vision RPU .bin (NULL if none). */
   const EncodePreset *preset; /**< SVT-AV1 parameter preset. */
   int film_grain;             /**< Film grain synthesis level (0–50). */
-  double grain_score;    /**< Normalized grain score 0..1 from media_analysis.
-                              Used for grain-adaptive CDEF scaling. */
-  double grain_variance; /**< Per-window Y-score variance from media_analysis
-                              (high = inconsistent grain across the film). */
-  int target_bitrate;    /**< Target bitrate in kbps (VBR mode, ignored if crf >
-                            0). */
-  int crf; /**< CRF value 1–63 for CRF mode, or 0 to use VBR @ target_bitrate.
-            */
-  const MediaInfo *info; /**< Source media info. */
-  const CropInfo *crop;  /**< Crop values (NULL if none). */
-  const HdrInfo *hdr;    /**< HDR info. */
-  int scale_width;  /**< Target output width  after downscale (0 = native). */
-  int scale_height; /**< Target output height after downscale (0 = native). */
+  double grain_score;         /**< Normalized grain score 0..1 from media_analysis.
+                                   Used for grain-adaptive CDEF scaling. */
+  double grain_variance;      /**< Per-window Y-score variance from media_analysis
+                                   (high = inconsistent grain across the film). */
+  int target_bitrate;         /**< Target bitrate in kbps (VBR mode, ignored if crf >
+                                 0). */
+  int crf;                    /**< CRF value 1–63 for CRF mode, or 0 to use VBR @ target_bitrate.
+                               */
+  const MediaInfo *info;      /**< Source media info. */
+  const CropInfo *crop;       /**< Crop values (NULL if none). */
+  const HdrInfo *hdr;         /**< HDR info. */
+  int scale_width;            /**< Target output width  after downscale (0 = native). */
+  int scale_height;           /**< Target output height after downscale (0 = native). */
 } VideoEncodeConfig;
 
 /**

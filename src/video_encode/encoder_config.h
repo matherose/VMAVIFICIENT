@@ -28,23 +28,20 @@
  * @param target_bitrate_kbps  Used only in VBR mode (crf <= 0).
  * @param crf                  CRF/CQP value, or 0/-1 for VBR.
  */
-void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg,
-                            const EncodePreset *p, int film_grain,
+void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg, const EncodePreset *p, int film_grain,
                             int target_bitrate_kbps, int crf);
 
 /**
  * Copy primaries / transfer / matrix / range from the source codecpar.
  * Must be called before svt_av1_enc_set_parameter.
  */
-void copy_color_info(EbSvtAv1EncConfiguration *cfg,
-                     const AVCodecParameters *codecpar);
+void copy_color_info(EbSvtAv1EncConfiguration *cfg, const AVCodecParameters *codecpar);
 
 /**
  * Extract HDR10 static metadata (MDCV + CLL) from stream side data and
  * write it into @p cfg. No-op when the source carries neither.
  * Must be called before svt_av1_enc_set_parameter.
  */
-void set_hdr10_metadata(EbSvtAv1EncConfiguration *cfg,
-                        const AVStream *stream);
+void set_hdr10_metadata(EbSvtAv1EncConfiguration *cfg, const AVStream *stream);
 
 #endif /* VMAV_ENCODER_CONFIG_H */

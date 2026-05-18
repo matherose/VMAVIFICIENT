@@ -1430,16 +1430,15 @@ int main(int argc, char *argv[]) {
           ui_section("CRF search");
           CrfSearchResult csr = run_crf_search(filepath, vmaf_used, enc_preset, film_grain, NULL);
           if (csr.crf < 0) {
-            ui_stage_fail("crf-search",
-                          csr.error ? csr.error : "CRF search failed");
+            ui_stage_fail("crf-search", csr.error ? csr.error : "CRF search failed");
             ui_hint("bypass with --crf <N> or --bitrate <kbps>");
             if (tracks.error == 0)
               free_media_tracks(&tracks);
             return 1;
           }
           char detail[96];
-          snprintf(detail, sizeof(detail), "CRF %d  (VMAF %.2f, target %d)",
-                   csr.crf, csr.vmaf_result, vmaf_used);
+          snprintf(detail, sizeof(detail), "CRF %d  (VMAF %.2f, target %d)", csr.crf,
+                   csr.vmaf_result, vmaf_used);
           ui_stage_ok("crf-search", detail);
           crf = csr.crf;
         }
@@ -2073,17 +2072,15 @@ int main(int argc, char *argv[]) {
           CrfSearchResult hd_csr = run_crf_search(filepath, hd_vmaf_used, hd_preset, hd_film_grain,
                                                   "scale=1920:1080:flags=lanczos");
           if (hd_csr.crf < 0) {
-            ui_stage_fail("crf-search",
-                          hd_csr.error ? hd_csr.error : "CRF search failed");
+            ui_stage_fail("crf-search", hd_csr.error ? hd_csr.error : "CRF search failed");
             ui_hint("bypass with --crf <N> or --bitrate <kbps>");
             if (tracks.error == 0)
               free_media_tracks(&tracks);
             return 1;
           }
           char hd_csr_detail[96];
-          snprintf(hd_csr_detail, sizeof(hd_csr_detail),
-                   "CRF %d  (VMAF %.2f, target %d)", hd_csr.crf,
-                   hd_csr.vmaf_result, hd_vmaf_used);
+          snprintf(hd_csr_detail, sizeof(hd_csr_detail), "CRF %d  (VMAF %.2f, target %d)",
+                   hd_csr.crf, hd_csr.vmaf_result, hd_vmaf_used);
           ui_stage_ok("crf-search", hd_csr_detail);
           hd_crf = hd_csr.crf;
         } else if (cli_vmaf_target > 0) {
