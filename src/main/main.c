@@ -1424,30 +1424,22 @@ int main(int argc, char *argv[]) {
           snprintf(detail, sizeof(detail), "using cached CRF %d", crf);
           ui_stage_ok("skip", detail);
         } else {
-          /* Default path: probe CRF via ab-av1 at source (4K) resolution. */
+          /* Default path: probe CRF in-process at source (4K) resolution. */
           vmaf_used =
               cli_vmaf_target > 0 ? cli_vmaf_target : get_vmaf_target(cli_quality, info.height);
           ui_section("CRF search");
           CrfSearchResult csr = run_crf_search(filepath, vmaf_used, enc_preset, film_grain, NULL);
-          if (csr.ab_av1_missing) {
-            ui_stage_fail("crf-search", "ab-av1 not found in PATH");
-            ui_hint("install: brew install master-of-mint/tap/ab-av1  "
-                    "or bypass with --crf <N> or --bitrate <kbps>");
-            if (tracks.error == 0)
-              free_media_tracks(&tracks);
-            return 1;
-          }
           if (csr.crf < 0) {
-            ui_stage_fail("crf-search", "ab-av1 exited with error or no CRF parsed");
-            ui_hint("if params changed since last run, clear stale cache: "
-                    "rm -rf ~/.cache/ab-av1/");
+            ui_stage_fail("crf-search",
+                          csr.error ? csr.error : "CRF search failed");
             ui_hint("bypass with --crf <N> or --bitrate <kbps>");
             if (tracks.error == 0)
               free_media_tracks(&tracks);
             return 1;
           }
-          char detail[64];
-          snprintf(detail, sizeof(detail), "CRF %d  (VMAF target %d)", csr.crf, vmaf_used);
+          char detail[96];
+          snprintf(detail, sizeof(detail), "CRF %d  (VMAF %.2f, target %d)",
+                   csr.crf, csr.vmaf_result, vmaf_used);
           ui_stage_ok("crf-search", detail);
           crf = csr.crf;
         }
@@ -2080,25 +2072,18 @@ int main(int argc, char *argv[]) {
           ui_section(companion_hd ? "HD CRF search" : "CRF search");
           CrfSearchResult hd_csr = run_crf_search(filepath, hd_vmaf_used, hd_preset, hd_film_grain,
                                                   "scale=1920:1080:flags=lanczos");
-          if (hd_csr.ab_av1_missing) {
-            ui_stage_fail("crf-search", "ab-av1 not found in PATH");
-            ui_hint("install: brew install master-of-mint/tap/ab-av1  "
-                    "or bypass with --crf <N> or --bitrate <kbps>");
-            if (tracks.error == 0)
-              free_media_tracks(&tracks);
-            return 1;
-          }
           if (hd_csr.crf < 0) {
-            ui_stage_fail("crf-search", "ab-av1 exited with error or no CRF parsed");
-            ui_hint("if params changed since last run, clear stale cache: "
-                    "rm -rf ~/.cache/ab-av1/");
+            ui_stage_fail("crf-search",
+                          hd_csr.error ? hd_csr.error : "CRF search failed");
+            ui_hint("bypass with --crf <N> or --bitrate <kbps>");
             if (tracks.error == 0)
               free_media_tracks(&tracks);
             return 1;
           }
-          char hd_csr_detail[64];
-          snprintf(hd_csr_detail, sizeof(hd_csr_detail), "CRF %d  (VMAF target %d)", hd_csr.crf,
-                   hd_vmaf_used);
+          char hd_csr_detail[96];
+          snprintf(hd_csr_detail, sizeof(hd_csr_detail),
+                   "CRF %d  (VMAF %.2f, target %d)", hd_csr.crf,
+                   hd_csr.vmaf_result, hd_vmaf_used);
           ui_stage_ok("crf-search", hd_csr_detail);
           hd_crf = hd_csr.crf;
         } else if (cli_vmaf_target > 0) {
