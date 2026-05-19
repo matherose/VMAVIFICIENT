@@ -1,0 +1,30 @@
+VMAVIFICIENT BINARY DISTRIBUTION LICENSE NOTICE
+================================================
+
+The VMAVIFICIENT source code is released under the WTFPL v2
+(see LICENSE in this distribution).
+
+However, the pre-built binary distributions of vmavificient (the .deb,
+.pkg, .msi, and .tar.zst artifacts published on GitHub Releases) include
+statically linked copies of GPL-licensed components, most notably
+FFmpeg built with the --enable-gpl configure flag.
+
+Under the terms of the GNU General Public License v3.0, the binary as a
+combined work is therefore licensed under the GPL-3.0-or-later. This
+applies only to the binary artifacts. The vmavificient source code
+itself remains under the WTFPL.
+
+If you redistribute the binary, you must comply with the GPL-3.0:
+  - Provide access to the corresponding source code of all GPL-licensed
+    components, including FFmpeg and any other GPL deps used to build
+    the binary. The pinned upstream sources are listed in
+    third_party/ as git submodules with exact SHAs.
+  - Pass on the GPL-3.0 rights to recipients.
+  - Do not impose additional restrictions.
+
+A full copy of the GPL-3.0 text is available at
+https://www.gnu.org/licenses/gpl-3.0.txt and is also embedded in the
+FFmpeg source tree under third_party/ffmpeg/COPYING.GPLv3.
+
+For full details on which third-party components contribute which
+license to the binary, see docs/licensing.md.

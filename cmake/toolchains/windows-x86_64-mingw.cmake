@@ -1,0 +1,28 @@
+# Windows x86_64 cross toolchain — llvm-mingw (LLVM + MinGW-w64 CRT).
+# Bootstrapped by scripts/fetch_llvm_mingw.sh, which exposes the
+# x86_64-w64-mingw32-clang triple on PATH.
+set(CMAKE_SYSTEM_NAME Windows)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+
+set(_triple "x86_64-w64-mingw32")
+find_program(_clang "${_triple}-clang" REQUIRED)
+find_program(_ar    "${_triple}-ar"    REQUIRED)
+find_program(_ranlib "${_triple}-ranlib" REQUIRED)
+find_program(_windres "${_triple}-windres")
+
+set(CMAKE_C_COMPILER "${_clang}")
+set(CMAKE_AR         "${_ar}"     CACHE FILEPATH "" FORCE)
+set(CMAKE_RANLIB     "${_ranlib}" CACHE FILEPATH "" FORCE)
+if(_windres)
+    set(CMAKE_RC_COMPILER "${_windres}")
+    enable_language(RC)
+endif()
+
+# Force static CRT + winpthread.
+set(CMAKE_EXE_LINKER_FLAGS_INIT
+    "-static -static-libgcc -Wl,-Bstatic -lpthread")
+
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)

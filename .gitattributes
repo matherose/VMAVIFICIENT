@@ -1,28 +1,26 @@
-# .gitattributes — Canonical entries per AGENTS.md § 15.4
-# Line endings and binary detection for consistent builds
+# Default: text files normalized to LF on commit, native on checkout
+* text=auto eol=lf
 
-# Normalize line endings to LF on commit
-*           text=auto eol=lf
+# Source code is always LF
+*.c     text eol=lf
+*.h     text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+*.cmake text eol=lf
+*.sh    text eol=lf
+CMakeLists.txt text eol=lf
 
-# Force LF for source files
-*.c         text eol=lf
-*.h         text eol=lf
-*.rs        text eol=lf
-*.s         text eol=lf
-*.S         text eol=lf
-*.asm       text eol=lf
-*.md        text eol=lf
-*.cmake     text eol=lf
-*.sh        text eol=lf
+# Windows-only build scripts stay CRLF
+*.bat   text eol=crlf
+*.ps1   text eol=crlf
 
-# Mark binaries — no line-ending conversion, no diff
-*.bin       binary
-*.o         binary
-*.a         binary
-*.so        binary
-*.profraw   binary
-*.profdata  binary
-
-# Scripts must be executable
-scripts/*.sh    text eol=lf
-fuzz/*.sh       text eol=lf
+# Binary fixtures must not be touched
+*.mkv   binary
+*.sup   binary
+*.bin   binary
+*.png   binary
+*.jpg   binary
+*.wav   binary
+*.zst   binary

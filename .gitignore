@@ -1,143 +1,52 @@
-# vmavificient .gitignore
-#
-# Kept deliberately compact. We're a C project that builds with CMake/Ninja
-# on macOS or Linux; there's no need for the toptal-template Windows / VS /
-# Emacs / Vim boilerplate this file used to carry.
-#
-# Anything you want ignored on your own machine that isn't broadly useful
-# (IDE state, scratch dirs) belongs in your local .git/info/exclude.
+# Build output
+/build/
+/build-*/
+/cmake-build-*/
+/out/
 
-# ── C build artifacts ─────────────────────────────────────────────────
-*.o
-*.a
-*.so
-*.so.*
-*.dylib
-*.dylib.*
-*.exe
-*.dll
-*.lib
-*.la
-*.lo
-*.gch
-*.pch
-*.d
+# Toolchains fetched by scripts/
+/.toolchains/
+/.zig/
+/.llvm-mingw/
 
-# ── CMake / Ninja build trees ─────────────────────────────────────────
-# We standardize on `build/` (release) and `build-asan/` (sanitizer).
-# Other build-* prefixes for ad-hoc trees are also ignored.
-build/
-build-*/
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-install_manifest.txt
-CTestTestfile.cmake
+# Third-party install prefix (set by ExternalProject)
+/third_party_install/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+.cache/
 compile_commands.json
-.ninja_deps
-.ninja_log
 
-# ── Cargo / Rust  (libdovi, libhdr10plus, grav1synth build inside CMake) ─
-target/
-**/Cargo.lock.tmp
-
-# ── macOS / Linux finder/editor cruft ────────────────────────────────
+# macOS
 .DS_Store
-.AppleDouble
-.LSOverride
+
+# Editor temp
 *.swp
-*.swo
+*~
+\#*\#
+.#*
 
-# ── Project-specific state ───────────────────────────────────────────
-# config.ini holds the TMDB API key; .tmdb_api_key was an older format.
-config.ini
-.tmdb_api_key
+# Test artifacts
+/Testing/
+/CTestTestfile.cmake
+/CMakeCache.txt
+/CMakeFiles/
 
-# .claude/ is session state from Anthropic's Claude Code (worktrees,
-# transcripts). Never commit this — every worktree is per-developer.
-.claude/
+# Coverage
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+/coverage/
 
-# crfsearch/ is a leftover scratch directory from the Phase A CRF/VMAF
-# experiments (now removed); keep ignored so re-running old branches
-# locally doesn't accidentally stage it.
-crfsearch/
+# Release artifacts (local builds)
+*.deb
+*.pkg
+*.msi
+*.tar.zst
 
-# ── Encoder intermediates / test outputs ──────────────────────────────
-# vmavificient writes per-track .opus, .srt, RPU .bin and a .video.mkv
-# next to the input source, then cleans them up on success. Ignore the
-# full set so a failed run doesn't leave them in `git status`.
-#
-# The final muxed *.mkv is also ignored — the test sample (BBB) and any
-# real encode output sit in this same workspace. Move sources you want
-# to keep tracked into a different directory.
-*.mkv
-*.video.mkv
-*.opus
-*.srt
-*.bin
-
-# CI test fixtures
-sample.mp4
-bbb.mp4.zip
-bbb_sunflower_*.mp4
-
-# ── Navigation artifacts (per AGENTS.md § 15.3) ────────────────────────
-# These directories are created during migration per AGENTS.md § 15.1
-# and should never be committed.
-
-docs/api/               # Doxygen-generated API docs
-docs/design/           # Design docs and ADRs (generated docs)
-build/debug/           # Debug preset build artifacts
-build/asan/            # ASan preset build artifacts
-build/msan/            # MSan preset build artifacts
-build/tsan/            # TSan preset build artifacts
-build/coverage/        # Coverage preset build artifacts
-build/release/         # Release preset build artifacts
-reports/analyzer/      # scan-build findings
-reports/coverage/      # llvm-cov HTML/LCOV reports
-.a5c/runs/             # Babysitter runtime state
-fuzz/corpus/           # Fuzz seed corpus (can be committed if small)
-
-# Optional (per AGENTS.md § 15.3):
-# .a5c/processes/       # Babysitter process definitions (commit these)
-# cmake/                # CMake helper modules (commit these)
-# scripts/              # Project scripts (commit these)
-# docs/                 # Project documentation (commit these, except docs/api/)
-
-# ── AI and personal config ────────────────────────────────────────────
-# Local AI session state (per AGENTS.md § 15.3):
-#(players, scripts, configs)—never commit.
-.a5c/
-.pi/
-
-# Model and configuration files—project-owned but sensitive.
-models.json
-model-router.json
-
-# Project-specific AI state
-.pi/agent/
-.pi/agent/config/
-.pi/agent/models/
-.pi/agent/contexts/
-.pi/agent/last-context
-.pi/agent/last-state
-.pi/agent/session-state
-.pi/agent/model-cache/
-.pi/agent/logs/
-.pi/agent/temp/
-
-# Babysitter runtime—local to each developer’s machine.
-a5c/runs/
-a5c/processes/
-.a5c/runs/
-.a5c/processes/
-.a5c/runner.state
-
-# Local AI session snapshots (never commit).
-.a5c/session-snapshots/
-.a5c/session-cache/
-.a5c/session-data/
-
-# Commit message templates—personal preference.
-.gitmessage
-.vmavificient-cache/
+# Logs / scratch
+*.log
+/tmp/
