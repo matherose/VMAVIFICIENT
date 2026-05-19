@@ -35,10 +35,8 @@ typedef struct {
  *                        If NULL, inferred from track language.
  * @return Result with error status and subtitle count.
  */
-SubtitleConvertResult convert_pgs_to_srt(const char *input_path,
-                                         const TrackInfo *track,
-                                         const char *output_path,
-                                         const char *tesseract_lang);
+SubtitleConvertResult convert_pgs_to_srt(const char *input_path, const TrackInfo *track,
+                                         const char *output_path, const char *tesseract_lang);
 
 /**
  * @brief Check if a subtitle track is PGS (bitmap-based).
@@ -80,8 +78,7 @@ const char *iso639_to_tesseract_lang(const char *iso639);
  * @param is_forced 1 if forced subtitle track.
  * @param is_sdh    1 if SDH subtitle track.
  */
-void build_srt_filename(char *buf, size_t bufsize, const char *base_name,
-                        const char *language, FrenchVariant fv, int is_forced,
-                        int is_sdh);
+void build_srt_filename(char *buf, size_t bufsize, const char *base_name, const char *language,
+                        FrenchVariant fv, int is_forced, int is_sdh);
 
 #endif /* SUBTITLE_CONVERT_H */

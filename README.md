@@ -138,8 +138,8 @@ Everything else comes from the system: FFmpeg (avformat/avcodec/avutil/avfilter/
 
 ```bash
 brew install \
-    ninja pkg-config nasm rust cargo-c \
-    ffmpeg opus dovi_tool tesseract leptonica \
+    ninja pkg-config nasm rust cargo-c meson \
+    ffmpeg opus dovi_tool tesseract leptonica libvmaf \
     jpeg-turbo libpng libtiff cjson openssl@3
 ```
 

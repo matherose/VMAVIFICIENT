@@ -60,8 +60,7 @@ int ui_is_verbose(void);
 void ui_section(const char *title);
 
 /** Print "  label<pad>value\n" with label column padded to UI_LABEL_W. */
-void ui_kv(const char *label, const char *fmt, ...)
-    __attribute__((format(printf, 2, 3)));
+void ui_kv(const char *label, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 
 /** Print "  freeform line\n" — two-space indent, no label column. */
 void ui_row(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

@@ -21,8 +21,6 @@
 #include <libavformat/avformat.h>
 #include <libavutil/error.h>
 #include <libavutil/imgutils.h>
-#include <libavutil/mastering_display_metadata.h>
-#include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
 
@@ -33,6 +31,7 @@
 
 #include <libdovi/rpu_parser.h>
 
+#include "encoder_config.h"
 #include "ui.h"
 
 /* ====================================================================== */
@@ -44,8 +43,8 @@
 /* output (rate control decisions, GOP layout, warnings, etc.).         */
 /* ====================================================================== */
 
-static void svt_log_callback(void *context, SvtAv1LogLevel level,
-                             const char *tag, const char *fmt, va_list args) {
+static void svt_log_callback(void *context, SvtAv1LogLevel level, const char *tag, const char *fmt,
+                             va_list args) {
   (void)context;
   if (!ui_is_verbose())
     return;
@@ -72,8 +71,7 @@ static void svt_log_callback(void *context, SvtAv1LogLevel level,
   default:
     break;
   }
-  fprintf(stderr, "[svt-av1 %s%s%s] ", level_str, tag ? " " : "",
-          tag ? tag : "");
+  fprintf(stderr, "[svt-av1 %s%s%s] ", level_str, tag ? " " : "", tag ? tag : "");
   vfprintf(stderr, fmt, args);
   /* SVT messages may or may not end with \n; don't double up. */
   size_t fmtlen = fmt ? strlen(fmt) : 0;
@@ -151,254 +149,10 @@ static size_t rpu_reader_next(RpuReader *r, uint8_t **out_data) {
 /* ====================================================================== */
 
 /** Format the per-update middle string for the video progress bar. */
-static void fmt_video_middle(char *out, size_t cap, int64_t frames_done,
-                             time_t start_time) {
+static void fmt_video_middle(char *out, size_t cap, int64_t frames_done, time_t start_time) {
   double elapsed = difftime(time(NULL), start_time);
   double fps = (elapsed > 0.5) ? frames_done / elapsed : 0;
   snprintf(out, cap, "%lld frames  %.1f fps", (long long)frames_done, fps);
-}
-
-/* ====================================================================== */
-/*  SVT-AV1 configuration from preset                                     */
-/* ====================================================================== */
-
-#define UNSET (-1)
-
-static void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg,
-                                   const EncodePreset *p, int film_grain,
-                                   int target_bitrate_kbps, int crf) {
-  cfg->enc_mode = (int8_t)p->preset;
-  cfg->intra_period_length = p->keyint;
-  cfg->tune = (uint8_t)p->tune;
-  if (crf > 0) {
-    cfg->rate_control_mode = SVT_AV1_RC_MODE_CQP_OR_CRF;
-    cfg->qp = (uint32_t)crf;
-  } else {
-    cfg->rate_control_mode = SVT_AV1_RC_MODE_VBR;
-    cfg->target_bit_rate = (uint32_t)target_bitrate_kbps * 1000;
-  }
-
-  cfg->ac_bias = p->ac_bias;
-  cfg->enable_variance_boost = true;
-  cfg->variance_boost_strength = (uint8_t)p->variance_boost;
-  cfg->variance_octile = (uint8_t)p->variance_octile;
-  cfg->variance_boost_curve = (uint8_t)p->variance_curve;
-  cfg->sharpness = (int8_t)p->sharpness;
-  cfg->luminance_qp_bias = (uint8_t)p->luminance_bias;
-  cfg->enable_tf = (uint8_t)p->enable_tf;
-  cfg->tf_strength = (uint8_t)p->tf_strength;
-  cfg->kf_tf_strength = (uint8_t)p->kf_tf_strength;
-  cfg->tx_bias = (uint8_t)p->tx_bias;
-  cfg->sharp_tx = (uint8_t)p->sharp_tx;
-  cfg->complex_hvs = (uint8_t)p->complex_hvs;
-  cfg->noise_adaptive_filtering = (uint8_t)p->noise_adaptive_filtering;
-  cfg->enable_dlf_flag = (uint8_t)p->enable_dlf;
-  cfg->cdef_scaling = (uint8_t)p->cdef_scaling;
-  cfg->qp_scale_compress_strength = p->qp_scale_compress_strength;
-  cfg->max_tx_size = (uint8_t)p->max_tx_size;
-  cfg->hbd_mds = (uint8_t)p->hbd_mds;
-  cfg->adaptive_film_grain = (p->adaptive_film_grain == 1);
-  cfg->alt_lambda_factors = (p->alt_lambda_factors == 1);
-
-  if (p->noise_norm_strength != UNSET)
-    cfg->noise_norm_strength = (uint8_t)p->noise_norm_strength;
-  if (p->chroma_qm_min != UNSET)
-    cfg->min_chroma_qm_level = (uint8_t)p->chroma_qm_min;
-  if (p->chroma_qm_max != UNSET)
-    cfg->max_chroma_qm_level = (uint8_t)p->chroma_qm_max;
-  if (p->enable_overlays != UNSET)
-    cfg->enable_overlays = (p->enable_overlays == 1);
-
-  /* Quantization matrices */
-  if (p->enable_qm >= 0)
-    cfg->enable_qm = (p->enable_qm == 1);
-  if (p->qm_min != UNSET)
-    cfg->min_qm_level = (uint8_t)p->qm_min;
-  if (p->qm_max != UNSET)
-    cfg->max_qm_level = (uint8_t)p->qm_max;
-
-  /* VBR rate control limits */
-  if (p->undershoot_pct != UNSET)
-    cfg->under_shoot_pct = (uint32_t)p->undershoot_pct;
-  if (p->overshoot_pct != UNSET)
-    cfg->over_shoot_pct = (uint32_t)p->overshoot_pct;
-
-  /* QP bounds */
-  if (p->min_qp != UNSET)
-    cfg->min_qp_allowed = (uint32_t)p->min_qp;
-  if (p->max_qp != UNSET)
-    cfg->max_qp_allowed = (uint32_t)p->max_qp;
-
-  /* Motion field motion vectors */
-  if (p->enable_mfmv != UNSET)
-    cfg->enable_mfmv = (p->enable_mfmv == 1);
-
-  /* Intra refresh type */
-  if (p->irefresh_type != UNSET)
-    cfg->intra_refresh_type = (int8_t)p->irefresh_type;
-
-  /* Adaptive quantization mode */
-  if (p->aq_mode != UNSET)
-    cfg->aq_mode = (uint8_t)p->aq_mode;
-
-  /* Restoration filter */
-  if (p->enable_restoration != UNSET)
-    cfg->enable_restoration_filtering = (p->enable_restoration == 1);
-
-  /* Recode loop level */
-  if (p->recode_loop != UNSET)
-    cfg->recode_loop = (uint32_t)p->recode_loop;
-
-  /* VBR look-ahead distance */
-  if (p->look_ahead_distance != UNSET)
-    cfg->look_ahead_distance = (uint32_t)p->look_ahead_distance;
-
-  /* Dynamic GOP */
-  if (p->enable_dg != UNSET)
-    cfg->enable_dg = (p->enable_dg == 1);
-
-  /* Decoder speed optimization (0 = favor quality) */
-  if (p->fast_decode != UNSET)
-    cfg->fast_decode = (uint8_t)p->fast_decode;
-
-  /* Scene change detection */
-  if (p->scd != UNSET)
-    cfg->scene_change_detection = (uint32_t)(p->scd == 1);
-
-  /* Apply uniform chroma QIndex offset across all temporal layers */
-  if (p->temporal_layer_chroma_qindex_offset != UNSET)
-    for (int i = 0; i < EB_MAX_TEMPORAL_LAYERS; i++)
-      cfg->chroma_qindex_offsets[i] =
-          (int32_t)p->temporal_layer_chroma_qindex_offset;
-
-  /* Keyframe QP offsets — require use_fixed_qindex_offsets to take effect.
-   * Mode 2 applies offsets on top of auto-derived QP (compatible with CRF). */
-  if (p->key_frame_qindex_offset != 0 ||
-      p->key_frame_chroma_qindex_offset != 0) {
-    cfg->use_fixed_qindex_offsets = 2;
-    cfg->key_frame_qindex_offset = (int32_t)p->key_frame_qindex_offset;
-    cfg->key_frame_chroma_qindex_offset =
-        (int32_t)p->key_frame_chroma_qindex_offset;
-  }
-
-  /* DC coefficient QP offsets are NOT set — they apply to every frame as
-   * delta_q_dc which creates a large DC/AC quality mismatch, destabilizing
-   * the RD optimizer and causing high bitrate with poor VMAF. */
-
-  /* VBR rate shaping — only meaningful in VBR mode */
-  if (crf <= 0) {
-    if (p->vbr_max_section_pct > 0)
-      cfg->vbr_max_section_pct = (uint32_t)p->vbr_max_section_pct;
-    /* gop_constraint_rc is intentionally NOT set — the feature is flagged
-     * as work-in-progress in SVT-AV1-HDR and not ready for production. */
-  }
-
-  /* Startup mini-GOP tuning — CRF/CQP mode only */
-  if (crf > 0) {
-    if (p->startup_mg_size > 0)
-      cfg->startup_mg_size = (uint8_t)p->startup_mg_size;
-    if (p->startup_qp_offset != 0)
-      cfg->startup_qp_offset = (int8_t)p->startup_qp_offset;
-  }
-
-  /* Grain mechanism — branches per preset (use_noise flag).
-   *
-   * use_noise = 1 (digital + animation):
-   *   --noise (SVT-AV1-HDR 4.1.0+) — synthetic noise table, no source
-   *   denoising, no analysis cost. Pure additive overlay. The strength
-   *   value comes from the same dynamic mapping (get_film_grain_from_score)
-   *   so the user-facing "grain level" stays consistent across mechanisms.
-   *
-   * use_noise = 0 (analog film):
-   *   --film-grain + denoise=1 — analyzes source grain, denoises before
-   *   encoding, decoder re-synths. The juliobbv-p fork normally disables
-   *   denoise (warns about detail loss), but at HDLight bitrates we need
-   *   the bitrate savings; analog film is the one tier where the source
-   *   grain has structure worth analyzing. */
-  if (p->use_noise) {
-    cfg->noise_strength = (uint8_t)film_grain;
-    cfg->noise_strength_chroma = (int32_t)p->noise_chroma_strength;
-    cfg->noise_chroma_from_luma = (uint8_t)p->noise_chroma_from_luma;
-    cfg->noise_size = (int8_t)p->noise_size;
-    /* Make sure the legacy film-grain path is fully off — both can't
-       drive fgs_table simultaneously. */
-    cfg->film_grain_denoise_strength = 0;
-    cfg->film_grain_denoise_apply = 0;
-  } else {
-    cfg->film_grain_denoise_strength = (uint32_t)film_grain;
-    cfg->film_grain_denoise_apply = (film_grain > 0) ? 1 : 0;
-    cfg->noise_strength = 0;
-  }
-}
-
-/* ====================================================================== */
-/*  Color space passthrough                                               */
-/* ====================================================================== */
-
-static void copy_color_info(EbSvtAv1EncConfiguration *cfg,
-                            const AVCodecParameters *codecpar) {
-  cfg->color_primaries = (EbColorPrimaries)codecpar->color_primaries;
-  cfg->transfer_characteristics =
-      (EbTransferCharacteristics)codecpar->color_trc;
-  cfg->matrix_coefficients = (EbMatrixCoefficients)codecpar->color_space;
-  cfg->color_range = (codecpar->color_range == AVCOL_RANGE_JPEG)
-                         ? EB_CR_FULL_RANGE
-                         : EB_CR_STUDIO_RANGE;
-}
-
-/**
- * Extract and set HDR10 static metadata from stream-level codec side data.
- * Must be called BEFORE svt_av1_enc_set_parameter / svt_av1_enc_init.
- */
-static void set_hdr10_metadata(EbSvtAv1EncConfiguration *cfg,
-                               const AVStream *stream) {
-  const AVCodecParameters *par = stream->codecpar;
-
-  /* Mastering display from coded side data */
-  const AVPacketSideData *mdcv_sd = NULL;
-  const AVPacketSideData *cll_sd = NULL;
-  for (int i = 0; i < par->nb_coded_side_data; i++) {
-    if (par->coded_side_data[i].type == AV_PKT_DATA_MASTERING_DISPLAY_METADATA)
-      mdcv_sd = &par->coded_side_data[i];
-    else if (par->coded_side_data[i].type == AV_PKT_DATA_CONTENT_LIGHT_LEVEL)
-      cll_sd = &par->coded_side_data[i];
-  }
-
-  if (mdcv_sd && mdcv_sd->size >= (int)sizeof(AVMasteringDisplayMetadata)) {
-    const AVMasteringDisplayMetadata *mdcv =
-        (const AVMasteringDisplayMetadata *)mdcv_sd->data;
-    if (mdcv->has_primaries) {
-      cfg->mastering_display.r.x =
-          (uint16_t)(av_q2d(mdcv->display_primaries[0][0]) * 50000 + 0.5);
-      cfg->mastering_display.r.y =
-          (uint16_t)(av_q2d(mdcv->display_primaries[0][1]) * 50000 + 0.5);
-      cfg->mastering_display.g.x =
-          (uint16_t)(av_q2d(mdcv->display_primaries[1][0]) * 50000 + 0.5);
-      cfg->mastering_display.g.y =
-          (uint16_t)(av_q2d(mdcv->display_primaries[1][1]) * 50000 + 0.5);
-      cfg->mastering_display.b.x =
-          (uint16_t)(av_q2d(mdcv->display_primaries[2][0]) * 50000 + 0.5);
-      cfg->mastering_display.b.y =
-          (uint16_t)(av_q2d(mdcv->display_primaries[2][1]) * 50000 + 0.5);
-      cfg->mastering_display.white_point.x =
-          (uint16_t)(av_q2d(mdcv->white_point[0]) * 50000 + 0.5);
-      cfg->mastering_display.white_point.y =
-          (uint16_t)(av_q2d(mdcv->white_point[1]) * 50000 + 0.5);
-    }
-    if (mdcv->has_luminance) {
-      cfg->mastering_display.max_luma =
-          (uint32_t)(av_q2d(mdcv->max_luminance) * 10000 + 0.5);
-      cfg->mastering_display.min_luma =
-          (uint32_t)(av_q2d(mdcv->min_luminance) * 10000 + 0.5);
-    }
-  }
-
-  if (cll_sd && cll_sd->size >= (int)sizeof(AVContentLightMetadata)) {
-    const AVContentLightMetadata *cll =
-        (const AVContentLightMetadata *)cll_sd->data;
-    cfg->content_light_level.max_cll = (uint16_t)cll->MaxCLL;
-    cfg->content_light_level.max_fall = (uint16_t)cll->MaxFALL;
-  }
 }
 
 /* ====================================================================== */
@@ -406,8 +160,7 @@ static void set_hdr10_metadata(EbSvtAv1EncConfiguration *cfg,
 /* ====================================================================== */
 
 VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
-  VideoEncodeResult result = {
-      .error = 0, .skipped = 0, .frames_encoded = 0, .bytes_written = 0};
+  VideoEncodeResult result = {.error = 0, .skipped = 0, .frames_encoded = 0, .bytes_written = 0};
 
   /* Skip if output already exists. */
   struct stat st;
@@ -461,8 +214,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   int padded_h = (dst_h + 63) & ~63;
 
   if (dst_w < 64 || dst_h < 64) {
-    fprintf(stderr, "  Video Error: output dimensions %dx%d too small\n", dst_w,
-            dst_h);
+    fprintf(stderr, "  Video Error: output dimensions %dx%d too small\n", dst_w, dst_h);
     result.error = -1;
     return result;
   }
@@ -471,8 +223,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   ret = avformat_open_input(&ifmt_ctx, config->input_path, NULL, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "  Video Error: cannot open '%s': %s\n", config->input_path,
-            errbuf);
+    fprintf(stderr, "  Video Error: cannot open '%s': %s\n", config->input_path, errbuf);
     result.error = ret;
     return result;
   }
@@ -487,8 +238,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
 
   /* Find video stream */
   const AVCodec *decoder = NULL;
-  video_idx =
-      av_find_best_stream(ifmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
+  video_idx = av_find_best_stream(ifmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
   if (video_idx < 0) {
     fprintf(stderr, "  Video Error: no video stream found\n");
     result.error = -1;
@@ -525,8 +275,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
      alignment regardless of how FFmpeg allocated the decoder frame. */
   /* Input: cropped source dims. Output: dst dims (== cropped if no downscale,
      or smaller when --companion-hd / --scale-to-hd is active). */
-  sws_ctx = sws_getContext(out_w, out_h, dec_ctx->pix_fmt, dst_w, dst_h,
-                           target_pix_fmt, SWS_LANCZOS, NULL, NULL, NULL);
+  sws_ctx = sws_getContext(out_w, out_h, dec_ctx->pix_fmt, dst_w, dst_h, target_pix_fmt,
+                           SWS_LANCZOS, NULL, NULL, NULL);
   if (!sws_ctx) {
     fprintf(stderr, "  Video Error: cannot create swscale context\n");
     result.error = -1;
@@ -538,8 +288,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   svt_av1_set_log_callback(svt_log_callback, NULL);
   ret = svt_av1_enc_init_handle(&svt_handle, &svt_config);
   if (ret != EB_ErrorNone) {
-    fprintf(stderr, "  Video Error: svt_av1_enc_init_handle failed (%d)\n",
-            ret);
+    fprintf(stderr, "  Video Error: svt_av1_enc_init_handle failed (%d)\n", ret);
     result.error = -1;
     goto cleanup;
   }
@@ -554,8 +303,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   if (in_stream->avg_frame_rate.num > 0 && in_stream->avg_frame_rate.den > 0) {
     svt_config.frame_rate_numerator = (uint32_t)in_stream->avg_frame_rate.num;
     svt_config.frame_rate_denominator = (uint32_t)in_stream->avg_frame_rate.den;
-  } else if (in_stream->r_frame_rate.num > 0 &&
-             in_stream->r_frame_rate.den > 0) {
+  } else if (in_stream->r_frame_rate.num > 0 && in_stream->r_frame_rate.den > 0) {
     svt_config.frame_rate_numerator = (uint32_t)in_stream->r_frame_rate.num;
     svt_config.frame_rate_denominator = (uint32_t)in_stream->r_frame_rate.den;
   }
@@ -567,8 +315,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   set_hdr10_metadata(&svt_config, in_stream);
 
   /* Apply quality preset */
-  apply_preset_to_config(&svt_config, config->preset, config->film_grain,
-                         config->target_bitrate, config->crf);
+  apply_preset_to_config(&svt_config, config->preset, config->film_grain, config->target_bitrate,
+                         config->crf);
 
   /* PQ content adjustments (HDR10 / HDR10+ / Dolby Vision) */
   if (in_stream->codecpar->color_trc == AVCOL_TRC_SMPTE2084) {
@@ -646,8 +394,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
     svt_config.noise_adaptive_filtering = 3;
 
     /* QP compression: tighten for temporal consistency on grainy content. */
-    svt_config.qp_scale_compress_strength =
-        fmin(svt_config.qp_scale_compress_strength + 0.5, 8.0);
+    svt_config.qp_scale_compress_strength = fmin(svt_config.qp_scale_compress_strength + 0.5, 8.0);
 
   } else if (gs > 0.08) {
     /* --- Medium grain --- */
@@ -670,15 +417,13 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
     svt_config.ac_bias = fmin(svt_config.ac_bias + 0.5, 8.0);
 
     /* QP compression: slight tighten. */
-    svt_config.qp_scale_compress_strength =
-        fmin(svt_config.qp_scale_compress_strength + 0.3, 8.0);
+    svt_config.qp_scale_compress_strength = fmin(svt_config.qp_scale_compress_strength + 0.3, 8.0);
   }
   /* Low grain (<0.08): keep preset defaults — no adjustments needed. */
 
   ret = svt_av1_enc_set_parameter(svt_handle, &svt_config);
   if (ret != EB_ErrorNone) {
-    fprintf(stderr, "  Video Error: svt_av1_enc_set_parameter failed (%d)\n",
-            ret);
+    fprintf(stderr, "  Video Error: svt_av1_enc_set_parameter failed (%d)\n", ret);
     result.error = -1;
     goto cleanup;
   }
@@ -691,8 +436,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   }
 
   /* ---- Set up output MKV muxer ---- */
-  ret = avformat_alloc_output_context2(&ofmt_ctx, NULL, "matroska",
-                                       config->output_path);
+  ret = avformat_alloc_output_context2(&ofmt_ctx, NULL, "matroska", config->output_path);
   if (ret < 0 || !ofmt_ctx) {
     fprintf(stderr, "  Video Error: cannot create output context\n");
     result.error = -1;
@@ -716,15 +460,14 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   out_stream->codecpar->color_range = in_stream->codecpar->color_range;
 
   /* Time base: use the encoder's frame rate */
-  out_stream->time_base = (AVRational){(int)svt_config.frame_rate_denominator,
-                                       (int)svt_config.frame_rate_numerator};
+  out_stream->time_base =
+      (AVRational){(int)svt_config.frame_rate_denominator, (int)svt_config.frame_rate_numerator};
 
   if (!(ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {
     ret = avio_open(&ofmt_ctx->pb, config->output_path, AVIO_FLAG_WRITE);
     if (ret < 0) {
       av_make_error_string(errbuf, sizeof(errbuf), ret);
-      fprintf(stderr, "  Video Error: cannot open output '%s': %s\n",
-              config->output_path, errbuf);
+      fprintf(stderr, "  Video Error: cannot open output '%s': %s\n", config->output_path, errbuf);
       result.error = ret;
       goto cleanup;
     }
@@ -793,35 +536,31 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
         }
 
         if (need_crop && (crop_top || crop_left)) {
-          const AVPixFmtDescriptor *desc =
-              av_pix_fmt_desc_get(dec_ctx->pix_fmt);
+          const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(dec_ctx->pix_fmt);
           int h_shift = desc->log2_chroma_w;
           int v_shift = desc->log2_chroma_h;
-          int is_semiplanar = (desc->nb_components >= 2 &&
-                               desc->comp[1].plane == desc->comp[2].plane);
+          int is_semiplanar =
+              (desc->nb_components >= 2 && desc->comp[1].plane == desc->comp[2].plane);
 
-          src_data[0] = frame->data[0] + crop_top * frame->linesize[0] +
-                        crop_left * bytes_per_sample;
+          src_data[0] =
+              frame->data[0] + crop_top * frame->linesize[0] + crop_left * bytes_per_sample;
 
           if (is_semiplanar) {
             if (frame->data[1])
-              src_data[1] = frame->data[1] +
-                            (crop_top >> v_shift) * frame->linesize[1] +
+              src_data[1] = frame->data[1] + (crop_top >> v_shift) * frame->linesize[1] +
                             (crop_left >> h_shift) * 2 * bytes_per_sample;
           } else {
             if (frame->data[1])
-              src_data[1] = frame->data[1] +
-                            (crop_top >> v_shift) * frame->linesize[1] +
+              src_data[1] = frame->data[1] + (crop_top >> v_shift) * frame->linesize[1] +
                             (crop_left >> h_shift) * bytes_per_sample;
             if (frame->data[2])
-              src_data[2] = frame->data[2] +
-                            (crop_top >> v_shift) * frame->linesize[2] +
+              src_data[2] = frame->data[2] + (crop_top >> v_shift) * frame->linesize[2] +
                             (crop_left >> h_shift) * bytes_per_sample;
           }
         }
 
-        sws_scale(sws_ctx, src_data, src_linesize, 0, out_h,
-                  cropped_frame->data, cropped_frame->linesize);
+        sws_scale(sws_ctx, src_data, src_linesize, 0, out_h, cropped_frame->data,
+                  cropped_frame->linesize);
       }
       AVFrame *enc_input = cropped_frame;
 
@@ -839,8 +578,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
       io_fmt.cr_stride = (uint32_t)(enc_input->linesize[2] / bytes_per_sample);
 
       input_buf.p_buffer = (uint8_t *)&io_fmt;
-      input_buf.n_filled_len =
-          (uint32_t)(dst_w * dst_h * bytes_per_sample * 3 / 2);
+      input_buf.n_filled_len = (uint32_t)(dst_w * dst_h * bytes_per_sample * 3 / 2);
       input_buf.pts = frame_number;
       input_buf.pic_type = EB_AV1_INVALID_PICTURE;
       input_buf.flags = 0;
@@ -858,11 +596,9 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
             /* Convert RPU to profile 8.1 for AV1 */
             dovi_convert_rpu_with_mode(rpu, 2);
 
-            const DoviData *t35 =
-                dovi_write_av1_rpu_metadata_obu_t35_complete(rpu);
+            const DoviData *t35 = dovi_write_av1_rpu_metadata_obu_t35_complete(rpu);
             if (t35 && t35->data && t35->len > 0) {
-              svt_add_metadata(&input_buf, EB_AV1_METADATA_TYPE_ITUT_T35,
-                               t35->data, t35->len);
+              svt_add_metadata(&input_buf, EB_AV1_METADATA_TYPE_ITUT_T35, t35->data, t35->len);
               dovi_data_free(t35);
             }
           }
@@ -894,21 +630,18 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
             /* Copy sequence header as extradata if present */
             if (out_pkt->flags & EB_BUFFERFLAG_HAS_TD) {
               /* The first packet with TD contains the sequence header */
-              out_stream->codecpar->extradata = av_mallocz(
-                  out_pkt->n_filled_len + AV_INPUT_BUFFER_PADDING_SIZE);
+              out_stream->codecpar->extradata =
+                  av_mallocz(out_pkt->n_filled_len + AV_INPUT_BUFFER_PADDING_SIZE);
               if (out_stream->codecpar->extradata) {
-                memcpy(out_stream->codecpar->extradata, out_pkt->p_buffer,
-                       out_pkt->n_filled_len);
-                out_stream->codecpar->extradata_size =
-                    (int)out_pkt->n_filled_len;
+                memcpy(out_stream->codecpar->extradata, out_pkt->p_buffer, out_pkt->n_filled_len);
+                out_stream->codecpar->extradata_size = (int)out_pkt->n_filled_len;
               }
             }
 
             ret = avformat_write_header(ofmt_ctx, NULL);
             if (ret < 0) {
               av_make_error_string(errbuf, sizeof(errbuf), ret);
-              fprintf(stderr, "  Video Error: cannot write output header: %s\n",
-                      errbuf);
+              fprintf(stderr, "  Video Error: cannot write output header: %s\n", errbuf);
               svt_av1_enc_release_out_buffer(&out_pkt);
               result.error = ret;
               goto cleanup;
@@ -973,24 +706,20 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
         const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(dec_ctx->pix_fmt);
         int h_shift = desc->log2_chroma_w;
         int v_shift = desc->log2_chroma_h;
-        int is_semiplanar = (desc->nb_components >= 2 &&
-                             desc->comp[1].plane == desc->comp[2].plane);
+        int is_semiplanar =
+            (desc->nb_components >= 2 && desc->comp[1].plane == desc->comp[2].plane);
 
-        src_data[0] = frame->data[0] + crop_top * frame->linesize[0] +
-                      crop_left * bytes_per_sample;
+        src_data[0] = frame->data[0] + crop_top * frame->linesize[0] + crop_left * bytes_per_sample;
         if (is_semiplanar) {
           if (frame->data[1])
-            src_data[1] = frame->data[1] +
-                          (crop_top >> v_shift) * frame->linesize[1] +
+            src_data[1] = frame->data[1] + (crop_top >> v_shift) * frame->linesize[1] +
                           (crop_left >> h_shift) * 2 * bytes_per_sample;
         } else {
           if (frame->data[1])
-            src_data[1] = frame->data[1] +
-                          (crop_top >> v_shift) * frame->linesize[1] +
+            src_data[1] = frame->data[1] + (crop_top >> v_shift) * frame->linesize[1] +
                           (crop_left >> h_shift) * bytes_per_sample;
           if (frame->data[2])
-            src_data[2] = frame->data[2] +
-                          (crop_top >> v_shift) * frame->linesize[2] +
+            src_data[2] = frame->data[2] + (crop_top >> v_shift) * frame->linesize[2] +
                           (crop_left >> h_shift) * bytes_per_sample;
         }
       }
@@ -1012,8 +741,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
     io_fmt.cr_stride = (uint32_t)(enc_input->linesize[2] / bytes_per_sample);
 
     input_buf.p_buffer = (uint8_t *)&io_fmt;
-    input_buf.n_filled_len =
-        (uint32_t)(out_w * out_h * bytes_per_sample * 3 / 2);
+    input_buf.n_filled_len = (uint32_t)(out_w * out_h * bytes_per_sample * 3 / 2);
     input_buf.pts = frame_number;
     input_buf.pic_type = EB_AV1_INVALID_PICTURE;
 
@@ -1026,11 +754,9 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
         const char *err = dovi_rpu_get_error(rpu);
         if (!err) {
           dovi_convert_rpu_with_mode(rpu, 2);
-          const DoviData *t35 =
-              dovi_write_av1_rpu_metadata_obu_t35_complete(rpu);
+          const DoviData *t35 = dovi_write_av1_rpu_metadata_obu_t35_complete(rpu);
           if (t35 && t35->data && t35->len > 0) {
-            svt_add_metadata(&input_buf, EB_AV1_METADATA_TYPE_ITUT_T35,
-                             t35->data, t35->len);
+            svt_add_metadata(&input_buf, EB_AV1_METADATA_TYPE_ITUT_T35, t35->data, t35->len);
             dovi_data_free(t35);
           }
         }
@@ -1060,8 +786,7 @@ flush_encoder:
   /* Drain all remaining encoded packets */
   {
     EbBufferHeaderType *out_pkt = NULL;
-    while (svt_av1_enc_get_packet(svt_handle, &out_pkt,
-                                  (uint8_t)pic_send_done) == EB_ErrorNone) {
+    while (svt_av1_enc_get_packet(svt_handle, &out_pkt, (uint8_t)pic_send_done) == EB_ErrorNone) {
       if (out_pkt->flags & EB_BUFFERFLAG_EOS) {
         svt_av1_enc_release_out_buffer(&out_pkt);
         break;
@@ -1070,11 +795,10 @@ flush_encoder:
       if (out_pkt->n_filled_len > 0) {
         if (!header_written) {
           if (out_pkt->flags & EB_BUFFERFLAG_HAS_TD) {
-            out_stream->codecpar->extradata = av_mallocz(
-                out_pkt->n_filled_len + AV_INPUT_BUFFER_PADDING_SIZE);
+            out_stream->codecpar->extradata =
+                av_mallocz(out_pkt->n_filled_len + AV_INPUT_BUFFER_PADDING_SIZE);
             if (out_stream->codecpar->extradata) {
-              memcpy(out_stream->codecpar->extradata, out_pkt->p_buffer,
-                     out_pkt->n_filled_len);
+              memcpy(out_stream->codecpar->extradata, out_pkt->p_buffer, out_pkt->n_filled_len);
               out_stream->codecpar->extradata_size = (int)out_pkt->n_filled_len;
             }
           }
@@ -1122,8 +846,7 @@ flush_encoder:
   /* Final progress */
   {
     char middle[64];
-    snprintf(middle, sizeof(middle), "%lld frames",
-             (long long)result.frames_encoded);
+    snprintf(middle, sizeof(middle), "%lld frames", (long long)result.frames_encoded);
     ui_progress_done(&progress, (long long)result.frames_encoded, middle);
   }
 

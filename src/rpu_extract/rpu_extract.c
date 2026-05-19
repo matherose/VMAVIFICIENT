@@ -33,8 +33,7 @@
  * @param nal_size  [out] Size of the located NAL unit.
  * @return Pointer to the NAL unit data, or NULL if none found.
  */
-static const uint8_t *find_next_nal(const uint8_t *data, size_t size,
-                                    size_t *nal_size) {
+static const uint8_t *find_next_nal(const uint8_t *data, size_t size, size_t *nal_size) {
   size_t i = 0;
 
   /* Skip to the start code. */
@@ -43,8 +42,7 @@ static const uint8_t *find_next_nal(const uint8_t *data, size_t size,
       i += 3;
       goto found;
     }
-    if (i + 3 < size && data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 0 &&
-        data[i + 3] == 1) {
+    if (i + 3 < size && data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 0 && data[i + 3] == 1) {
       i += 4;
       goto found;
     }
@@ -59,8 +57,8 @@ found:;
   /* Find the next start code to determine NAL size. */
   for (size_t j = 0; j + 2 < remaining; j++) {
     if (nal_start[j] == 0 && nal_start[j + 1] == 0 &&
-        (nal_start[j + 2] == 1 || (j + 3 < remaining && nal_start[j + 2] == 0 &&
-                                   nal_start[j + 3] == 1))) {
+        (nal_start[j + 2] == 1 ||
+         (j + 3 < remaining && nal_start[j + 2] == 0 && nal_start[j + 3] == 1))) {
       *nal_size = j;
       return nal_start;
     }
@@ -84,14 +82,11 @@ found:;
  * @return 1 if an UNSPEC62 NAL was found, 0 otherwise.
  */
 static int find_unspec62_length_prefixed(const uint8_t *pkt_data, int pkt_size,
-                                         const uint8_t **out_nal,
-                                         size_t *out_size) {
+                                         const uint8_t **out_nal, size_t *out_size) {
   int offset = 0;
   while (offset + 4 < pkt_size) {
-    uint32_t nal_len = ((uint32_t)pkt_data[offset] << 24) |
-                       ((uint32_t)pkt_data[offset + 1] << 16) |
-                       ((uint32_t)pkt_data[offset + 2] << 8) |
-                       (uint32_t)pkt_data[offset + 3];
+    uint32_t nal_len = ((uint32_t)pkt_data[offset] << 24) | ((uint32_t)pkt_data[offset + 1] << 16) |
+                       ((uint32_t)pkt_data[offset + 2] << 8) | (uint32_t)pkt_data[offset + 3];
     offset += 4;
 
     if (nal_len == 0 || offset + (int)nal_len > pkt_size)
@@ -115,8 +110,8 @@ static int find_unspec62_length_prefixed(const uint8_t *pkt_data, int pkt_size,
 /**
  * @brief Try Annex B start-code based search for UNSPEC62 NAL units.
  */
-static int find_unspec62_annex_b(const uint8_t *pkt_data, int pkt_size,
-                                 const uint8_t **out_nal, size_t *out_size) {
+static int find_unspec62_annex_b(const uint8_t *pkt_data, int pkt_size, const uint8_t **out_nal,
+                                 size_t *out_size) {
   const uint8_t *pos = pkt_data;
   size_t remaining = (size_t)pkt_size;
 
@@ -179,8 +174,7 @@ RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
   }
 
   /* Find the video stream. */
-  int video_idx =
-      av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
+  int video_idx = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
   if (video_idx < 0) {
     fprintf(stderr, "  RPU Error: no video stream found\n");
     result.error = -1;
@@ -228,8 +222,7 @@ RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
     size_t nal_size = 0;
 
     /* Try length-prefixed first (common for mp4/mkv), then Annex B. */
-    int found = find_unspec62_length_prefixed(pkt->data, pkt->size, &nal_data,
-                                              &nal_size);
+    int found = find_unspec62_length_prefixed(pkt->data, pkt->size, &nal_data, &nal_size);
     if (!found)
       found = find_unspec62_annex_b(pkt->data, pkt->size, &nal_data, &nal_size);
 
@@ -241,8 +234,7 @@ RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
         if (err) {
           /* Log but continue -- some RPUs may be recoverable. */
           if (result.rpu_count == 0)
-            fprintf(stderr, "  RPU Warning: parse error on first RPU: %s\n",
-                    err);
+            fprintf(stderr, "  RPU Warning: parse error on first RPU: %s\n", err);
         } else {
           /* Write the raw RPU bytes. */
           const DoviData *data = dovi_write_rpu(rpu);
@@ -269,8 +261,8 @@ RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
     /* Progress update. */
     time_t now = time(NULL);
     if (now != last_progress && total_duration > 0) {
-      int64_t current_us = av_rescale_q(pkt->pts, video_stream->time_base,
-                                        (AVRational){1, AV_TIME_BASE});
+      int64_t current_us =
+          av_rescale_q(pkt->pts, video_stream->time_base, (AVRational){1, AV_TIME_BASE});
       char middle[32];
       snprintf(middle, sizeof(middle), "%d RPUs", result.rpu_count);
       ui_progress_update(&progress, (long long)current_us, middle);

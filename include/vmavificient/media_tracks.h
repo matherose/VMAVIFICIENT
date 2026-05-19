@@ -72,8 +72,7 @@ void free_media_tracks(MediaTracks *tracks);
  * @param out_count              Receives the number of selected tracks.
  * @return Heap-allocated array of TrackInfo (caller must @c free), or NULL.
  */
-TrackInfo *select_best_audio_per_language(const MediaTracks *tracks,
-                                          int split_french_variants,
+TrackInfo *select_best_audio_per_language(const MediaTracks *tracks, int split_french_variants,
                                           int *out_count);
 
 /**
@@ -108,8 +107,8 @@ int detect_track_french_variant(const TrackInfo *track);
  * @param channels    Number of audio channels.
  * @param fr_origin   French origin variant (only used if language is French).
  */
-void build_audio_track_name(char *buf, size_t bufsize, const char *language,
-                            int channels, FrenchAudioOrigin fr_origin);
+void build_audio_track_name(char *buf, size_t bufsize, const char *language, int channels,
+                            FrenchAudioOrigin fr_origin);
 
 /**
  * @brief Build a display name for a subtitle track in MKV.
@@ -125,8 +124,7 @@ void build_audio_track_name(char *buf, size_t bufsize, const char *language,
  * @param is_sdh      1 if the subtitle is SDH.
  * @param fr_origin   French variant (only used if language is French).
  */
-void build_subtitle_track_name(char *buf, size_t bufsize, const char *language,
-                               int is_srt, int is_forced, int is_sdh,
-                               FrenchAudioOrigin fr_origin);
+void build_subtitle_track_name(char *buf, size_t bufsize, const char *language, int is_srt,
+                               int is_forced, int is_sdh, FrenchAudioOrigin fr_origin);
 
 #endif /* MEDIA_TRACKS_H */

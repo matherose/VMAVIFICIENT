@@ -5,7 +5,8 @@
 # Wins over any project override that relaxes formatting
 
 BasedOnStyle: LLVM
-Language: C
+# Note: clang-format groups C and C++ under "Cpp"; there's no separate "C" value.
+Language: Cpp
 IndentWidth: 2
 TabWidth: 2
 UseTab: Never

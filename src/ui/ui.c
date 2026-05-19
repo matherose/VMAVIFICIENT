@@ -107,24 +107,24 @@ void ui_row(const char *fmt, ...) {
 
 void ui_stage_ok(const char *name, const char *detail) {
   if (detail && detail[0])
-    printf("  %s[OK]%s   %s  %s%s%s\n", c(ANSI_GREEN), c(ANSI_RESET), name,
-           c(ANSI_DIM), detail, c(ANSI_RESET));
+    printf("  %s[OK]%s   %s  %s%s%s\n", c(ANSI_GREEN), c(ANSI_RESET), name, c(ANSI_DIM), detail,
+           c(ANSI_RESET));
   else
     printf("  %s[OK]%s   %s\n", c(ANSI_GREEN), c(ANSI_RESET), name);
 }
 
 void ui_stage_skip(const char *name, const char *reason) {
   if (reason && reason[0])
-    printf("  %s[--]%s   %s  %s%s%s\n", c(ANSI_DIM), c(ANSI_RESET), name,
-           c(ANSI_DIM), reason, c(ANSI_RESET));
+    printf("  %s[--]%s   %s  %s%s%s\n", c(ANSI_DIM), c(ANSI_RESET), name, c(ANSI_DIM), reason,
+           c(ANSI_RESET));
   else
     printf("  %s[--]%s   %s\n", c(ANSI_DIM), c(ANSI_RESET), name);
 }
 
 void ui_stage_fail(const char *name, const char *reason) {
   if (reason && reason[0])
-    fprintf(stderr, "  %s[FAIL]%s %s  %s%s%s\n", c(ANSI_RED), c(ANSI_RESET),
-            name, c(ANSI_DIM), reason, c(ANSI_RESET));
+    fprintf(stderr, "  %s[FAIL]%s %s  %s%s%s\n", c(ANSI_RED), c(ANSI_RESET), name, c(ANSI_DIM),
+            reason, c(ANSI_RESET));
   else
     fprintf(stderr, "  %s[FAIL]%s %s\n", c(ANSI_RED), c(ANSI_RESET), name);
 }
@@ -181,8 +181,7 @@ void ui_progress_update(UiProgress *p, long long current, const char *middle) {
     return;
 
   double now = monotonic_seconds();
-  if (p->last_draw_s != 0.0 &&
-      (now - p->last_draw_s) < UI_PROGRESS_MIN_INTERVAL_S)
+  if (p->last_draw_s != 0.0 && (now - p->last_draw_s) < UI_PROGRESS_MIN_INTERVAL_S)
     return;
   p->last_draw_s = now;
 
@@ -205,13 +204,11 @@ void ui_progress_update(UiProgress *p, long long current, const char *middle) {
   int has_middle = (middle && middle[0]);
   const char *mid_text = has_middle ? middle : "";
   const char *mid_sep = has_middle ? "  " : "";
-  fprintf(stderr, "\r  [%s] %3d%%  %s%s%s   ", bar, (int)(pct * 100), mid_text,
-          mid_sep, eta_str);
+  fprintf(stderr, "\r  [%s] %3d%%  %s%s%s   ", bar, (int)(pct * 100), mid_text, mid_sep, eta_str);
   fflush(stderr);
 }
 
-void ui_progress_done(UiProgress *p, long long final_count,
-                      const char *middle) {
+void ui_progress_done(UiProgress *p, long long final_count, const char *middle) {
   if (!p)
     return;
   /* Force a final draw at 100% even if total <= 0, so users always get a
@@ -228,8 +225,8 @@ void ui_progress_done(UiProgress *p, long long final_count,
   int has_middle = (middle && middle[0]);
   const char *mid_text = has_middle ? middle : "";
   const char *mid_sep = has_middle ? "  " : "";
-  fprintf(stderr, "\r  [%s] 100%%  %s%sDone in %02d:%02d          \n", bar,
-          mid_text, mid_sep, min, sec);
+  fprintf(stderr, "\r  [%s] 100%%  %s%sDone in %02d:%02d          \n", bar, mid_text, mid_sep, min,
+          sec);
   fflush(stderr);
 }
 

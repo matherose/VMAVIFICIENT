@@ -65,8 +65,7 @@ extern char **environ;
 static const double SAMPLE_POSITIONS[NUM_SAMPLES] = {0.20, 0.40, 0.60, 0.80};
 /** Midpoints between the initial positions, used when refinement is triggered.
  */
-static const double REFINE_SAMPLE_POSITIONS[MAX_SAMPLE_WINDOWS - NUM_SAMPLES] =
-    {0.30, 0.50, 0.70};
+static const double REFINE_SAMPLE_POSITIONS[MAX_SAMPLE_WINDOWS - NUM_SAMPLES] = {0.30, 0.50, 0.70};
 
 /* ------------------------------------------------------------------------- */
 /*  Sample-extraction pipeline                                               */
@@ -81,8 +80,7 @@ typedef struct {
 /**
  * Open a single FFV1-in-MKV output context matching a decoded filter frame.
  */
-static int out_open(const char *path, AVFrame *ref, AVRational time_base,
-                    OutCtx *o) {
+static int out_open(const char *path, AVFrame *ref, AVRational time_base, OutCtx *o) {
   int ret = avformat_alloc_output_context2(&o->fmt, NULL, "matroska", path);
   if (ret < 0)
     return ret;
@@ -179,9 +177,8 @@ static int write_frame(OutCtx *o, AVFrame *f) {
  * Build the filter graph: buffer -> crop -> split -> [a]null / [b]hqdn3d.
  * The two sinks expose the source-cropped and denoised-cropped streams.
  */
-static int build_graph(AVFilterGraph **graph, AVFilterContext **src_ctx,
-                       AVFilterContext **sink_a, AVFilterContext **sink_b,
-                       AVCodecContext *dec) {
+static int build_graph(AVFilterGraph **graph, AVFilterContext **src_ctx, AVFilterContext **sink_a,
+                       AVFilterContext **sink_b, AVCodecContext *dec) {
   *graph = avfilter_graph_alloc();
   if (!*graph)
     return AVERROR(ENOMEM);
@@ -193,20 +190,20 @@ static int build_graph(AVFilterGraph **graph, AVFilterContext **src_ctx,
            dec->width, dec->height, dec->pix_fmt, dec->pkt_timebase.num,
            dec->pkt_timebase.den ? dec->pkt_timebase.den : 1,
            dec->sample_aspect_ratio.num ? dec->sample_aspect_ratio.num : 1,
-           dec->sample_aspect_ratio.den ? dec->sample_aspect_ratio.den : 1,
-           dec->colorspace, dec->color_range);
+           dec->sample_aspect_ratio.den ? dec->sample_aspect_ratio.den : 1, dec->colorspace,
+           dec->color_range);
 
-  int ret = avfilter_graph_create_filter(
-      src_ctx, avfilter_get_by_name("buffer"), "in", args, NULL, *graph);
+  int ret = avfilter_graph_create_filter(src_ctx, avfilter_get_by_name("buffer"), "in", args, NULL,
+                                         *graph);
   if (ret < 0)
     return ret;
 
-  ret = avfilter_graph_create_filter(sink_a, avfilter_get_by_name("buffersink"),
-                                     "out_a", NULL, NULL, *graph);
+  ret = avfilter_graph_create_filter(sink_a, avfilter_get_by_name("buffersink"), "out_a", NULL,
+                                     NULL, *graph);
   if (ret < 0)
     return ret;
-  ret = avfilter_graph_create_filter(sink_b, avfilter_get_by_name("buffersink"),
-                                     "out_b", NULL, NULL, *graph);
+  ret = avfilter_graph_create_filter(sink_b, avfilter_get_by_name("buffersink"), "out_b", NULL,
+                                     NULL, *graph);
   if (ret < 0)
     return ret;
 
@@ -263,8 +260,7 @@ static int build_graph(AVFilterGraph **graph, AVFilterContext **src_ctx,
  * @p duration_sec.
  */
 static int extract_samples(const char *in_path, const char *out_src_path,
-                           const char *out_denoised_path, double pos_ratio,
-                           int duration_sec) {
+                           const char *out_denoised_path, double pos_ratio, int duration_sec) {
   AVFormatContext *fmt = NULL;
   AVCodecContext *dec = NULL;
   AVFilterGraph *graph = NULL;
@@ -330,8 +326,8 @@ static int extract_samples(const char *in_path, const char *out_src_path,
 
   /* Stop after ~duration_sec of decoded frames (in stream time). */
   int64_t start_pts = AV_NOPTS_VALUE;
-  int64_t stop_after = av_rescale_q((int64_t)duration_sec * AV_TIME_BASE,
-                                    AV_TIME_BASE_Q, stream->time_base);
+  int64_t stop_after =
+      av_rescale_q((int64_t)duration_sec * AV_TIME_BASE, AV_TIME_BASE_Q, stream->time_base);
 
   int done_reading = 0;
   while (!done_reading) {
@@ -386,8 +382,7 @@ static int extract_samples(const char *in_path, const char *out_src_path,
         av_frame_unref(filt_b);
         if (ret < 0)
           goto done;
-        if (start_pts != AV_NOPTS_VALUE && cur != AV_NOPTS_VALUE &&
-            cur - start_pts > stop_after) {
+        if (start_pts != AV_NOPTS_VALUE && cur != AV_NOPTS_VALUE && cur - start_pts > stop_after) {
           done_reading = 1;
           break;
         }
@@ -436,27 +431,22 @@ done:
 /*  grav1synth invocation                                                    */
 /* ------------------------------------------------------------------------- */
 
-static int spawn_grav1synth(const char *src, const char *denoised,
-                            const char *table_out) {
+static int spawn_grav1synth(const char *src, const char *denoised, const char *table_out) {
   /* grav1synth diff <src> <denoised> -o <table_out> */
-  char *argv[] = {
-      (char *)VMAV_GRAV1SYNTH_BIN, "diff", (char *)src, (char *)denoised, "-o",
-      (char *)table_out,           NULL};
+  char *argv[] = {(char *)VMAV_GRAV1SYNTH_BIN, "diff", (char *)src, (char *)denoised, "-o",
+                  (char *)table_out,           NULL};
   pid_t pid;
   posix_spawn_file_actions_t actions;
   posix_spawn_file_actions_init(&actions);
   /* Silence grav1synth's chatter; we only care about exit status + table. */
-  posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null",
-                                   O_WRONLY, 0);
-  posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null",
-                                   O_WRONLY, 0);
+  posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+  posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
   /* posix_spawnp does PATH lookup when the program name has no slash —
      so packagers can pass -DVMAV_GRAV1SYNTH_BIN_RUNTIME=grav1synth and
      ship the helper alongside vmavificient in bin/. Absolute paths
      (the dev-build default) still work because the `p` variant only
      consults PATH when the name is unqualified. */
-  int ret =
-      posix_spawnp(&pid, VMAV_GRAV1SYNTH_BIN, &actions, NULL, argv, environ);
+  int ret = posix_spawnp(&pid, VMAV_GRAV1SYNTH_BIN, &actions, NULL, argv, environ);
   posix_spawn_file_actions_destroy(&actions);
   if (ret != 0)
     return -ret;
@@ -486,8 +476,7 @@ typedef struct {
  * Parse scaling values for a single plane prefix ("sY", "sCb", or "sCr")
  * from a grain table line.  Returns the sum and count of scaling values found.
  */
-static void parse_plane_scalings(const char *line, const char *prefix,
-                                 double *sum, long *count) {
+static void parse_plane_scalings(const char *line, const char *prefix, double *sum, long *count) {
   const char *p = line;
   while (*p == '\t' || *p == ' ')
     p++;
@@ -584,25 +573,20 @@ static GrainTableScores parse_grain_table(const char *path) {
  *  fgs_table, but feeding measured grain params back to the encoder
  *  produced over-faithful (mushy + expensive) reproduction at HDLight
  *  bitrates, so we now let SVT do its own grain analysis instead. */
-static int sample_grain_window(const char *path, const char *label,
-                               int window_idx, double position, int keep_tmp,
-                               GrainTableScores *out_scores) {
+static int sample_grain_window(const char *path, const char *label, int window_idx, double position,
+                               int keep_tmp, GrainTableScores *out_scores) {
   char src_tmp[4096], denoised_tmp[4096], table_tmp[4096];
   snprintf(src_tmp, sizeof(src_tmp), "%s.grav1_src_%d.mkv", path, window_idx);
-  snprintf(denoised_tmp, sizeof(denoised_tmp), "%s.grav1_denoised_%d.mkv", path,
-           window_idx);
-  snprintf(table_tmp, sizeof(table_tmp), "%s.grav1_table_%d.txt", path,
-           window_idx);
+  snprintf(denoised_tmp, sizeof(denoised_tmp), "%s.grav1_denoised_%d.mkv", path, window_idx);
+  snprintf(table_tmp, sizeof(table_tmp), "%s.grav1_table_%d.txt", path, window_idx);
 
   time_t window_t0 = time(NULL);
-  int ret = extract_samples(path, src_tmp, denoised_tmp, position,
-                            SAMPLE_DURATION_SEC);
+  int ret = extract_samples(path, src_tmp, denoised_tmp, position, SAMPLE_DURATION_SEC);
   if (ret >= 0) {
     ret = spawn_grav1synth(src_tmp, denoised_tmp, table_tmp);
     if (ret >= 0) {
       struct stat st;
-      if (stat(table_tmp, &st) == 0 && st.st_size > 0 &&
-          st.st_size <= MAX_TABLE_BYTES) {
+      if (stat(table_tmp, &st) == 0 && st.st_size > 0 && st.st_size <= MAX_TABLE_BYTES) {
         *out_scores = parse_grain_table(table_tmp);
       } else {
         ret = AVERROR(EIO);
@@ -615,16 +599,14 @@ static int sample_grain_window(const char *path, const char *label,
     unlink(denoised_tmp);
     unlink(table_tmp);
   } else {
-    fprintf(stderr, "[grain] window %d (pos %.2f): kept %s\n", window_idx,
-            position, table_tmp);
+    fprintf(stderr, "[grain] window %d (pos %.2f): kept %s\n", window_idx, position, table_tmp);
   }
 
   /* Per-window status — gives the user something to watch during the long
      analysis pass instead of a silent 10+ minute wait. */
   if (ret >= 0) {
     char detail[64];
-    snprintf(detail, sizeof(detail), "pos %.0f%%, luma %.4f  %s",
-             position * 100.0, out_scores->y,
+    snprintf(detail, sizeof(detail), "pos %.0f%%, luma %.4f  %s", position * 100.0, out_scores->y,
              ui_fmt_duration(difftime(time(NULL), window_t0)));
     ui_stage_ok(label, detail);
   } else {
@@ -671,8 +653,8 @@ GrainScore get_grain_score(const char *path) {
     GrainTableScores scores = {0};
     char label[32];
     snprintf(label, sizeof(label), "Window %d/%d", i + 1, NUM_SAMPLES);
-    int ret = sample_grain_window(path, label, total_attempts,
-                                  SAMPLE_POSITIONS[i], keep_tmp, &scores);
+    int ret =
+        sample_grain_window(path, label, total_attempts, SAMPLE_POSITIONS[i], keep_tmp, &scores);
     if (ret >= 0) {
       result.per_window_scores[i] = scores.y;
       y_scores[total_attempts] = scores.y;
@@ -702,16 +684,15 @@ GrainScore get_grain_score(const char *path) {
    * max aggregation sees any grainier passage lurking between them. */
   int refined = 0;
   if (initial_variance > GRAIN_VARIANCE_REFINE_THRESHOLD) {
-    const int refine_count = (int)(sizeof(REFINE_SAMPLE_POSITIONS) /
-                                   sizeof(REFINE_SAMPLE_POSITIONS[0]));
+    const int refine_count =
+        (int)(sizeof(REFINE_SAMPLE_POSITIONS) / sizeof(REFINE_SAMPLE_POSITIONS[0]));
     for (int j = 0; j < refine_count && total_attempts < MAX_SAMPLE_WINDOWS;
          j++, total_attempts++) {
       GrainTableScores scores = {0};
       char label[32];
       snprintf(label, sizeof(label), "Refine %d/%d", j + 1, refine_count);
-      int ret =
-          sample_grain_window(path, label, total_attempts,
-                              REFINE_SAMPLE_POSITIONS[j], keep_tmp, &scores);
+      int ret = sample_grain_window(path, label, total_attempts, REFINE_SAMPLE_POSITIONS[j],
+                                    keep_tmp, &scores);
       if (ret >= 0) {
         y_scores[total_attempts] = scores.y;
         if (scores.y > max_score)
@@ -734,8 +715,7 @@ GrainScore get_grain_score(const char *path) {
   result.chroma_grain_score = max_chroma;
   /* When refinement ran, report variance over the combined sample set so the
    * signal reflects the full picture; otherwise keep the initial-pass value. */
-  result.grain_variance =
-      refined ? score_variance(y_scores, total_attempts) : initial_variance;
+  result.grain_variance = refined ? score_variance(y_scores, total_attempts) : initial_variance;
 
   return result;
 }

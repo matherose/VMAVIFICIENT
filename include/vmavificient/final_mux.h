@@ -30,15 +30,15 @@ typedef struct {
 
 /** @brief Configuration for the final MKV mux. */
 typedef struct {
-  const char *video_path;       /**< Path to the video-only .mkv. */
-  const char *output_path;      /**< Final output .mkv path. */
-  const MuxAudioTrack *audio;   /**< Array of audio tracks. */
-  int audio_count;              /**< Number of audio tracks. */
-  const MuxSubtitleTrack *subs; /**< Array of subtitle tracks. */
-  int sub_count;                /**< Number of subtitle tracks. */
-  const char *title;            /**< MKV container title, or NULL. */
-  const char *video_title;      /**< Video stream title, or NULL. */
-  const char *video_language;   /**< Video stream ISO 639-2/B code, or NULL. */
+  const char *video_path;           /**< Path to the video-only .mkv. */
+  const char *output_path;          /**< Final output .mkv path. */
+  const MuxAudioTrack *audio;       /**< Array of audio tracks. */
+  int audio_count;                  /**< Number of audio tracks. */
+  const MuxSubtitleTrack *subs;     /**< Array of subtitle tracks. */
+  int sub_count;                    /**< Number of subtitle tracks. */
+  const char *title;                /**< MKV container title, or NULL. */
+  const char *video_title;          /**< Video stream title, or NULL. */
+  const char *video_language;       /**< Video stream ISO 639-2/B code, or NULL. */
   const char *chapters_source_path; /**< File to copy chapters from, or NULL. */
 } FinalMuxConfig;
 
