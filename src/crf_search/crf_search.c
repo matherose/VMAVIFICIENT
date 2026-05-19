@@ -47,8 +47,8 @@
 /* Silence the SVT-AV1 banner spam during probe trials unless --verbose.
  * Each trial calls svt_av1_enc_init_handle which re-emits the banner; with
  * 4 trials × 3 samples that's a lot of noise. */
-static void svt_probe_log_callback(void *ctx, SvtAv1LogLevel level, const char *tag, const char *fmt,
-                                   va_list args) {
+static void svt_probe_log_callback(void *ctx, SvtAv1LogLevel level, const char *tag,
+                                   const char *fmt, va_list args) {
   (void)ctx;
   (void)level;
   (void)tag;
@@ -198,8 +198,9 @@ static int build_vfilter(Source *s, const char *vfilter_expr, VFilter *vf) {
   /* Use the codecpar's pix_fmt rather than dec_ctx->pix_fmt because the
    * decoder may not have decoded a frame yet (we just seeked) so dec_ctx
    * may report AV_PIX_FMT_NONE until the first frame comes out. */
-  enum AVPixelFormat in_fmt =
-      s->dec->pix_fmt != AV_PIX_FMT_NONE ? s->dec->pix_fmt : (enum AVPixelFormat)st->codecpar->format;
+  enum AVPixelFormat in_fmt = s->dec->pix_fmt != AV_PIX_FMT_NONE
+                                  ? s->dec->pix_fmt
+                                  : (enum AVPixelFormat)st->codecpar->format;
   if (in_fmt == AV_PIX_FMT_NONE) {
     fprintf(stderr, "crf_search: build_vfilter: unknown source pix_fmt (dec=%d, par=%d)\n",
             s->dec->pix_fmt, st->codecpar->format);
@@ -845,8 +846,8 @@ static int run_trial(const char *input_path, const EncodePreset *p, int film_gra
 
   double score = 0;
   if (trial_rc == 0 && total_scored > 0) {
-    vr = vmaf_score_pooled(vmaf, model, VMAF_POOL_METHOD_HARMONIC_MEAN, &score, 0,
-                           total_scored - 1);
+    vr =
+        vmaf_score_pooled(vmaf, model, VMAF_POOL_METHOD_HARMONIC_MEAN, &score, 0, total_scored - 1);
     if (vr < 0) {
       fprintf(stderr, "crf_search: vmaf_score_pooled failed (%d, scored=%u)\n", vr, total_scored);
       trial_rc = -1;
