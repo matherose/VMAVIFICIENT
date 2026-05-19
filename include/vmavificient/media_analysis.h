@@ -22,11 +22,10 @@ typedef struct {
   /* Per-window detail. */
   double per_window_scores[GRAIN_NUM_WINDOWS]; /**< Individual Y scores per
                                                   window. */
-  int windows_succeeded; /**< How many windows produced valid scores. */
-  double grain_variance; /**< Variance of per-window Y scores (high =
-                            inconsistent grain). */
-  double
-      chroma_grain_score; /**< Max of sCb/sCr averages across windows, 0..1. */
+  int windows_succeeded;                       /**< How many windows produced valid scores. */
+  double grain_variance;                       /**< Variance of per-window Y scores (high =
+                                                  inconsistent grain). */
+  double chroma_grain_score;                   /**< Max of sCb/sCr averages across windows, 0..1. */
 } GrainScore;
 
 /**

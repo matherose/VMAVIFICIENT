@@ -14,8 +14,7 @@
 #include <libavutil/rational.h>
 
 MediaInfo get_media_info(const char *path) {
-  MediaInfo info = {
-      .error = 0, .width = 0, .height = 0, .duration = 0.0, .framerate = 0.0};
+  MediaInfo info = {.error = 0, .width = 0, .height = 0, .duration = 0.0, .framerate = 0.0};
   AVFormatContext *fmt_ctx = NULL;
   char errbuf[AV_ERROR_MAX_STRING_SIZE];
   int ret;
@@ -31,8 +30,7 @@ MediaInfo get_media_info(const char *path) {
   ret = avformat_find_stream_info(fmt_ctx, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "Error: cannot read stream info from '%s': %s\n", path,
-            errbuf);
+    fprintf(stderr, "Error: cannot read stream info from '%s': %s\n", path, errbuf);
     info.error = ret;
     avformat_close_input(&fmt_ctx);
     return info;

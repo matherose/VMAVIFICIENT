@@ -346,6 +346,7 @@ if(VMAV_USE_SYSTEM_DEPS)
     pkg_check_modules(VMAV_LIBTIFF   REQUIRED IMPORTED_TARGET libtiff-4)
     pkg_check_modules(VMAV_LIBCURL   REQUIRED IMPORTED_TARGET libcurl)
     pkg_check_modules(VMAV_CJSON     REQUIRED IMPORTED_TARGET libcjson)
+    pkg_check_modules(VMAV_LIBVMAF   REQUIRED IMPORTED_TARGET libvmaf)
 
     message(STATUS "Dependencies: system (pkg-config / find_package)")
 else()
@@ -363,6 +364,7 @@ else()
     set(TIFF_INSTALL    "${DEPS_PREFIX}/libtiff")
     set(LEPT_INSTALL    "${DEPS_PREFIX}/leptonica")
     set(TESS_INSTALL    "${DEPS_PREFIX}/tesseract")
+    set(VMAF_INSTALL    "${DEPS_PREFIX}/libvmaf")
 
     # CMake validates INTERFACE_INCLUDE_DIRECTORIES at configure time,
     # so the directories must already exist even though headers arrive later.
@@ -379,6 +381,7 @@ else()
     file(MAKE_DIRECTORY "${LEPT_INSTALL}/include/leptonica")
     file(MAKE_DIRECTORY "${TESS_INSTALL}/include")
     file(MAKE_DIRECTORY "${TESS_INSTALL}/include/tesseract")
+    file(MAKE_DIRECTORY "${VMAF_INSTALL}/include")
 
     set(FFMPEG_GIT_TAG    "n8.1")
     set(OPUS_GIT_TAG      "v1.5.2")
@@ -393,6 +396,7 @@ else()
     set(LIBTIFF_GIT_TAG   "v4.7.0")
     set(LEPTONICA_GIT_TAG "1.85.0")
     set(TESSERACT_GIT_TAG "5.5.0")
+    set(LIBVMAF_GIT_TAG   "v3.1.0")
 
     # ---- cJSON via FetchContent ----------------------------------------
     FetchContent_Declare(cjson
@@ -776,6 +780,33 @@ else()
         LOG_OUTPUT_ON_FAILURE TRUE
     )
 
+    # ---- libvmaf (meson) ----------------------------------------------
+    find_program(MESON_EXECUTABLE meson REQUIRED)
+    ExternalProject_Add(ep_libvmaf
+        GIT_REPOSITORY  https://github.com/Netflix/vmaf.git
+        GIT_TAG         ${LIBVMAF_GIT_TAG}
+        GIT_SHALLOW     TRUE
+        PREFIX          "${DEPS_PREFIX}/build/libvmaf"
+        CONFIGURE_COMMAND
+            ${MESON_EXECUTABLE} setup
+                --prefix=${VMAF_INSTALL}
+                --libdir=${VMAF_INSTALL}/lib
+                --buildtype=release
+                --default-library=static
+                -Denable_tests=false
+                -Denable_docs=false
+                -Dbuilt_in_models=true
+                <BINARY_DIR>
+                <SOURCE_DIR>/libvmaf
+        BUILD_COMMAND   ${MESON_EXECUTABLE} compile -C <BINARY_DIR>
+        INSTALL_COMMAND ${MESON_EXECUTABLE} install -C <BINARY_DIR>
+        BUILD_BYPRODUCTS "${VMAF_INSTALL}/lib/libvmaf.a"
+        LOG_CONFIGURE   TRUE
+        LOG_BUILD       TRUE
+        LOG_INSTALL     TRUE
+        LOG_OUTPUT_ON_FAILURE TRUE
+    )
+
     # ---- libdovi (Rust / cargo-c) -------------------------------------
     ExternalProject_Add(ep_libdovi
         GIT_REPOSITORY  https://github.com/quietvoid/dovi_tool.git
@@ -814,6 +845,13 @@ else()
         INTERFACE_INCLUDE_DIRECTORIES "${DOVI_INSTALL}/include"
     )
     add_dependencies(Dovi::dovi ep_libdovi)
+
+    add_library(Vmav::libvmaf STATIC IMPORTED GLOBAL)
+    set_target_properties(Vmav::libvmaf PROPERTIES
+        IMPORTED_LOCATION             "${VMAF_INSTALL}/lib/libvmaf.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${VMAF_INSTALL}/include"
+    )
+    add_dependencies(Vmav::libvmaf ep_libvmaf)
 
     add_library(Vmav::zlib STATIC IMPORTED GLOBAL)
     set_target_properties(Vmav::zlib PROPERTIES
@@ -903,6 +941,7 @@ add_executable(vmavificient
     src/tmdb/tmdb.c
     src/ui/ui.c
     src/utils/utils.c
+    src/video_encode/encoder_config.c
     src/video_encode/video_encode.c
 )
 
@@ -961,6 +1000,7 @@ if(VMAV_USE_SYSTEM_DEPS)
         PkgConfig::VMAV_LIBPNG
         PkgConfig::VMAV_LIBCURL
         PkgConfig::VMAV_CJSON
+        PkgConfig::VMAV_LIBVMAF
         OpenSSL::SSL
         OpenSSL::Crypto
         ZLIB::ZLIB
@@ -975,6 +1015,7 @@ else()
         FFmpeg::swscale
         FFmpeg::avutil
         Dovi::dovi
+        Vmav::libvmaf
         "${OPUS_INSTALL}/lib/libopus.a"
         Vmav::tesseract
         Vmav::leptonica

@@ -21,8 +21,7 @@
 #include "utils.h"
 
 /** @brief Append a printf-formatted string to the command buffer. */
-static void cmd_appendf(char *buf, size_t cap, size_t *pos, const char *fmt,
-                        ...) {
+static void cmd_appendf(char *buf, size_t cap, size_t *pos, const char *fmt, ...) {
   if (*pos >= cap)
     return;
   va_list ap;
@@ -102,16 +101,14 @@ FinalMuxResult final_mux(const FinalMuxConfig *config) {
     shell_quote_append(cmd, cap, &pos, config->video_title);
   }
   if (config->video_language && config->video_language[0]) {
-    cmd_appendf(cmd, cap, &pos, " -metadata:s:v:0 language=%s",
-                config->video_language);
+    cmd_appendf(cmd, cap, &pos, " -metadata:s:v:0 language=%s", config->video_language);
   }
 
   /* Audio metadata + dispositions. */
   for (int i = 0; i < config->audio_count; i++) {
-    const char *lang =
-        (config->audio[i].language && config->audio[i].language[0])
-            ? config->audio[i].language
-            : "und";
+    const char *lang = (config->audio[i].language && config->audio[i].language[0])
+                           ? config->audio[i].language
+                           : "und";
     cmd_appendf(cmd, cap, &pos, " -metadata:s:a:%d language=%s", i, lang);
     if (config->audio[i].track_name && config->audio[i].track_name[0]) {
       cmd_appendf(cmd, cap, &pos, " -metadata:s:a:%d title=", i);

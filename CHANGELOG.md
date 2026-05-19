@@ -4,6 +4,29 @@ All notable changes to vmavificient are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **CRF search is now in-process** — the `ab-av1 crf-search` subprocess is
+  replaced by a libSvtAv1Enc + libvmaf implementation that uses the vendored
+  SVT-AV1-HDR fork directly. Removes the requirement that the system
+  `ffmpeg` be linked against a matching libsvtav1; works out of the box on
+  stock Homebrew. Sampling is adaptive (1 sample fast path, 3-sample
+  refinement when the 1-sample VMAF lands more than 2.0 from target),
+  pooled with harmonic mean to penalise outlier-low scenes.
+
+### Added
+
+- **`libvmaf` dependency** — required at build/runtime. Already a transitive
+  of `ffmpeg` on Homebrew (`--enable-libvmaf`), so most users have it.
+- **`meson` build-time dependency** in vendored mode (used by `ep_libvmaf`).
+
+### Removed
+
+- **`ab-av1` runtime dependency.** Hints, error messages, and the
+  `master-of-mint/tap/ab-av1` install instruction are gone.
+
 ## [1.2.0] — 2026-04-29
 
 Packaging path. v1.2.0 makes vmavificient installable as a Homebrew

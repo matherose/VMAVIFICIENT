@@ -37,8 +37,7 @@ typedef struct {
  * @param output_path Full path for the output .opus file.
  * @return Result with error status and output path.
  */
-OpusEncodeResult encode_track_to_opus(const char *input_path,
-                                      const TrackInfo *track,
+OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *track,
                                       const char *output_path);
 
 /**
@@ -56,8 +55,8 @@ OpusEncodeResult encode_track_to_opus(const char *input_path,
  * @param language  ISO 639-2/B 3-letter language code.
  * @param fv        French variant (only used if language is French).
  */
-void build_opus_filename(char *buf, size_t bufsize, const char *base_name,
-                         const char *language, FrenchVariant fv);
+void build_opus_filename(char *buf, size_t bufsize, const char *base_name, const char *language,
+                         FrenchVariant fv);
 
 /**
  * @brief Verify an OPUS file is valid by probing with FFmpeg.

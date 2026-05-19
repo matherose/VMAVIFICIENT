@@ -66,8 +66,7 @@ const char *iso639_1_to_2b(const char *iso1);
 /**
  * @brief Determine the language tag from audio tracks and original language.
  */
-LanguageTag determine_language_tag(const MediaTracks *tracks,
-                                   const char *original_lang_iso1,
+LanguageTag determine_language_tag(const MediaTracks *tracks, const char *original_lang_iso1,
                                    FrenchVariant french_variant);
 
 /**
@@ -101,8 +100,8 @@ const char *language_tag_to_string(LanguageTag tag);
  * @param source    Source type.
  * @return 0 on success, -1 on error.
  */
-int build_output_filename(char *buf, size_t bufsize, const char *title,
-                          int year, LanguageTag lang_tag, const MediaInfo *info,
-                          const HdrInfo *hdr, SourceType source);
+int build_output_filename(char *buf, size_t bufsize, const char *title, int year,
+                          LanguageTag lang_tag, const MediaInfo *info, const HdrInfo *hdr,
+                          SourceType source);
 
 #endif /* MEDIA_NAMING_H */
