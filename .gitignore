@@ -140,3 +140,4 @@ a5c/processes/
 
 # Commit message templates—personal preference.
 .gitmessage
+.vmavificient-cache/
