@@ -31,17 +31,15 @@ void vmav_cli_render_help(const vmav_subcmd_t *cmds, FILE *out) {
         }
     }
     for (const vmav_subcmd_t *c = cmds; c->name != NULL; c++) {
-        fprintf(out, "  %-*s   %s\n",
+        fprintf(out,
+                "  %-*s   %s\n",
                 (int)name_width,
                 c->name,
                 c->short_help != NULL ? c->short_help : "");
     }
 }
 
-int vmav_cli_dispatch(int argc,
-                      char **argv,
-                      const vmav_subcmd_t *cmds,
-                      const char *default_cmd) {
+int vmav_cli_dispatch(int argc, char **argv, const vmav_subcmd_t *cmds, const char *default_cmd) {
     if (cmds == NULL) {
         return 1;
     }

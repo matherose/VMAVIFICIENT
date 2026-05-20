@@ -37,10 +37,7 @@ const vmav_subcmd_t *vmav_cli_find(const vmav_subcmd_t *cmds, const char *name);
  *                                       returns 1.
  *
  * Returns the subcommand's exit code, or 1 on dispatch failure. */
-int vmav_cli_dispatch(int argc,
-                      char **argv,
-                      const vmav_subcmd_t *cmds,
-                      const char *default_cmd);
+int vmav_cli_dispatch(int argc, char **argv, const vmav_subcmd_t *cmds, const char *default_cmd);
 
 /* Render the top-level --help message listing every subcommand. */
 void vmav_cli_render_help(const vmav_subcmd_t *cmds, FILE *out);

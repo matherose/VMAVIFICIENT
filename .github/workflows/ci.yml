@@ -90,24 +90,11 @@ jobs:
           export QEMU_LD_PREFIX=/usr/aarch64-linux-gnu
           ctest --test-dir build/linux-aarch64-musl --output-on-failure
 
-  build-macos-x86_64:
-    name: build / macos-x86_64
-    runs-on: macos-13
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: lukka/get-cmake@latest
-      - name: Configure
-        run: cmake --preset macos-x86_64
-      - name: Build
-        run: cmake --build --preset macos-x86_64 --verbose
-      - name: Sanity
-        run: |
-          file build/macos-x86_64/src/vmavificient
-          build/macos-x86_64/src/vmavificient version
-      - name: Test
-        run: ctest --test-dir build/macos-x86_64 --output-on-failure
+  # Intel Mac runners (macos-13) are increasingly scarce on GHA as Apple
+  # winds down x86 hardware; the macos-x86_64 job was queue-cancelled
+  # on every run. The toolchain file + preset remain available for local
+  # builds (cmake --preset macos-x86_64). If we ever need x86 Mac coverage
+  # again, reintroduce a nightly-only job here.
 
   build-macos-arm64:
     name: build / macos-arm64

@@ -11,13 +11,17 @@ zero system dependencies.
 
 ## Platforms
 
-| OS      | Architecture | Toolchain    | Status      |
-|---------|--------------|--------------|-------------|
-| Linux   | x86_64       | zig cc/musl  | In progress |
-| Linux   | aarch64      | zig cc/musl  | In progress |
-| macOS   | x86_64       | Apple Clang  | In progress |
-| macOS   | arm64        | Apple Clang  | In progress |
-| Windows | x86_64       | llvm-mingw   | In progress |
+| OS      | Architecture | Toolchain    | CI         |
+|---------|--------------|--------------|------------|
+| Linux   | x86_64       | zig cc/musl  | Yes        |
+| Linux   | aarch64      | zig cc/musl  | Yes        |
+| macOS   | arm64        | Apple Clang  | Yes        |
+| Windows | x86_64       | llvm-mingw   | Yes        |
+| macOS   | x86_64       | Apple Clang  | Local only |
+
+> Intel Mac CI was dropped — `macos-13` runners on GitHub Actions are
+> queue-starved as Apple winds down x86 hardware. The toolchain file is
+> kept so anyone can run `cmake --preset macos-x86_64` locally.
 
 ## Install (v2.0+, planned)
 

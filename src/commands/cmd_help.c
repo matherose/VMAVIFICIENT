@@ -1,6 +1,6 @@
-#include "commands.h"
-
 #include "vmavificient/vmav_version.h"
+
+#include "commands.h"
 
 #include <stdio.h>
 

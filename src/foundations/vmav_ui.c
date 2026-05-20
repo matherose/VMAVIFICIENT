@@ -81,7 +81,8 @@ static void render_bar(vmav_ui_progress_t *p, bool final) {
         }
     }
     if (p->total > 0) {
-        fprintf(p->out, "] %3d%%  %llu/%llu",
+        fprintf(p->out,
+                "] %3d%%  %llu/%llu",
                 pct,
                 (unsigned long long)p->current,
                 (unsigned long long)p->total);
@@ -100,8 +101,7 @@ void vmav_ui_progress_set(vmav_ui_progress_t *p, uint64_t current) {
     }
     p->current = current;
     const uint64_t now = vmav_time_now_ms();
-    if (p->is_tty && (now - p->last_render_ms) < VMAV_UI_PROGRESS_RENDER_MS
-        && current < p->total) {
+    if (p->is_tty && (now - p->last_render_ms) < VMAV_UI_PROGRESS_RENDER_MS && current < p->total) {
         return;
     }
     p->last_render_ms = now;
@@ -171,11 +171,13 @@ void vmav_ui_spinner_finish(vmav_ui_spinner_t *s, const char *final_msg) {
         return;
     }
     if (s->is_tty) {
-        fprintf(s->out, "\r%s %s\n",
+        fprintf(s->out,
+                "\r%s %s\n",
                 final_msg != NULL && final_msg[0] != '\0' ? final_msg : "done",
                 s->label);
     } else {
-        fprintf(s->out, "%s %s\n",
+        fprintf(s->out,
+                "%s %s\n",
                 final_msg != NULL && final_msg[0] != '\0' ? final_msg : "done",
                 s->label);
     }
@@ -189,7 +191,7 @@ void vmav_ui_spinner_free(vmav_ui_spinner_t *s) {
 
 /* === Table ==================================================== */
 
-#define VMAV_UI_TABLE_KEY_MAX   64
+#define VMAV_UI_TABLE_KEY_MAX 64
 #define VMAV_UI_TABLE_VALUE_MAX 256
 
 typedef struct row {
@@ -227,8 +229,8 @@ vmav_status_t vmav_ui_table_add(vmav_ui_table_t *t, const char *key, const char 
         t->cap = new_cap;
     }
     snprintf(t->rows[t->len].key, sizeof(t->rows[t->len].key), "%s", key);
-    snprintf(t->rows[t->len].value, sizeof(t->rows[t->len].value), "%s",
-             value != NULL ? value : "");
+    snprintf(
+        t->rows[t->len].value, sizeof(t->rows[t->len].value), "%s", value != NULL ? value : "");
     t->len++;
     return VMAV_OK_STATUS;
 }

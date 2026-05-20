@@ -11,8 +11,7 @@ static FILE *g_fp;
 static char g_path[256];
 
 void setUp(void) {
-    snprintf(g_path, sizeof(g_path), "/tmp/vmav-ui-test-%lld-%d.txt",
-             (long long)getpid(), rand());
+    snprintf(g_path, sizeof(g_path), "/tmp/vmav-ui-test-%lld-%d.txt", (long long)getpid(), rand());
     g_fp = fopen(g_path, "w+");
     TEST_ASSERT_NOT_NULL(g_fp);
 }

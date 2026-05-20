@@ -57,11 +57,11 @@ static void test_path_join_truncation_errors(void) {
 /* === Terminal ================================================ */
 
 #if defined(_WIN32)
-#    define vmav_test_setenv(name, val) _putenv_s((name), (val))
-#    define vmav_test_unsetenv(name)    _putenv_s((name), "")
+#define vmav_test_setenv(name, val) _putenv_s((name), (val))
+#define vmav_test_unsetenv(name) _putenv_s((name), "")
 #else
-#    define vmav_test_setenv(name, val) setenv((name), (val), 1)
-#    define vmav_test_unsetenv(name)    unsetenv((name))
+#define vmav_test_setenv(name, val) setenv((name), (val), 1)
+#define vmav_test_unsetenv(name) unsetenv((name))
 #endif
 
 static void test_no_color_detects_env(void) {

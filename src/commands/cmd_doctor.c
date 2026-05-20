@@ -1,10 +1,10 @@
-#include "commands.h"
-
 #include "vmavificient/vmav_log.h"
 #include "vmavificient/vmav_os.h"
 #include "vmavificient/vmav_subproc.h"
 #include "vmavificient/vmav_ui.h"
 #include "vmavificient/vmav_version.h"
+
+#include "commands.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -36,8 +36,7 @@ static void check_ffmpeg(vmav_ui_table_t *t) {
     vmav_subproc_result_free(&r);
 }
 
-static void check_path(vmav_ui_table_t *t, const char *label,
-                       vmav_status_t (*fn)(char *, size_t)) {
+static void check_path(vmav_ui_table_t *t, const char *label, vmav_status_t (*fn)(char *, size_t)) {
     char buf[VMAV_PATH_MAX];
     vmav_status_t st = fn(buf, sizeof(buf));
     if (!vmav_status_ok(st)) {
