@@ -14,7 +14,7 @@ extern "C" {
  * free via vmav_subproc_result_free. `data` is either NULL (no bytes
  * captured) or a malloc'd NUL-terminated string of length `len`. */
 typedef struct {
-    char  *data;
+    char *data;
     size_t len;
     size_t cap;
 } vmav_buf_t;
@@ -61,7 +61,7 @@ typedef struct {
 
     /* True if exited via signal; signal_num is the signal number. */
     bool signaled;
-    int  signal_num;
+    int signal_num;
 
     /* Captured streams. data is NULL when nothing was captured (either
      * not requested, or the stream was empty). When non-NULL, data is

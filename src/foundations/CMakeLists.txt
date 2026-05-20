@@ -4,7 +4,9 @@ add_library(vmav_foundations STATIC
     vmav_os_win.c
     vmav_log.c
     vmav_subproc_posix.c
-    vmav_subproc_win.c)
+    vmav_subproc_win.c
+    vmav_ui.c
+    vmav_cli.c)
 
 add_library(vmav::foundations ALIAS vmav_foundations)
 

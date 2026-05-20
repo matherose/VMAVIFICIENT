@@ -1,20 +1,22 @@
 #include "vmavificient/vmav_subproc.h"
 
+#include "unity.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "unity.h"
+void setUp(void) {
+}
 
-void setUp(void) {}
-void tearDown(void) {}
+void tearDown(void) {
+}
 
 /* === Basic spawn ============================================== */
 
 static void test_echo_captures_stdout(void) {
     const char *argv[] = {"echo", "hello", "world", NULL};
-    vmav_subproc_spec_t spec = {
-        .exe = "/bin/echo", .argv = argv, .capture_stdout = true};
+    vmav_subproc_spec_t spec = {.exe = "/bin/echo", .argv = argv, .capture_stdout = true};
     vmav_subproc_result_t r = {0};
     vmav_status_t st = vmav_subproc_run(&spec, &r);
     TEST_ASSERT_TRUE_MESSAGE(vmav_status_ok(st), st.msg);
@@ -44,8 +46,7 @@ static void test_false_exits_nonzero(void) {
 static void test_stdout_and_stderr_separated(void) {
     const char *argv[] = {"sh", "-c", "printf out; printf err >&2", NULL};
     vmav_subproc_spec_t spec = {
-        .exe = "/bin/sh", .argv = argv,
-        .capture_stdout = true, .capture_stderr = true};
+        .exe = "/bin/sh", .argv = argv, .capture_stdout = true, .capture_stderr = true};
     vmav_subproc_result_t r = {0};
     vmav_status_t st = vmav_subproc_run(&spec, &r);
     TEST_ASSERT_TRUE_MESSAGE(vmav_status_ok(st), st.msg);
@@ -61,9 +62,7 @@ static void test_stdout_and_stderr_separated(void) {
 
 static void test_timeout_kills_child(void) {
     const char *argv[] = {"sleep", "5", NULL};
-    vmav_subproc_spec_t spec = {
-        .exe = "/bin/sleep", .argv = argv,
-        .timeout_ms = 100};
+    vmav_subproc_spec_t spec = {.exe = "/bin/sleep", .argv = argv, .timeout_ms = 100};
     vmav_subproc_result_t r = {0};
     vmav_status_t st = vmav_subproc_run(&spec, &r);
     TEST_ASSERT_TRUE_MESSAGE(vmav_status_ok(st), st.msg);
@@ -78,8 +77,7 @@ static void test_timeout_kills_child(void) {
 
 static void test_nonexistent_exe_errors(void) {
     const char *argv[] = {"this-binary-definitely-does-not-exist", NULL};
-    vmav_subproc_spec_t spec = {
-        .exe = "this-binary-definitely-does-not-exist", .argv = argv};
+    vmav_subproc_spec_t spec = {.exe = "this-binary-definitely-does-not-exist", .argv = argv};
     vmav_subproc_result_t r = {0};
     vmav_status_t st = vmav_subproc_run(&spec, &r);
     TEST_ASSERT_FALSE(vmav_status_ok(st));
@@ -111,11 +109,12 @@ static void test_result_free_idempotent(void) {
 
 static void test_captures_large_output(void) {
     /* 64 KB of 'A' via yes(1)-like sh loop. Verifies that the buf grows. */
-    const char *argv[] = {"sh", "-c",
+    const char *argv[] = {"sh",
+                          "-c",
                           "for i in $(seq 1 1024); do "
-                          "printf '%64s' '' | tr ' ' A; done; echo", NULL};
-    vmav_subproc_spec_t spec = {
-        .exe = "/bin/sh", .argv = argv, .capture_stdout = true};
+                          "printf '%64s' '' | tr ' ' A; done; echo",
+                          NULL};
+    vmav_subproc_spec_t spec = {.exe = "/bin/sh", .argv = argv, .capture_stdout = true};
     vmav_subproc_result_t r = {0};
     vmav_status_t st = vmav_subproc_run(&spec, &r);
     TEST_ASSERT_TRUE_MESSAGE(vmav_status_ok(st), st.msg);

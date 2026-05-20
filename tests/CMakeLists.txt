@@ -13,3 +13,11 @@ vmav_add_unit_test(NAME test_log
 vmav_add_unit_test(NAME test_subproc
     SOURCES unit/test_subproc.c
     LINK_LIBS vmav::foundations)
+
+vmav_add_unit_test(NAME test_ui
+    SOURCES unit/test_ui.c
+    LINK_LIBS vmav::foundations)
+
+vmav_add_unit_test(NAME test_cli
+    SOURCES unit/test_cli.c
+    LINK_LIBS vmav::foundations)

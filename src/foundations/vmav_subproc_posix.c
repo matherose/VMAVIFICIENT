@@ -5,9 +5,8 @@ typedef int vmav_subproc_posix_anchor_t;
 /* Windows impl in vmav_subproc_win.c (Phase 2). */
 #else
 
-#include "vmavificient/vmav_subproc.h"
-
 #include "vmavificient/vmav_os.h"
+#include "vmavificient/vmav_subproc.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -16,14 +15,15 @@ typedef int vmav_subproc_posix_anchor_t;
 #include <spawn.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+#include <sys/wait.h>
 
 extern char **environ;
 
 #define VMAV_SUBPROC_BUF_INITIAL 4096
-#define VMAV_SUBPROC_BUF_MAX     (16U * 1024U * 1024U) /* 16 MiB sanity cap */
+#define VMAV_SUBPROC_BUF_MAX (16U * 1024U * 1024U) /* 16 MiB sanity cap */
 
 static vmav_status_t buf_append(vmav_buf_t *b, const char *data, size_t n) {
     if (b->len + n + 1 > b->cap) {
@@ -41,7 +41,7 @@ static vmav_status_t buf_append(vmav_buf_t *b, const char *data, size_t n) {
             return VMAV_ERR(VMAV_ERR_NO_MEM, "subproc buf realloc(%zu)", new_cap);
         }
         b->data = p;
-        b->cap  = new_cap;
+        b->cap = new_cap;
     }
     memcpy(b->data + b->len, data, n);
     b->len += n;
@@ -56,11 +56,11 @@ void vmav_subproc_result_free(vmav_subproc_result_t *out) {
     free(out->stdout_buf.data);
     free(out->stderr_buf.data);
     out->stdout_buf.data = NULL;
-    out->stdout_buf.len  = 0;
-    out->stdout_buf.cap  = 0;
+    out->stdout_buf.len = 0;
+    out->stdout_buf.cap = 0;
     out->stderr_buf.data = NULL;
-    out->stderr_buf.len  = 0;
-    out->stderr_buf.cap  = 0;
+    out->stderr_buf.len = 0;
+    out->stderr_buf.cap = 0;
 }
 
 static void close_if_open(int *fd) {
@@ -85,11 +85,11 @@ vmav_status_t vmav_subproc_run(const vmav_subproc_spec_t *spec, vmav_subproc_res
 
     int stdout_pipe[2] = {-1, -1};
     int stderr_pipe[2] = {-1, -1};
-    int devnull        = -1;
+    int devnull = -1;
     posix_spawn_file_actions_t actions;
     bool actions_inited = false;
-    pid_t pid           = -1;
-    vmav_status_t st    = VMAV_OK_STATUS;
+    pid_t pid = -1;
+    vmav_status_t st = VMAV_OK_STATUS;
 
     if (spec->capture_stdout && pipe(stdout_pipe) != 0) {
         st = VMAV_ERR(VMAV_ERR_SUBPROC, "pipe(stdout): %s", strerror(errno));
@@ -130,8 +130,7 @@ vmav_status_t vmav_subproc_run(const vmav_subproc_spec_t *spec, vmav_subproc_res
     const int spawn_rc =
         posix_spawnp(&pid, spec->exe, &actions, NULL, (char *const *)spec->argv, envp);
     if (spawn_rc != 0) {
-        st = VMAV_ERR(VMAV_ERR_SUBPROC, "posix_spawnp('%s'): %s",
-                      spec->exe, strerror(spawn_rc));
+        st = VMAV_ERR(VMAV_ERR_SUBPROC, "posix_spawnp('%s'): %s", spec->exe, strerror(spawn_rc));
         pid = -1;
         goto cleanup;
     }
@@ -145,22 +144,22 @@ vmav_status_t vmav_subproc_run(const vmav_subproc_spec_t *spec, vmav_subproc_res
      * Uses poll with a short-ish timeout so timeout enforcement can
      * happen in Phase B even while pipes are still open. */
     struct pollfd pfds[2];
-    int n_pfds     = 0;
+    int n_pfds = 0;
     int stdout_idx = -1;
     int stderr_idx = -1;
     if (spec->capture_stdout) {
-        pfds[n_pfds].fd     = stdout_pipe[0];
+        pfds[n_pfds].fd = stdout_pipe[0];
         pfds[n_pfds].events = POLLIN;
-        stdout_idx          = n_pfds++;
+        stdout_idx = n_pfds++;
     }
     if (spec->capture_stderr) {
-        pfds[n_pfds].fd     = stderr_pipe[0];
+        pfds[n_pfds].fd = stderr_pipe[0];
         pfds[n_pfds].events = POLLIN;
-        stderr_idx          = n_pfds++;
+        stderr_idx = n_pfds++;
     }
     bool stdout_done = (stdout_idx < 0);
     bool stderr_done = (stderr_idx < 0);
-    bool kill_sent   = false;
+    bool kill_sent = false;
 
     while (n_pfds > 0 && (!stdout_done || !stderr_done)) {
         const int n = poll(pfds, (nfds_t)n_pfds, 50);
@@ -177,7 +176,7 @@ vmav_status_t vmav_subproc_run(const vmav_subproc_spec_t *spec, vmav_subproc_res
             if (elapsed >= spec->timeout_ms) {
                 if (!kill_sent) {
                     kill(pid, SIGTERM);
-                    kill_sent      = true;
+                    kill_sent = true;
                     out->timed_out = true;
                 } else if (elapsed > (uint64_t)spec->timeout_ms + 500) {
                     kill(pid, SIGKILL);
@@ -197,8 +196,7 @@ vmav_status_t vmav_subproc_run(const vmav_subproc_spec_t *spec, vmav_subproc_res
             char tmp[8192];
             const ssize_t r = read(pfds[i].fd, tmp, sizeof(tmp));
             if (r > 0) {
-                vmav_buf_t *target =
-                    (i == stdout_idx) ? &out->stdout_buf : &out->stderr_buf;
+                vmav_buf_t *target = (i == stdout_idx) ? &out->stdout_buf : &out->stderr_buf;
                 vmav_status_t ast = buf_append(target, tmp, (size_t)r);
                 if (!vmav_status_ok(ast)) {
                     st = ast;
@@ -236,9 +234,9 @@ reap:
             if (WIFEXITED(wstatus)) {
                 out->exit_code = WEXITSTATUS(wstatus);
             } else if (WIFSIGNALED(wstatus)) {
-                out->signaled   = true;
+                out->signaled = true;
                 out->signal_num = WTERMSIG(wstatus);
-                out->exit_code  = 128 + out->signal_num;
+                out->exit_code = 128 + out->signal_num;
             }
             pid = -1;
             break;
@@ -257,7 +255,7 @@ reap:
             if (elapsed >= spec->timeout_ms) {
                 if (!kill_sent) {
                     kill(pid, SIGTERM);
-                    kill_sent      = true;
+                    kill_sent = true;
                     out->timed_out = true;
                 } else if (elapsed > (uint64_t)spec->timeout_ms + 500) {
                     kill(pid, SIGKILL);

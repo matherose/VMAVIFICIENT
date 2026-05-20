@@ -1,60 +1,30 @@
-#include "vmavificient/vmav_version.h"
+#include "vmavificient/vmav_log.h"
+#include "vmavificient/vmav_os.h"
 
-#include <stdio.h>
-#include <string.h>
+#include "commands/commands.h"
 
-static int cmd_version(void) {
-    printf(
-        "vmavificient %s (git %s, built %s)\n", VMAV_VERSION_STRING, VMAV_GIT_SHA, VMAV_BUILD_DATE);
-    return 0;
-}
-
-static int cmd_help(FILE *out) {
-    fputs("vmavificient " VMAV_VERSION_STRING " — AV1 encoding CLI\n"
-          "\n"
-          "Usage:\n"
-          "  vmavificient <subcommand> [options]\n"
-          "  vmavificient <input>                (one-shot, dispatches to `encode`)\n"
-          "\n"
-          "Subcommands:\n"
-          "  encode <input>      Encode a video to AV1 (not implemented in Phase 0)\n"
-          "  analyze <input>     Probe a video without encoding (not implemented in Phase 0)\n"
-          "  search <title>      TMDB metadata lookup (not implemented in Phase 0)\n"
-          "  doctor              Environment self-check (not implemented in Phase 0)\n"
-          "  version             Print version information\n"
-          "  help                Print this message\n"
-          "\n"
-          "v2.0.0-dev — see https://github.com/joeltordjman/VMAVIFICIENT for status.\n",
-          out);
-    return 0;
-}
-
-static int cmd_not_implemented(const char *name) {
-    fprintf(stderr,
-            "vmavificient: '%s' is not implemented in this Phase 0 skeleton.\n"
-            "See docs/porting-notes.md for the implementation roadmap.\n",
-            name);
-    return 2;
-}
+const vmav_subcmd_t VMAV_CMD_TABLE[] = {
+    {"encode", "Encode a video to AV1 (stub — Phase 4)", cmd_encode_run},
+    {"analyze", "Probe a video without encoding (stub — Phase 3)", cmd_analyze_run},
+    {"search", "TMDB metadata lookup (stub — Phase 3)", cmd_search_run},
+    {"doctor", "Environment self-check", cmd_doctor_run},
+    {"version", "Print version information", cmd_version_run},
+    {"help", "Print this message", cmd_help_run},
+    {NULL, NULL, NULL},
+};
 
 int main(int argc, char **argv) {
-    if (argc < 2) {
-        return cmd_help(stdout);
-    }
-    const char *cmd = argv[1];
+    /* Best-effort: on Windows console, enable VT processing so ANSI
+     * escapes render. No-op on POSIX. */
+    (void)vmav_term_enable_vt();
 
-    if (strcmp(cmd, "version") == 0 || strcmp(cmd, "--version") == 0 || strcmp(cmd, "-v") == 0) {
-        return cmd_version();
+    /* Honor VMAV_LOG_LEVEL env var; default INFO. */
+    vmav_log_level_t lvl = VMAV_LL_INFO;
+    const char *lvl_env = vmav_env_get("VMAV_LOG_LEVEL");
+    if (lvl_env != NULL) {
+        (void)vmav_log_level_from_str(lvl_env, &lvl);
     }
-    if (strcmp(cmd, "help") == 0 || strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0) {
-        return cmd_help(stdout);
-    }
-    if (strcmp(cmd, "encode") == 0 || strcmp(cmd, "analyze") == 0 || strcmp(cmd, "search") == 0 ||
-        strcmp(cmd, "doctor") == 0) {
-        return cmd_not_implemented(cmd);
-    }
+    vmav_log_init(lvl, VMAV_LOG_SINK_STDERR);
 
-    fprintf(stderr, "vmavificient: unknown subcommand '%s'\n", cmd);
-    cmd_help(stderr);
-    return 1;
+    return vmav_cli_dispatch(argc, argv, VMAV_CMD_TABLE, "encode");
 }
