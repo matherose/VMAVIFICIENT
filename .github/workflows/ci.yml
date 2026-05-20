@@ -21,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Install clang-format
         run: |
           sudo apt-get update -qq
@@ -41,6 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: lukka/get-cmake@latest
       - name: Fetch zig toolchain
         run: |
@@ -62,6 +66,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: lukka/get-cmake@latest
       - name: Install qemu-user-static
         run: |
@@ -89,6 +95,8 @@ jobs:
     runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: lukka/get-cmake@latest
       - name: Configure
         run: cmake --preset macos-x86_64
@@ -106,6 +114,8 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: lukka/get-cmake@latest
       - name: Configure
         run: cmake --preset macos-arm64
@@ -123,6 +133,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: lukka/get-cmake@latest
       - name: Fetch llvm-mingw
         run: |
