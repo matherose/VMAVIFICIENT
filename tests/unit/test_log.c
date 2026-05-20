@@ -1,19 +1,23 @@
 #include "vmavificient/vmav_log.h"
 
+#include "unity.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 #include <unistd.h>
 
-#include "unity.h"
+#include <sys/types.h>
 
 static char g_tmp_path[256];
 static FILE *g_tmp_fp;
 
 void setUp(void) {
-    snprintf(g_tmp_path, sizeof(g_tmp_path), "/tmp/vmav-log-test-%lld-%d.log",
-             (long long)getpid(), rand());
+    snprintf(g_tmp_path,
+             sizeof(g_tmp_path),
+             "/tmp/vmav-log-test-%lld-%d.log",
+             (long long)getpid(),
+             rand());
     g_tmp_fp = fopen(g_tmp_path, "w+");
     TEST_ASSERT_NOT_NULL(g_tmp_fp);
     vmav_log_init(VMAV_LL_TRACE, VMAV_LOG_SINK_FILE);

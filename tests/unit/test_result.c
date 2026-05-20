@@ -1,11 +1,14 @@
 #include "vmavificient/vmav_result.h"
 
-#include <string.h>
-
 #include "unity.h"
 
-void setUp(void) {}
-void tearDown(void) {}
+#include <string.h>
+
+void setUp(void) {
+}
+
+void tearDown(void) {
+}
 
 static void test_ok_status_is_zero(void) {
     vmav_status_t st = VMAV_OK_STATUS;
@@ -30,11 +33,22 @@ static void test_code_str_covers_every_code(void) {
     /* If a new code is added without updating vmav_code_str, the
      * default branch returns "unknown" — assert all named codes
      * resolve to a non-"unknown" string. */
-    const vmav_code_t codes[] = {
-        VMAV_OK,           VMAV_ERR_GENERIC,    VMAV_ERR_IO,         VMAV_ERR_PARSE,
-        VMAV_ERR_NO_MEM,   VMAV_ERR_BAD_ARG,    VMAV_ERR_NOT_FOUND,  VMAV_ERR_NOT_IMPL,
-        VMAV_ERR_PERMISSION, VMAV_ERR_TIMEOUT,  VMAV_ERR_CANCELED,   VMAV_ERR_SUBPROC,
-        VMAV_ERR_FFMPEG,   VMAV_ERR_ENCODE,     VMAV_ERR_DECODE,     VMAV_ERR_INVARIANT};
+    const vmav_code_t codes[] = {VMAV_OK,
+                                 VMAV_ERR_GENERIC,
+                                 VMAV_ERR_IO,
+                                 VMAV_ERR_PARSE,
+                                 VMAV_ERR_NO_MEM,
+                                 VMAV_ERR_BAD_ARG,
+                                 VMAV_ERR_NOT_FOUND,
+                                 VMAV_ERR_NOT_IMPL,
+                                 VMAV_ERR_PERMISSION,
+                                 VMAV_ERR_TIMEOUT,
+                                 VMAV_ERR_CANCELED,
+                                 VMAV_ERR_SUBPROC,
+                                 VMAV_ERR_FFMPEG,
+                                 VMAV_ERR_ENCODE,
+                                 VMAV_ERR_DECODE,
+                                 VMAV_ERR_INVARIANT};
     for (size_t i = 0; i < sizeof(codes) / sizeof(codes[0]); ++i) {
         const char *s = vmav_code_str(codes[i]);
         TEST_ASSERT_NOT_NULL(s);

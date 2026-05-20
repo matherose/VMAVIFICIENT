@@ -1,15 +1,19 @@
 #include "vmavificient/vmav_os.h"
 
+#include "unity.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/types.h>
 #include <unistd.h>
 
-#include "unity.h"
+#include <sys/types.h>
 
-void setUp(void) {}
-void tearDown(void) {}
+void setUp(void) {
+}
+
+void tearDown(void) {
+}
 
 /* === Path join ================================================ */
 
@@ -86,8 +90,7 @@ static void test_mkdir_p_creates_nested_dirs(void) {
 
     /* Cleanup. */
     char cleanup[VMAV_PATH_MAX];
-    snprintf(cleanup, sizeof(cleanup), "rm -rf %s/vmav-test-mkdir-%lld",
-             tmp, (long long)getpid());
+    snprintf(cleanup, sizeof(cleanup), "rm -rf %s/vmav-test-mkdir-%lld", tmp, (long long)getpid());
     (void)system(cleanup);
 }
 

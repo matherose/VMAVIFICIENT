@@ -50,11 +50,7 @@ const char *vmav_code_str(vmav_code_t code);
 
 /* Construct an error status with a printf-style message. Prefer the
  * VMAV_ERR macro, which captures __FILE__ and __LINE__ automatically. */
-vmav_status_t vmav_status_make(vmav_code_t code,
-                               const char *file,
-                               int line,
-                               const char *fmt,
-                               ...)
+vmav_status_t vmav_status_make(vmav_code_t code, const char *file, int line, const char *fmt, ...)
     __attribute__((format(printf, 4, 5)));
 
 /* Construct an error status with a captured source location. The
@@ -64,12 +60,12 @@ vmav_status_t vmav_status_make(vmav_code_t code,
 
 /* If `expr` evaluates to a non-OK status, return it from the current
  * function. The current function must return vmav_status_t. */
-#define VMAV_TRY(expr)                                                                              \
-    do {                                                                                            \
-        vmav_status_t _vmav_try_st = (expr);                                                        \
-        if (_vmav_try_st.code != VMAV_OK) {                                                         \
-            return _vmav_try_st;                                                                    \
-        }                                                                                           \
+#define VMAV_TRY(expr)                                                                             \
+    do {                                                                                           \
+        vmav_status_t _vmav_try_st = (expr);                                                       \
+        if (_vmav_try_st.code != VMAV_OK) {                                                        \
+            return _vmav_try_st;                                                                   \
+        }                                                                                          \
     } while (0)
 
 static inline bool vmav_status_ok(vmav_status_t st) {

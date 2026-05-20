@@ -45,16 +45,13 @@ void vmav_log_set_file(FILE *fp);
 /* Emit a log entry. Prefer the level-specific macros below — they
  * capture __FILE__ and __LINE__ automatically. Entries below the
  * configured level are dropped. */
-void vmav_logf(vmav_log_level_t level,
-               const char *file,
-               int line,
-               const char *fmt,
-               ...) __attribute__((format(printf, 4, 5)));
+void vmav_logf(vmav_log_level_t level, const char *file, int line, const char *fmt, ...)
+    __attribute__((format(printf, 4, 5)));
 
 #define VMAV_LOG_TRACE(...) vmav_logf(VMAV_LL_TRACE, __FILE__, __LINE__, __VA_ARGS__)
 #define VMAV_LOG_DEBUG(...) vmav_logf(VMAV_LL_DEBUG, __FILE__, __LINE__, __VA_ARGS__)
-#define VMAV_LOG_INFO(...)  vmav_logf(VMAV_LL_INFO,  __FILE__, __LINE__, __VA_ARGS__)
-#define VMAV_LOG_WARN(...)  vmav_logf(VMAV_LL_WARN,  __FILE__, __LINE__, __VA_ARGS__)
+#define VMAV_LOG_INFO(...) vmav_logf(VMAV_LL_INFO, __FILE__, __LINE__, __VA_ARGS__)
+#define VMAV_LOG_WARN(...) vmav_logf(VMAV_LL_WARN, __FILE__, __LINE__, __VA_ARGS__)
 #define VMAV_LOG_ERROR(...) vmav_logf(VMAV_LL_ERROR, __FILE__, __LINE__, __VA_ARGS__)
 
 /* Lookup helpers. Return stable strings; never NULL. */

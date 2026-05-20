@@ -1,3 +1,6 @@
+/* Anchor declaration so this TU is non-empty on Windows builds. */
+typedef int vmav_os_posix_anchor_t;
+
 #if defined(_WIN32)
 /* Windows impl lives in vmav_os_win.c (Phase 2). */
 #else
@@ -9,10 +12,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+
+#include <sys/stat.h>
+#include <sys/types.h>
 
 /* === Environment ============================================== */
 
@@ -145,15 +149,16 @@ vmav_status_t vmav_path_join(char *out, size_t out_size, const char *a, const ch
     if (written < 0 || (size_t)written >= out_size) {
         return VMAV_ERR(VMAV_ERR_BAD_ARG,
                         "vmav_path_join: result truncated (need %d bytes, have %zu)",
-                        written, out_size);
+                        written,
+                        out_size);
     }
     return VMAV_OK_STATUS;
 }
 
 #if defined(__APPLE__)
-#    define VMAV_OS_MACOS 1
+#define VMAV_OS_MACOS 1
 #else
-#    define VMAV_OS_LINUX 1
+#define VMAV_OS_LINUX 1
 #endif
 
 static vmav_status_t home_dir(char *out, size_t out_size) {
