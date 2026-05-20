@@ -14,8 +14,9 @@ target_compile_features(vmav_compile_options INTERFACE c_std_11)
 # Clang extensions we explicitly opt into (e.g. statement expressions in
 # macros, __attribute__((cleanup))). Disable any warning here that proves
 # noisy in practice; keep the bar high.
+# (-std=c11 itself is contributed by target_compile_features(c_std_11)
+# above — listing it twice triggers benign duplication on some drivers.)
 target_compile_options(vmav_compile_options INTERFACE
-    -std=c11
     -Wall
     -Wextra
     -Wpedantic

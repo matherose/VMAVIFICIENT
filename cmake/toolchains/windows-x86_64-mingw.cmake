@@ -14,8 +14,10 @@ set(CMAKE_C_COMPILER "${_clang}")
 set(CMAKE_AR         "${_ar}"     CACHE FILEPATH "" FORCE)
 set(CMAKE_RANLIB     "${_ranlib}" CACHE FILEPATH "" FORCE)
 if(_windres)
+    # CMAKE_RC_COMPILER is recorded for later enable_language(RC) at the
+    # top-level CMakeLists. Calling enable_language() here would fire
+    # before CMake has resolved CMAKE_MAKE_PROGRAM and fail.
     set(CMAKE_RC_COMPILER "${_windres}")
-    enable_language(RC)
 endif()
 
 # Force static CRT + winpthread.

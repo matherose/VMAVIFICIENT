@@ -34,4 +34,17 @@ else
 fi
 
 "${INSTALL_DIR}/zig" version
+
+# Install ar/ranlib wrappers — CMake's CMAKE_AR / CMAKE_RANLIB must point at
+# a single executable; zig's multi-tool form ("zig ar ...") can't be
+# expressed directly, so we write tiny shell stubs next to the zig binary.
+for tool in ar ranlib; do
+    wrapper="${INSTALL_DIR}/zig-${tool}"
+    cat >"${wrapper}" <<EOF
+#!/bin/sh
+exec "${INSTALL_DIR}/zig" ${tool} "\$@"
+EOF
+    chmod +x "${wrapper}"
+done
+
 echo "${INSTALL_DIR}"

@@ -28,8 +28,7 @@ target_compile_options(vmav_compile_options INTERFACE
     "-D__TIME__=\"redacted\""
     "-D__TIMESTAMP__=\"redacted\"")
 
-if(NOT APPLE AND NOT WIN32)
-    target_link_options(vmav_compile_options INTERFACE
-        "LINKER:--build-id=none"
-        "LINKER:--sort-section=name")
-endif()
+# --build-id=none and --sort-section=name are GNU-ld specific and rejected
+# by zig cc's lld wrapper. We rely on SOURCE_DATE_EPOCH + path-prefix maps
+# alone for Phase 0 reproducibility; per-linker flags can be reintroduced
+# in Phase 5 when scripts/repro_check.sh is wired up.
