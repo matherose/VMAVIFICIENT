@@ -28,3 +28,12 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+
+# Auto-detect wine for ctest. When present, CTest will prefix each test
+# command with `wine` so .exe test runners execute under wine on Linux.
+# Locally on macOS where wine is typically missing, we don't run tests
+# anyway (build-only validation).
+find_program(_wine wine)
+if(_wine)
+    set(CMAKE_CROSSCOMPILING_EMULATOR "${_wine}")
+endif()

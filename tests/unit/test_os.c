@@ -82,10 +82,21 @@ static void test_no_color_detects_env(void) {
 /* === Filesystem ============================================== */
 
 static void test_mkdir_p_creates_nested_dirs(void) {
+#if defined(_WIN32)
+    const char *tmp = vmav_env_get("TEMP");
+    if (tmp == NULL) {
+        tmp = vmav_env_get("TMP");
+    }
+    if (tmp == NULL) {
+        TEST_IGNORE_MESSAGE("neither TEMP nor TMP set");
+        return;
+    }
+#else
     const char *tmp = vmav_env_get("TMPDIR");
     if (tmp == NULL) {
         tmp = "/tmp";
     }
+#endif
     char dir[VMAV_PATH_MAX];
     snprintf(dir, sizeof(dir), "%s/vmav-test-mkdir-%lld/a/b/c", tmp, (long long)getpid());
 
@@ -96,10 +107,8 @@ static void test_mkdir_p_creates_nested_dirs(void) {
     /* Idempotent: calling again succeeds. */
     TEST_ASSERT_TRUE(vmav_status_ok(vmav_fs_mkdir_p(dir)));
 
-    /* Cleanup. */
-    char cleanup[VMAV_PATH_MAX];
-    snprintf(cleanup, sizeof(cleanup), "rm -rf %s/vmav-test-mkdir-%lld", tmp, (long long)getpid());
-    (void)system(cleanup);
+    /* Cleanup is intentionally skipped — POSIX `rm -rf` is unavailable
+     * under wine and on real Windows. The OS cleans up TEMP eventually. */
 }
 
 /* === Time ==================================================== */
