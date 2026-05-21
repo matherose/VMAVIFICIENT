@@ -33,7 +33,7 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 # command with `wine` so .exe test runners execute under wine on Linux.
 # Locally on macOS where wine is typically missing, we don't run tests
 # anyway (build-only validation).
-find_program(_wine wine)
+find_program(_wine NAMES wine wine64)
 if(_wine)
     set(CMAKE_CROSSCOMPILING_EMULATOR "${_wine}")
 endif()

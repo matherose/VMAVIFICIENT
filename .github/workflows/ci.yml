@@ -125,9 +125,14 @@ jobs:
       - uses: lukka/get-cmake@latest
       - name: Install wine (for ctest)
         run: |
-          sudo dpkg --add-architecture i386
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends wine64 wine32 winbind
+          sudo apt-get install -y --no-install-recommends wine64
+          # Ubuntu 24.04+ ships `wine64`; older releases provided both
+          # `wine` and `wine64`. Symlink so CMAKE_CROSSCOMPILING_EMULATOR
+          # finds either name.
+          if ! command -v wine >/dev/null 2>&1; then
+              sudo ln -sf "$(command -v wine64)" /usr/local/bin/wine
+          fi
           wine --version
       - name: Fetch llvm-mingw
         run: |
