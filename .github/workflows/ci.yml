@@ -126,13 +126,13 @@ jobs:
       - name: Install wine (for ctest)
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends wine64
-          # Ubuntu 24.04+ ships `wine64`; older releases provided both
-          # `wine` and `wine64`. Symlink so CMAKE_CROSSCOMPILING_EMULATOR
-          # finds either name.
-          if ! command -v wine >/dev/null 2>&1; then
-              sudo ln -sf "$(command -v wine64)" /usr/local/bin/wine
-          fi
+          # Ubuntu's `wine` package provides the /usr/bin/wine launcher
+          # and recommends wine64 for x86_64 binaries. We use the launcher
+          # because Ubuntu 24.04's standalone `wine64` doesn't ship
+          # /usr/bin/wine64 — it lives in /usr/lib/wine/ and isn't on
+          # PATH by default.
+          sudo apt-get install -y --no-install-recommends wine
+          command -v wine
           wine --version
       - name: Fetch llvm-mingw
         run: |
