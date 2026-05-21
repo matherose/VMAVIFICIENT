@@ -199,6 +199,15 @@ vmav_tp_add_external(libpng "${_libpng_dir}"
         -DPNG_TOOLS=OFF
         -DPNG_EXECUTABLES=OFF
         -DPNG_DEBUG=OFF
+        # libpng ships ARM32 NEON assembly that the aarch64 assembler
+        # rejects (vmovn.u16/vbsl/vadd.u8 are 32-bit ARM mnemonics).
+        # Disabling all hardware optimizations is the portable fix —
+        # we trade a few percent decode speed for "builds on every
+        # arch we ship". Tesseract / leptonica use libpng for occasional
+        # PGS-subtitle bitmaps so the perf hit is negligible.
+        -DPNG_HARDWARE_OPTIMIZATIONS=OFF
+        -DPNG_ARM_NEON=off
+        -DPNG_INTEL_SSE=off
         -DZLIB_ROOT=${_zlib_install}
         -DZLIB_INCLUDE_DIR=${_zlib_install}/include
         -DZLIB_LIBRARY=${_zlib_static_path}
