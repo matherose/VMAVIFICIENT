@@ -46,14 +46,23 @@ vmav_status_t vmav_json_read_file(const char *path, struct cJSON **out_root) {
     buf[size] = '\0';
 
     cJSON *root = cJSON_ParseWithLength(buf, (size_t)size);
-    free(buf);
     if (root == NULL) {
+        /* cJSON_GetErrorPtr returns a pointer INTO `buf` — capture
+         * the excerpt before free, otherwise musl's eager reclaim
+         * turns the printf below into a use-after-free segfault
+         * (glibc/macOS hide it via lazy reclaim). */
         const char *err = cJSON_GetErrorPtr();
-        return VMAV_ERR(VMAV_ERR_PARSE,
-                        "cJSON parse failed on '%s' near '%.32s'",
-                        path,
-                        err != NULL ? err : "?");
+        char excerpt[33] = "?";
+        if (err != NULL && err >= buf && err < buf + size) {
+            const size_t avail = (size_t)(buf + size - err);
+            const size_t copy = avail > 32 ? 32 : avail;
+            memcpy(excerpt, err, copy);
+            excerpt[copy] = '\0';
+        }
+        free(buf);
+        return VMAV_ERR(VMAV_ERR_PARSE, "cJSON parse failed on '%s' near '%s'", path, excerpt);
     }
+    free(buf);
     *out_root = root;
     return VMAV_OK_STATUS;
 }
@@ -97,6 +106,12 @@ vmav_status_t vmav_json_write_atomic(const char *path, const struct cJSON *root)
     }
     fclose(fp);
 
+    /* POSIX rename() atomically replaces an existing destination, but
+     * Windows / wine's CRT rename() returns -1 when the destination
+     * exists. Remove first to keep behavior identical everywhere. The
+     * tiny non-atomic window is acceptable for cache files (recompute
+     * on crash) but unfit for anything write-once-must-survive. */
+    (void)remove(path);
     if (rename(tmp_path, path) != 0) {
         (void)remove(tmp_path);
         return VMAV_ERR(VMAV_ERR_IO, "rename '%s' -> '%s' failed", tmp_path, path);
