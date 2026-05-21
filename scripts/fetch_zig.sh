@@ -35,10 +35,13 @@ fi
 
 "${INSTALL_DIR}/zig" version
 
-# Install ar/ranlib wrappers — CMake's CMAKE_AR / CMAKE_RANLIB must point at
-# a single executable; zig's multi-tool form ("zig ar ...") can't be
-# expressed directly, so we write tiny shell stubs next to the zig binary.
-for tool in ar ranlib; do
+# Install cc/c++/ar/ranlib wrappers — CMake's CMAKE_*_COMPILER /
+# CMAKE_AR / CMAKE_RANLIB must each point at a single executable. Zig's
+# multi-tool form ("zig cc ...") can't be expressed via *_COMPILER_ARG1
+# alone — CMake's `-P` script mode bypasses ARG1 and calls
+# `${CMAKE_C_COMPILER} -E ...` directly, which a bare `zig` rejects.
+# Tiny shell stubs sidestep the whole problem.
+for tool in cc c++ ar ranlib; do
     wrapper="${INSTALL_DIR}/zig-${tool}"
     cat >"${wrapper}" <<EOF
 #!/bin/sh
