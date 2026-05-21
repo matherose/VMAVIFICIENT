@@ -16,3 +16,9 @@
 [submodule "third_party/libtiff"]
 	path = third_party/libtiff
 	url = https://gitlab.com/libtiff/libtiff.git
+[submodule "third_party/openssl"]
+	path = third_party/openssl
+	url = https://github.com/openssl/openssl.git
+[submodule "third_party/curl"]
+	path = third_party/curl
+	url = https://github.com/curl/curl.git

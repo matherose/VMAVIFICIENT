@@ -58,6 +58,18 @@ vmav_add_unit_test(NAME test_libtiff_link
     SOURCES unit/test_libtiff_link.c
     LINK_LIBS vmav::tp::tiff)
 
+vmav_add_unit_test(NAME test_openssl_link
+    SOURCES unit/test_openssl_link.c
+    LINK_LIBS vmav::tp::ssl vmav::tp::crypto)
+
+vmav_add_unit_test(NAME test_libcurl_link
+    SOURCES unit/test_libcurl_link.c
+    LINK_LIBS vmav::tp::curl)
+
+vmav_add_unit_test(NAME test_tmdb_match
+    SOURCES unit/test_tmdb_match.c
+    LINK_LIBS vmav::integrations)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     # test_subproc: invokes POSIX-only binaries (/bin/echo, /bin/sh).
     # test_cache: relies on env-var cache-dir override and `rm -rf`

@@ -289,3 +289,212 @@ add_dependencies(libtiff-ep zlib-ep libjpeg-turbo-ep)
 add_library(vmav::tp::tiff ALIAS vmav_tp_libtiff)
 
 message(STATUS "VmavThirdParty: libtiff v4.6.0 (vendored static, ExternalProject)")
+
+# === OpenSSL 3.3.7 LTS (autoconf-style ExternalProject) =======
+# OpenSSL uses its own Perl-based Configure script, not CMake. Wire it
+# up via a custom ExternalProject CONFIGURE_COMMAND. Each platform has
+# its own OpenSSL "target name" recognized by Configure.
+#
+# We synthesize a tiny CC-wrapper script so the cross-compile -target
+# flag (currently lives in CMAKE_C_FLAGS_INIT) is baked into the
+# compiler invocation OpenSSL sees. OpenSSL's `CC=foo bar baz` env-var
+# parsing is fragile across CMake's quoting layers, so the wrapper is
+# the cleanest path.
+
+set(_openssl_dir "${CMAKE_SOURCE_DIR}/third_party/openssl")
+if(NOT EXISTS "${_openssl_dir}/Configure")
+    message(FATAL_ERROR
+        "third_party/openssl submodule missing at ${_openssl_dir}.\n"
+        "Run:  git submodule update --init --recursive")
+endif()
+
+# Per-platform Configure target.
+if(WIN32)
+    set(_openssl_target "mingw64")
+elseif(APPLE)
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64"
+       OR CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
+        set(_openssl_target "darwin64-arm64-cc")
+    else()
+        set(_openssl_target "darwin64-x86_64-cc")
+    endif()
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+        set(_openssl_target "linux-aarch64")
+    else()
+        set(_openssl_target "linux-x86_64-clang")
+    endif()
+else()
+    message(FATAL_ERROR "OpenSSL: unsupported target ${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+
+set(_openssl_install "${CMAKE_BINARY_DIR}/_tp_install/openssl")
+set(_openssl_build "${CMAKE_BINARY_DIR}/_tp_build/openssl")
+file(MAKE_DIRECTORY "${_openssl_build}")
+file(MAKE_DIRECTORY "${_openssl_install}/include")
+
+# CC wrapper that bakes in every compiler flag CMake would normally
+# inject implicitly — cross-compile -target, macOS -isysroot, etc.
+# OpenSSL's Configure invokes CC directly via its own Makefile so we
+# can't rely on CMake's per-invocation flag construction.
+set(_openssl_cc_flags "${CMAKE_C_FLAGS_INIT}")
+if(APPLE)
+    if(CMAKE_OSX_SYSROOT)
+        set(_openssl_cc_flags "${_openssl_cc_flags} -isysroot ${CMAKE_OSX_SYSROOT}")
+    endif()
+    if(CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(_openssl_cc_flags
+            "${_openssl_cc_flags} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    endif()
+endif()
+
+set(_openssl_cc "${_openssl_build}/cc-wrapper.sh")
+file(WRITE "${_openssl_cc}"
+"#!/bin/sh\nexec \"${CMAKE_C_COMPILER}\" ${_openssl_cc_flags} \"$@\"\n")
+execute_process(COMMAND chmod +x "${_openssl_cc}")
+
+include(ExternalProject)
+ExternalProject_Add(openssl-ep
+    SOURCE_DIR  "${_openssl_dir}"
+    BINARY_DIR  "${_openssl_build}"
+    INSTALL_DIR "${_openssl_install}"
+    CONFIGURE_COMMAND
+        perl "${_openssl_dir}/Configure" "${_openssl_target}"
+            --prefix=<INSTALL_DIR>
+            --libdir=lib
+            --openssldir=<INSTALL_DIR>/ssl
+            "CC=${_openssl_cc}"
+            "AR=${CMAKE_AR}"
+            "RANLIB=${CMAKE_RANLIB}"
+            no-shared
+            no-tests
+            no-docs
+            no-apps
+            no-engine
+            # no-module skips dynamic-loadable providers (the legacy.so
+            # / legacy.dylib files); without it, install_sw rebuilds them
+            # and links against KDF symbols our static config omits.
+            no-module
+            no-legacy
+            no-dynamic-engine
+    BUILD_COMMAND
+        make -j build_libs
+    INSTALL_COMMAND
+        make install_dev
+    BUILD_BYPRODUCTS
+        "${_openssl_install}/lib/libssl.a"
+        "${_openssl_install}/lib/libcrypto.a"
+    UPDATE_DISCONNECTED TRUE
+    LOG_CONFIGURE TRUE
+    LOG_BUILD TRUE
+    LOG_INSTALL TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE)
+
+# Expose two IMPORTED targets — libssl depends on libcrypto, and on
+# Windows both need link-time winsock + crypt32.
+foreach(_lib crypto ssl)
+    add_library(vmav_tp_${_lib} STATIC IMPORTED GLOBAL)
+    add_dependencies(vmav_tp_${_lib} openssl-ep)
+    set_target_properties(vmav_tp_${_lib} PROPERTIES
+        IMPORTED_LOCATION "${_openssl_install}/lib/lib${_lib}.a")
+    target_include_directories(vmav_tp_${_lib} SYSTEM INTERFACE
+        "${_openssl_install}/include")
+endforeach()
+
+target_link_libraries(vmav_tp_ssl INTERFACE vmav_tp_crypto)
+
+if(WIN32)
+    target_link_libraries(vmav_tp_crypto INTERFACE ws2_32 crypt32)
+endif()
+if(UNIX AND NOT APPLE)
+    target_link_libraries(vmav_tp_crypto INTERFACE pthread dl)
+endif()
+
+add_library(vmav::tp::ssl    ALIAS vmav_tp_ssl)
+add_library(vmav::tp::crypto ALIAS vmav_tp_crypto)
+
+message(STATUS "VmavThirdParty: OpenSSL 3.3.7 LTS (target ${_openssl_target}, ExternalProject)")
+
+# === libcurl 8.7.1 (CMake ExternalProject) ====================
+# HTTPS client used by tmdb_client. CMake build; trivial compared to
+# OpenSSL once the OPENSSL_* find_package vars point at our vendored
+# install. Disable every protocol/feature we don't need so the static
+# binary stays small and we avoid hidden host-deps.
+
+set(_curl_dir "${CMAKE_SOURCE_DIR}/third_party/curl")
+if(NOT EXISTS "${_curl_dir}/CMakeLists.txt")
+    message(FATAL_ERROR
+        "third_party/curl submodule missing at ${_curl_dir}.\n"
+        "Run:  git submodule update --init --recursive")
+endif()
+
+vmav_tp_add_external(curl "${_curl_dir}"
+    STATIC_LIB "lib/libcurl.a"
+    CMAKE_ARGS
+        -DBUILD_CURL_EXE=OFF
+        -DBUILD_SHARED_LIBS=OFF
+        -DBUILD_STATIC_LIBS=ON
+        -DBUILD_LIBCURL_DOCS=OFF
+        -DBUILD_MISC_DOCS=OFF
+        -DENABLE_CURL_MANUAL=OFF
+        -DBUILD_TESTING=OFF
+        # TLS backend: our vendored OpenSSL.
+        -DCURL_USE_OPENSSL=ON
+        -DOPENSSL_ROOT_DIR=${_openssl_install}
+        -DOPENSSL_INCLUDE_DIR=${_openssl_install}/include
+        -DOPENSSL_SSL_LIBRARY=${_openssl_install}/lib/libssl.a
+        -DOPENSSL_CRYPTO_LIBRARY=${_openssl_install}/lib/libcrypto.a
+        # Compression: our vendored zlib.
+        -DCURL_ZLIB=ON
+        -DZLIB_ROOT=${_zlib_install}
+        -DZLIB_INCLUDE_DIR=${_zlib_install}/include
+        -DZLIB_LIBRARY=${_zlib_static_path}
+        # Disable everything we don't need — keeps the .a small and
+        # eliminates auto-find_package for host system libs.
+        -DCURL_DISABLE_LDAP=ON
+        -DCURL_DISABLE_LDAPS=ON
+        -DCURL_DISABLE_GOPHER=ON
+        -DCURL_DISABLE_TELNET=ON
+        -DCURL_DISABLE_DICT=ON
+        -DCURL_DISABLE_FILE=ON
+        -DCURL_DISABLE_TFTP=ON
+        -DCURL_DISABLE_RTSP=ON
+        -DCURL_DISABLE_POP3=ON
+        -DCURL_DISABLE_IMAP=ON
+        -DCURL_DISABLE_SMTP=ON
+        -DCURL_DISABLE_SMB=ON
+        -DCURL_DISABLE_MQTT=ON
+        -DCURL_DISABLE_FTP=ON
+        -DUSE_LIBIDN2=OFF
+        -DUSE_NGHTTP2=OFF
+        -DCURL_USE_LIBPSL=OFF
+        -DCURL_USE_LIBSSH2=OFF
+        -DCURL_USE_LIBSSH=OFF
+        -DCURL_USE_GSSAPI=OFF
+        -DCURL_BROTLI=OFF
+        -DCURL_ZSTD=OFF
+    LINK_LIBS vmav::tp::ssl vmav::tp::crypto vmav::tp::zlib)
+add_dependencies(curl-ep openssl-ep zlib-ep)
+
+set(_curl_install "${CMAKE_BINARY_DIR}/_tp_install/curl")
+
+if(WIN32)
+    # libcurl on Windows needs winsock + crypt32. With LDAP disabled we
+    # don't need wldap32.
+    target_link_libraries(vmav_tp_curl INTERFACE ws2_32 crypt32 bcrypt)
+    # libcurl's headers default to __declspec(dllimport); consumers
+    # building against the static .a must define CURL_STATICLIB so the
+    # extern decls drop the import attribute.
+    target_compile_definitions(vmav_tp_curl INTERFACE CURL_STATICLIB)
+elseif(APPLE)
+    # libcurl on macOS pulls in CoreFoundation + SystemConfiguration
+    # for the macOS-native proxy resolver (Curl_macos_init reads
+    # SCDynamicStoreCopyProxies).
+    target_link_libraries(vmav_tp_curl INTERFACE
+        "-framework CoreFoundation"
+        "-framework SystemConfiguration")
+endif()
+
+add_library(vmav::tp::curl ALIAS vmav_tp_curl)
+
+message(STATUS "VmavThirdParty: libcurl 8.7.1 (vendored static, ExternalProject)")

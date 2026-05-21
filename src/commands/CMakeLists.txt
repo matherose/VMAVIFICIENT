@@ -12,7 +12,8 @@ target_link_libraries(vmav_commands
     PRIVATE
         vmav::compile_options
     PUBLIC
-        vmav::foundations)
+        vmav::foundations
+        vmav::integrations)
 
 target_include_directories(vmav_commands
     PUBLIC
