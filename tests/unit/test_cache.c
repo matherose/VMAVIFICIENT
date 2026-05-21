@@ -1,10 +1,8 @@
 #include "vmavificient/vmav_cache.h"
-
 #include "vmavificient/vmav_os.h"
 
-#include "unity.h"
-
 #include "cJSON.h"
+#include "unity.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,9 +10,9 @@
 #include <unistd.h>
 
 #if defined(_WIN32)
-#    define vmav_test_setenv(name, val) _putenv_s((name), (val))
+#define vmav_test_setenv(name, val) _putenv_s((name), (val))
 #else
-#    define vmav_test_setenv(name, val) setenv((name), (val), 1)
+#define vmav_test_setenv(name, val) setenv((name), (val), 1)
 #endif
 
 static char g_tmp[256];

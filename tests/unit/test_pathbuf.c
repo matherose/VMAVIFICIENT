@@ -1,11 +1,11 @@
-#include "util/pathbuf.h"
-
 #include "unity.h"
+#include "util/pathbuf.h"
 
 #include <string.h>
 
 void setUp(void) {
 }
+
 void tearDown(void) {
 }
 

@@ -1,20 +1,24 @@
 #include "vmavificient/vmav_cache.h"
 
-#include "util/json_io.h"
 #include "vmavificient/vmav_log.h"
 #include "vmavificient/vmav_os.h"
+
+#include "cJSON.h"
+#include "util/json_io.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#include "cJSON.h"
-
 const char *vmav_cache_kind_str(vmav_cache_kind_t kind) {
     switch (kind) {
-        case VMAV_CACHE_KIND_GRAIN_SCORE: return "grain_score";
-        case VMAV_CACHE_KIND_CRF_SEARCH:  return "crf_search";
-        case VMAV_CACHE_KIND_PROBE:       return "probe";
-        case VMAV_CACHE_KIND_COUNT_:      return "?";
+    case VMAV_CACHE_KIND_GRAIN_SCORE:
+        return "grain_score";
+    case VMAV_CACHE_KIND_CRF_SEARCH:
+        return "crf_search";
+    case VMAV_CACHE_KIND_PROBE:
+        return "probe";
+    case VMAV_CACHE_KIND_COUNT_:
+        return "?";
     }
     return "?";
 }
@@ -22,7 +26,8 @@ const char *vmav_cache_kind_str(vmav_cache_kind_t kind) {
 /* Build the on-disk path for one entry into `out` (which must have
  * room for at least VMAV_PATH_MAX bytes). Does NOT create the parent
  * directory. */
-static vmav_status_t entry_path(vmav_cache_kind_t kind, const char *key, char *out, size_t out_size) {
+static vmav_status_t
+entry_path(vmav_cache_kind_t kind, const char *key, char *out, size_t out_size) {
     if (key == NULL || key[0] == '\0') {
         return VMAV_ERR(VMAV_ERR_BAD_ARG, "vmav_cache: empty key");
     }
@@ -123,7 +128,9 @@ vmav_status_t vmav_cache_get(vmav_cache_kind_t kind, const char *key, struct cJS
     const int schema = vmav_json_get_int(env, "schema", -1);
     if (schema != VMAV_CACHE_SCHEMA) {
         VMAV_LOG_DEBUG("cache schema mismatch on %s (have %d, need %d) — treating as miss",
-                       path, schema, VMAV_CACHE_SCHEMA);
+                       path,
+                       schema,
+                       VMAV_CACHE_SCHEMA);
         cJSON_Delete(env);
         return VMAV_ERR(VMAV_ERR_NOT_FOUND, "schema %d != %d", schema, VMAV_CACHE_SCHEMA);
     }

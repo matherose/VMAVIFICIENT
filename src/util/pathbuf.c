@@ -9,10 +9,8 @@ static bool is_sep(char c) {
     return c == '/' || c == '\\';
 }
 
-__attribute__((format(printf, 3, 4))) static void write_safe(char *out,
-                                                             size_t out_size,
-                                                             const char *fmt,
-                                                             ...) {
+__attribute__((format(printf, 3, 4))) static void
+write_safe(char *out, size_t out_size, const char *fmt, ...) {
     if (out == NULL || out_size == 0) {
         return;
     }

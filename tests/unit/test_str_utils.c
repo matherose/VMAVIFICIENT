@@ -1,12 +1,12 @@
-#include "util/str_utils.h"
-
 #include "unity.h"
+#include "util/str_utils.h"
 
 #include <stdlib.h>
 #include <string.h>
 
 void setUp(void) {
 }
+
 void tearDown(void) {
 }
 

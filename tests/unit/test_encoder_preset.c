@@ -1,12 +1,12 @@
-#include "encode/encoder_preset.h"
-
 #include "config_defaults.h"
+#include "encode/encoder_preset.h"
 #include "unity.h"
 
 #include <string.h>
 
 void setUp(void) {
 }
+
 void tearDown(void) {
 }
 

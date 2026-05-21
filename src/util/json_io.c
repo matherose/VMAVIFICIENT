@@ -2,11 +2,11 @@
 
 #include "vmavificient/vmav_os.h"
 
+#include "cJSON.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "cJSON.h"
 
 vmav_status_t vmav_json_read_file(const char *path, struct cJSON **out_root) {
     if (path == NULL || out_root == NULL) {
@@ -71,8 +71,8 @@ vmav_status_t vmav_json_write_atomic(const char *path, const struct cJSON *root)
     /* Write to a sibling .tmp file then rename. Avoids partial files
      * after a crash. */
     char tmp_path[VMAV_PATH_MAX];
-    const int wrote =
-        snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%llu", path, (unsigned long long)vmav_time_now_ms());
+    const int wrote = snprintf(
+        tmp_path, sizeof(tmp_path), "%s.tmp.%llu", path, (unsigned long long)vmav_time_now_ms());
     if (wrote < 0 || (size_t)wrote >= sizeof(tmp_path)) {
         free(text);
         return VMAV_ERR(VMAV_ERR_BAD_ARG, "atomic-write tmp path too long");

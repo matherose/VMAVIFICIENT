@@ -30,7 +30,7 @@ typedef enum {
  *     grain, denoises, re-synthesizes. Used for analog film. */
 typedef enum {
     VMAV_GRAIN_SYNTHETIC = 0,
-    VMAV_GRAIN_FILM      = 1,
+    VMAV_GRAIN_FILM = 1,
 } vmav_grain_mode_t;
 
 /* Stable preset metadata. Returned pointers reference static storage;
@@ -42,7 +42,7 @@ typedef struct {
     vmav_grain_mode_t grain_mode;
     int vmaf_target_4k;
     int vmaf_target_hd;
-    int bitrate_4k_grainy;    /* kbps; selected when grain_score >= LOW threshold */
+    int bitrate_4k_grainy; /* kbps; selected when grain_score >= LOW threshold */
     int bitrate_4k_clean;
     int bitrate_4k_animation; /* only meaningful for VMAV_PRESET_ANIMATION */
     int bitrate_hd_grainy;

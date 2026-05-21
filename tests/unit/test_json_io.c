@@ -1,8 +1,6 @@
-#include "util/json_io.h"
-
-#include "unity.h"
-
 #include "cJSON.h"
+#include "unity.h"
+#include "util/json_io.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,13 +8,22 @@
 #include <unistd.h>
 
 static char g_path[256];
+static int g_test_counter = 0;
 
 void setUp(void) {
-    snprintf(g_path, sizeof(g_path), "/tmp/vmav-json-test-%d-%d.json", (int)getpid(), rand());
+    g_test_counter++;
+    /* Deterministic, monotonic path per test — avoids any rand()-state
+     * surprises across libc implementations. */
+    snprintf(
+        g_path, sizeof(g_path), "/tmp/vmav-json-test-%d-%d.json", (int)getpid(), g_test_counter);
     (void)remove(g_path);
+    fprintf(stderr, "[test_json_io] setUp test #%d path=%s\n", g_test_counter, g_path);
+    fflush(stderr);
 }
 
 void tearDown(void) {
+    fprintf(stderr, "[test_json_io] tearDown test #%d\n", g_test_counter);
+    fflush(stderr);
     (void)remove(g_path);
 }
 
