@@ -50,3 +50,10 @@ compile_commands.json
 # Logs / scratch
 *.log
 /tmp/
+
+# OpenSSL's perl Configure script dumps these into CWD; ensure stray
+# runs (debugging from worktree root) never get committed.
+/Makefile
+/Makefile.in
+/configdata.pm
+/include/openssl/
