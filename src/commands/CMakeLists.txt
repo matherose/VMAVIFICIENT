@@ -13,7 +13,8 @@ target_link_libraries(vmav_commands
         vmav::compile_options
     PUBLIC
         vmav::foundations
-        vmav::integrations)
+        vmav::integrations
+        vmav::media)
 
 target_include_directories(vmav_commands
     PUBLIC

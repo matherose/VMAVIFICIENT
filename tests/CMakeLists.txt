@@ -70,6 +70,14 @@ vmav_add_unit_test(NAME test_tmdb_match
     SOURCES unit/test_tmdb_match.c
     LINK_LIBS vmav::integrations)
 
+vmav_add_unit_test(NAME test_ffmpeg_link
+    SOURCES unit/test_ffmpeg_link.c
+    LINK_LIBS vmav::tp::avformat vmav::tp::avfilter)
+
+vmav_add_unit_test(NAME test_media_probe
+    SOURCES unit/test_media_probe.c
+    LINK_LIBS vmav::media)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     # test_subproc: invokes POSIX-only binaries (/bin/echo, /bin/sh).
     # test_cache: relies on env-var cache-dir override and `rm -rf`

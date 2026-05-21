@@ -498,3 +498,173 @@ endif()
 add_library(vmav::tp::curl ALIAS vmav_tp_curl)
 
 message(STATUS "VmavThirdParty: libcurl 8.7.1 (vendored static, ExternalProject)")
+
+# === FFmpeg n8.1.1 (autoconf-style ExternalProject) ===========
+# The biggest dep by far: ~3000 source files producing 6 static libs.
+# Builds via FFmpeg's own ./configure (Bourne shell, not autoconf
+# proper). Each platform needs target-os/arch flags. We reuse the
+# OpenSSL-style CC wrapper pattern to bake in cross-compile flags
+# the configure-time tiny test programs need.
+#
+# Output libs (in install/lib/):
+#   libavformat.a, libavcodec.a, libavutil.a,
+#   libavfilter.a, libswscale.a, libswresample.a
+
+set(_ffmpeg_dir "${CMAKE_SOURCE_DIR}/third_party/ffmpeg")
+if(NOT EXISTS "${_ffmpeg_dir}/configure")
+    message(FATAL_ERROR
+        "third_party/ffmpeg submodule missing at ${_ffmpeg_dir}.\n"
+        "Run:  git submodule update --init --recursive")
+endif()
+
+# Per-platform target-os / arch / cross-prefix.
+if(WIN32)
+    set(_ffmpeg_target_os "mingw32")
+    set(_ffmpeg_arch "x86_64")
+elseif(APPLE)
+    set(_ffmpeg_target_os "darwin")
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64"
+       OR CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
+        set(_ffmpeg_arch "arm64")
+    else()
+        set(_ffmpeg_arch "x86_64")
+    endif()
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(_ffmpeg_target_os "linux")
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+        set(_ffmpeg_arch "aarch64")
+    else()
+        set(_ffmpeg_arch "x86_64")
+    endif()
+else()
+    message(FATAL_ERROR "FFmpeg: unsupported target ${CMAKE_SYSTEM_NAME}")
+endif()
+
+set(_ffmpeg_install "${CMAKE_BINARY_DIR}/_tp_install/ffmpeg")
+set(_ffmpeg_build "${CMAKE_BINARY_DIR}/_tp_build/ffmpeg")
+file(MAKE_DIRECTORY "${_ffmpeg_build}")
+file(MAKE_DIRECTORY "${_ffmpeg_install}/include")
+
+# CC wrapper baking in cross-compile + macOS sysroot flags. FFmpeg's
+# configure invokes CC many times for capability probes; the wrapper
+# ensures every invocation gets the right target.
+set(_ffmpeg_cc_flags "${CMAKE_C_FLAGS_INIT}")
+if(APPLE)
+    if(CMAKE_OSX_SYSROOT)
+        set(_ffmpeg_cc_flags "${_ffmpeg_cc_flags} -isysroot ${CMAKE_OSX_SYSROOT}")
+    endif()
+    if(CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(_ffmpeg_cc_flags
+            "${_ffmpeg_cc_flags} -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    endif()
+endif()
+
+set(_ffmpeg_cc "${_ffmpeg_build}/cc-wrapper.sh")
+file(WRITE "${_ffmpeg_cc}"
+"#!/bin/sh\nexec \"${CMAKE_C_COMPILER}\" ${_ffmpeg_cc_flags} \"$@\"\n")
+execute_process(COMMAND chmod +x "${_ffmpeg_cc}")
+
+# Whether to allow x86 assembly. zig cc doesn't bundle nasm, so we
+# disable x86asm on x86_64 targets. ARM/aarch64 GAS-style asm is
+# handled by clang's integrated assembler — keep that path on.
+set(_ffmpeg_asm_args "")
+if(_ffmpeg_arch STREQUAL "x86_64")
+    list(APPEND _ffmpeg_asm_args "--disable-x86asm" "--disable-asm")
+endif()
+
+include(ExternalProject)
+ExternalProject_Add(ffmpeg-ep
+    SOURCE_DIR  "${_ffmpeg_dir}"
+    BINARY_DIR  "${_ffmpeg_build}"
+    INSTALL_DIR "${_ffmpeg_install}"
+    CONFIGURE_COMMAND
+        "${_ffmpeg_dir}/configure"
+            --prefix=<INSTALL_DIR>
+            --enable-cross-compile
+            "--target-os=${_ffmpeg_target_os}"
+            "--arch=${_ffmpeg_arch}"
+            "--cc=${_ffmpeg_cc}"
+            "--ar=${CMAKE_AR}"
+            "--ranlib=${CMAKE_RANLIB}"
+            # Static binary distribution gating.
+            --enable-static
+            --disable-shared
+            --enable-gpl
+            --enable-version3
+            # Trim everything we don't need.
+            --disable-programs
+            --disable-doc
+            --disable-htmlpages
+            --disable-manpages
+            --disable-podpages
+            --disable-txtpages
+            --disable-debug
+            --disable-network
+            # Don't auto-detect host system libs (libxml2, libfreetype,
+            # etc.) — we want a deterministic set of inputs.
+            --disable-autodetect
+            ${_ffmpeg_asm_args}
+            --pkg-config=false
+    BUILD_COMMAND
+        make -j
+    INSTALL_COMMAND
+        make install
+    BUILD_BYPRODUCTS
+        "${_ffmpeg_install}/lib/libavformat.a"
+        "${_ffmpeg_install}/lib/libavcodec.a"
+        "${_ffmpeg_install}/lib/libavutil.a"
+        "${_ffmpeg_install}/lib/libavfilter.a"
+        "${_ffmpeg_install}/lib/libswscale.a"
+        "${_ffmpeg_install}/lib/libswresample.a"
+    UPDATE_DISCONNECTED TRUE
+    LOG_CONFIGURE TRUE
+    LOG_BUILD TRUE
+    LOG_INSTALL TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE)
+
+# Expose the six FFmpeg libs as IMPORTED targets. Order matters at
+# link time: avformat depends on avcodec, avcodec on avutil, etc.
+# We capture the dep DAG via target_link_libraries(... INTERFACE ...)
+# so consumers only need to link the top-level libs they use.
+foreach(_lib avutil swresample swscale avcodec avformat avfilter)
+    add_library(vmav_tp_${_lib} STATIC IMPORTED GLOBAL)
+    add_dependencies(vmav_tp_${_lib} ffmpeg-ep)
+    set_target_properties(vmav_tp_${_lib} PROPERTIES
+        IMPORTED_LOCATION "${_ffmpeg_install}/lib/lib${_lib}.a")
+    target_include_directories(vmav_tp_${_lib} SYSTEM INTERFACE
+        "${_ffmpeg_install}/include")
+endforeach()
+
+# Dep DAG. Lower libs come last so when the linker resolves the
+# upper libs' references it finds them.
+target_link_libraries(vmav_tp_avformat INTERFACE
+    vmav_tp_avcodec vmav_tp_swresample vmav_tp_avutil)
+target_link_libraries(vmav_tp_avfilter INTERFACE
+    vmav_tp_avformat vmav_tp_avcodec vmav_tp_swresample vmav_tp_swscale vmav_tp_avutil)
+target_link_libraries(vmav_tp_avcodec INTERFACE vmav_tp_swresample vmav_tp_avutil)
+target_link_libraries(vmav_tp_swresample INTERFACE vmav_tp_avutil)
+target_link_libraries(vmav_tp_swscale INTERFACE vmav_tp_avutil)
+
+# Platform link-time system libs.
+if(UNIX AND NOT APPLE)
+    target_link_libraries(vmav_tp_avutil INTERFACE m pthread)
+elseif(APPLE)
+    target_link_libraries(vmav_tp_avutil INTERFACE
+        "-framework CoreFoundation"
+        "-framework CoreMedia"
+        "-framework CoreVideo"
+        "-framework VideoToolbox"
+        "-framework AudioToolbox"
+        "-framework Security")
+elseif(WIN32)
+    target_link_libraries(vmav_tp_avutil INTERFACE bcrypt ws2_32 secur32)
+endif()
+
+add_library(vmav::tp::avformat    ALIAS vmav_tp_avformat)
+add_library(vmav::tp::avcodec     ALIAS vmav_tp_avcodec)
+add_library(vmav::tp::avutil      ALIAS vmav_tp_avutil)
+add_library(vmav::tp::avfilter    ALIAS vmav_tp_avfilter)
+add_library(vmav::tp::swscale     ALIAS vmav_tp_swscale)
+add_library(vmav::tp::swresample  ALIAS vmav_tp_swresample)
+
+message(STATUS "VmavThirdParty: FFmpeg n8.1.1 (target ${_ffmpeg_target_os}/${_ffmpeg_arch}, ExternalProject)")

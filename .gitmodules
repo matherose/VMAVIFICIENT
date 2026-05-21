@@ -22,3 +22,6 @@
 [submodule "third_party/curl"]
 	path = third_party/curl
 	url = https://github.com/curl/curl.git
+[submodule "third_party/ffmpeg"]
+	path = third_party/ffmpeg
+	url = https://github.com/FFmpeg/FFmpeg.git
