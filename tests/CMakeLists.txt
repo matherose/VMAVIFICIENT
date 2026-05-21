@@ -22,11 +22,32 @@ vmav_add_unit_test(NAME test_cli
     SOURCES unit/test_cli.c
     LINK_LIBS vmav::foundations)
 
-# test_subproc invokes POSIX binaries (/bin/echo, /bin/sleep, /bin/sh)
-# that don't exist on Windows. The vmav_subproc Win32 implementation is
-# still exercised by the build (it compiles + links), but ctest skips
-# this case on Windows. Replace with Windows-native test cases in
-# Phase 3 once we have real ffmpeg/grav1synth to invoke.
+vmav_add_unit_test(NAME test_str_utils
+    SOURCES unit/test_str_utils.c
+    LINK_LIBS vmav::util)
+
+vmav_add_unit_test(NAME test_pathbuf
+    SOURCES unit/test_pathbuf.c
+    LINK_LIBS vmav::util)
+
+vmav_add_unit_test(NAME test_encoder_preset
+    SOURCES unit/test_encoder_preset.c
+    LINK_LIBS vmav::encode)
+
+vmav_add_unit_test(NAME test_json_io
+    SOURCES unit/test_json_io.c
+    LINK_LIBS vmav::util vmav::tp::cjson)
+
+vmav_add_unit_test(NAME test_cache
+    SOURCES unit/test_cache.c
+    LINK_LIBS vmav::foundations vmav::util vmav::tp::cjson)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    # test_subproc: invokes POSIX-only binaries (/bin/echo, /bin/sh).
+    # test_cache: relies on env-var cache-dir override and `rm -rf`
+    # cleanup; the Win32 cache dir comes from SHGetKnownFolderPath
+    # which ignores HOME/XDG_CACHE_HOME. Re-add Windows-native test
+    # cases for both in Phase 4.
     set_tests_properties(test_subproc PROPERTIES DISABLED TRUE)
+    set_tests_properties(test_cache PROPERTIES DISABLED TRUE)
 endif()

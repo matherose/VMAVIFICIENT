@@ -1,4 +1,6 @@
 add_subdirectory(foundations)
+add_subdirectory(util)
+add_subdirectory(encode)
 add_subdirectory(commands)
 
 add_executable(vmavificient main.c)
@@ -7,6 +9,8 @@ target_link_libraries(vmavificient
     PRIVATE
         vmav::compile_options
         vmav::commands
+        vmav::encode
+        vmav::util
         vmav::foundations)
 
 target_include_directories(vmavificient

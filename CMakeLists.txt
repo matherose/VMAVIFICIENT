@@ -26,7 +26,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 option(VMAV_BUILD_TESTS    "Build unit + integration tests"             ON)
 option(VMAV_SANITIZE       "Build with ASan + UBSan"                    OFF)
 option(VMAV_LTO            "Enable link-time optimization"              ON)
-option(VMAV_USE_THIRD_PARTY "Build vendored third_party deps (off in Phase 0)" OFF)
+option(VMAV_USE_THIRD_PARTY "Build vendored third_party deps"           ON)
 option(VMAV_REPRODUCIBLE   "Enable reproducible-build flags"            ON)
 
 if(NOT CMAKE_C_COMPILER_ID STREQUAL "Clang"
