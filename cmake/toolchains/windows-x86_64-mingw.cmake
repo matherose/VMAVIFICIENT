@@ -5,14 +5,19 @@ set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_SYSTEM_PROCESSOR x86_64)
 
 set(_triple "x86_64-w64-mingw32")
-find_program(_clang "${_triple}-clang" REQUIRED)
-find_program(_ar    "${_triple}-ar"    REQUIRED)
-find_program(_ranlib "${_triple}-ranlib" REQUIRED)
+find_program(_clang   "${_triple}-clang"    REQUIRED)
+find_program(_clangxx "${_triple}-clang++"  REQUIRED)
+find_program(_ar      "${_triple}-ar"       REQUIRED)
+find_program(_ranlib  "${_triple}-ranlib"   REQUIRED)
 find_program(_windres "${_triple}-windres")
 
-set(CMAKE_C_COMPILER "${_clang}")
-set(CMAKE_AR         "${_ar}"     CACHE FILEPATH "" FORCE)
-set(CMAKE_RANLIB     "${_ranlib}" CACHE FILEPATH "" FORCE)
+set(CMAKE_C_COMPILER   "${_clang}")
+# CXX needed when third_party deps enable LANGUAGES CXX in project()
+# (libtiff, leptonica, tesseract). Without this CMake falls back to
+# the host's c++ which can't cross-target Windows.
+set(CMAKE_CXX_COMPILER "${_clangxx}")
+set(CMAKE_AR           "${_ar}"     CACHE FILEPATH "" FORCE)
+set(CMAKE_RANLIB       "${_ranlib}" CACHE FILEPATH "" FORCE)
 if(_windres)
     # CMAKE_RC_COMPILER is recorded for later enable_language(RC) at the
     # top-level CMakeLists. Calling enable_language() here would fire
