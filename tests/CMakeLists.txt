@@ -42,6 +42,22 @@ vmav_add_unit_test(NAME test_cache
     SOURCES unit/test_cache.c
     LINK_LIBS vmav::foundations vmav::util vmav::tp::cjson)
 
+vmav_add_unit_test(NAME test_zlib_link
+    SOURCES unit/test_zlib_link.c
+    LINK_LIBS vmav::tp::zlib)
+
+vmav_add_unit_test(NAME test_libpng_link
+    SOURCES unit/test_libpng_link.c
+    LINK_LIBS vmav::tp::png)
+
+vmav_add_unit_test(NAME test_libjpeg_link
+    SOURCES unit/test_libjpeg_link.c
+    LINK_LIBS vmav::tp::jpeg)
+
+vmav_add_unit_test(NAME test_libtiff_link
+    SOURCES unit/test_libtiff_link.c
+    LINK_LIBS vmav::tp::tiff)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     # test_subproc: invokes POSIX-only binaries (/bin/echo, /bin/sh).
     # test_cache: relies on env-var cache-dir override and `rm -rf`

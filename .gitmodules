@@ -4,3 +4,15 @@
 [submodule "third_party/cjson"]
 	path = third_party/cjson
 	url = https://github.com/DaveGamble/cJSON.git
+[submodule "third_party/zlib"]
+	path = third_party/zlib
+	url = https://github.com/madler/zlib.git
+[submodule "third_party/libpng"]
+	path = third_party/libpng
+	url = https://github.com/pnggroup/libpng.git
+[submodule "third_party/libjpeg-turbo"]
+	path = third_party/libjpeg-turbo
+	url = https://github.com/libjpeg-turbo/libjpeg-turbo.git
+[submodule "third_party/libtiff"]
+	path = third_party/libtiff
+	url = https://gitlab.com/libtiff/libtiff.git
