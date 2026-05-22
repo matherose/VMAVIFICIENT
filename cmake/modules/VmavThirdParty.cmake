@@ -674,3 +674,125 @@ add_library(vmav::tp::swscale     ALIAS vmav_tp_swscale)
 add_library(vmav::tp::swresample  ALIAS vmav_tp_swresample)
 
 message(STATUS "VmavThirdParty: FFmpeg n8.1.1 (target ${_ffmpeg_target_os}/${_ffmpeg_arch}, ExternalProject)")
+
+# === Rust deps (libdovi, libhdr10plus) via cargo-c ============
+# Both crates produce C-callable static libs via the cargo-c subcommand.
+# cargo-c handles header generation (cbindgen) + pkg-config + install.
+# Each platform needs a matching rustup target installed.
+
+# Pick the Rust target triple matching our CMAKE_SYSTEM_NAME / processor.
+if(WIN32)
+    set(_rust_target "x86_64-pc-windows-gnu")
+elseif(APPLE)
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64"
+       OR CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
+        set(_rust_target "aarch64-apple-darwin")
+    else()
+        set(_rust_target "x86_64-apple-darwin")
+    endif()
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+        set(_rust_target "aarch64-unknown-linux-musl")
+    else()
+        set(_rust_target "x86_64-unknown-linux-musl")
+    endif()
+else()
+    message(FATAL_ERROR "Rust deps: unsupported target ${CMAKE_SYSTEM_NAME}")
+endif()
+
+# Helper: wrap a cargo-c crate as an ExternalProject. The crate must
+# have a `capi` feature (libdovi + libhdr10plus both do). Produces an
+# install layout at <INSTALL_DIR>/{lib,include}.
+#
+# Usage:
+#   vmav_tp_add_cargo_c(libdovi
+#       SOURCE_DIR ${_dovi_dir}
+#       CRATE_DIR  dolby_vision
+#       STATIC_LIB lib/libdovi.a
+#       INCLUDE_DIR include/libdovi)
+function(vmav_tp_add_cargo_c name)
+    cmake_parse_arguments(VMAV_RUST
+        ""
+        "SOURCE_DIR;CRATE_DIR;STATIC_LIB;FEATURES"
+        ""
+        ${ARGN})
+
+    set(_install_dir "${CMAKE_BINARY_DIR}/_tp_install/${name}")
+    set(_crate_path "${VMAV_RUST_SOURCE_DIR}/${VMAV_RUST_CRATE_DIR}")
+    set(_byproduct "${_install_dir}/${VMAV_RUST_STATIC_LIB}")
+    file(MAKE_DIRECTORY "${_install_dir}/include")
+
+    # Optional --features=X,Y. libdovi has capi as a default feature so
+    # it omits this; libhdr10plus's capi is opt-in.
+    set(_features_arg "")
+    if(VMAV_RUST_FEATURES)
+        set(_features_arg "--features=${VMAV_RUST_FEATURES}")
+    endif()
+
+    # cargo cinstall installs into <prefix>/lib + <prefix>/include.
+    # --library-type=staticlib forces just the .a (no .so/.dylib).
+    # --target picks the rustup triple.
+    include(ExternalProject)
+    ExternalProject_Add(${name}-ep
+        SOURCE_DIR        "${_crate_path}"
+        BINARY_DIR        "${_crate_path}"
+        INSTALL_DIR       "${_install_dir}"
+        CONFIGURE_COMMAND ""
+        BUILD_COMMAND     ""
+        INSTALL_COMMAND
+            cargo cinstall
+                --release
+                --library-type=staticlib
+                --target=${_rust_target}
+                ${_features_arg}
+                --prefix=<INSTALL_DIR>
+                --pkgconfigdir=<INSTALL_DIR>/lib/pkgconfig
+        BUILD_BYPRODUCTS  "${_byproduct}"
+        UPDATE_DISCONNECTED TRUE
+        LOG_INSTALL TRUE
+        LOG_OUTPUT_ON_FAILURE TRUE)
+
+    add_library(vmav_tp_${name} STATIC IMPORTED GLOBAL)
+    add_dependencies(vmav_tp_${name} ${name}-ep)
+    set_target_properties(vmav_tp_${name} PROPERTIES
+        IMPORTED_LOCATION "${_byproduct}")
+    target_include_directories(vmav_tp_${name} SYSTEM INTERFACE
+        "${_install_dir}/include")
+endfunction()
+
+# === libdovi 3.3.2 ============================================
+# Reads + writes Dolby Vision RPU metadata. Used by rpu_extract to
+# pull the RPU sidecar from a DV-tagged input video.
+set(_dovi_dir "${CMAKE_SOURCE_DIR}/third_party/dovi_tool")
+if(NOT EXISTS "${_dovi_dir}/dolby_vision/Cargo.toml")
+    message(FATAL_ERROR
+        "third_party/dovi_tool submodule missing at ${_dovi_dir}.\n"
+        "Run:  git submodule update --init --recursive")
+endif()
+vmav_tp_add_cargo_c(libdovi
+    SOURCE_DIR  "${_dovi_dir}"
+    CRATE_DIR   dolby_vision
+    STATIC_LIB  lib/libdovi.a)
+add_library(vmav::tp::dovi ALIAS vmav_tp_libdovi)
+
+message(STATUS "VmavThirdParty: libdovi 3.3.2 (cargo-c, target ${_rust_target})")
+
+# === libhdr10plus 2.1.5 =======================================
+# Reads + writes HDR10+ dynamic metadata. Used by rpu_extract when
+# the input is HDR10+ tagged (DV is handled via libdovi).
+# Crate output name is `hdr10plus-rs` per its Cargo.toml metadata.capi
+# block, so the staticlib lives at lib/libhdr10plus-rs.a.
+set(_hdr10p_dir "${CMAKE_SOURCE_DIR}/third_party/hdr10plus_tool")
+if(NOT EXISTS "${_hdr10p_dir}/hdr10plus/Cargo.toml")
+    message(FATAL_ERROR
+        "third_party/hdr10plus_tool submodule missing at ${_hdr10p_dir}.\n"
+        "Run:  git submodule update --init --recursive")
+endif()
+vmav_tp_add_cargo_c(libhdr10plus
+    SOURCE_DIR  "${_hdr10p_dir}"
+    CRATE_DIR   hdr10plus
+    STATIC_LIB  lib/libhdr10plus-rs.a
+    FEATURES    capi)
+add_library(vmav::tp::hdr10plus ALIAS vmav_tp_libhdr10plus)
+
+message(STATUS "VmavThirdParty: libhdr10plus 2.1.5 (cargo-c, target ${_rust_target})")

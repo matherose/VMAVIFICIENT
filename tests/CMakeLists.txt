@@ -98,6 +98,18 @@ vmav_add_unit_test(NAME test_media_naming
     SOURCES unit/test_media_naming.c
     LINK_LIBS vmav::media)
 
+vmav_add_unit_test(NAME test_libdovi_link
+    SOURCES unit/test_libdovi_link.c
+    LINK_LIBS vmav::tp::dovi)
+
+vmav_add_unit_test(NAME test_libhdr10plus_link
+    SOURCES unit/test_libhdr10plus_link.c
+    LINK_LIBS vmav::tp::hdr10plus)
+
+vmav_add_unit_test(NAME test_media_rpu
+    SOURCES unit/test_media_rpu.c
+    LINK_LIBS vmav::media)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     # test_subproc: invokes POSIX-only binaries (/bin/echo, /bin/sh).
     # test_cache: relies on env-var cache-dir override and `rm -rf`

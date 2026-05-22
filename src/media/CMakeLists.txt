@@ -4,7 +4,8 @@ add_library(vmav_media STATIC
     media_tracks.c
     media_crop.c
     media_analysis.c
-    media_naming.c)
+    media_naming.c
+    media_rpu.c)
 
 add_library(vmav::media ALIAS vmav_media)
 
@@ -15,6 +16,7 @@ target_link_libraries(vmav_media
         vmav::tp::avfilter
         vmav::tp::avcodec
         vmav::tp::avutil
+        vmav::tp::dovi
     PUBLIC
         vmav::foundations
         vmav::util)
