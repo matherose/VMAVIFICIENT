@@ -290,6 +290,111 @@ add_library(vmav::tp::tiff ALIAS vmav_tp_libtiff)
 
 message(STATUS "VmavThirdParty: libtiff v4.6.0 (vendored static, ExternalProject)")
 
+# === leptonica v1.84.1 (ExternalProject) ======================
+# Image library used by Tesseract: provides Pix (8-bit grayscale and
+# RGBA images), I/O wrappers for PNG/TIFF/JPEG, and primitives like
+# pixScale / pixOtsuThreshOnBackgroundNorm that v1's subtitle_convert
+# uses for OCR pre-processing. Depends on zlib + libpng + libtiff +
+# libjpeg — all vendored, all pinned. Optional codecs (GIF, WebP,
+# OpenJPEG) explicitly disabled to keep the dep graph closed.
+
+set(_leptonica_dir "${CMAKE_SOURCE_DIR}/third_party/leptonica")
+if(NOT EXISTS "${_leptonica_dir}/CMakeLists.txt")
+    message(FATAL_ERROR
+        "third_party/leptonica submodule missing at ${_leptonica_dir}.\n"
+        "Run:  git submodule update --init --recursive")
+endif()
+
+vmav_tp_add_external(leptonica "${_leptonica_dir}"
+    STATIC_LIB "lib/libleptonica.a"
+    CMAKE_ARGS
+        -DBUILD_PROG=OFF
+        -DSW_BUILD=OFF
+        # Disable optional codecs we don't vendor. Leaving these ON
+        # would have leptonica's CMakeLists pick up host system libs.
+        -DENABLE_GIF=OFF
+        -DENABLE_WEBP=OFF
+        -DENABLE_OPENJPEG=OFF
+        # Vendored codec libs — same wiring as libtiff above.
+        -DZLIB_ROOT=${_zlib_install}
+        -DZLIB_INCLUDE_DIR=${_zlib_install}/include
+        -DZLIB_LIBRARY=${_zlib_static_path}
+        -DPNG_PNG_INCLUDE_DIR=${_libpng_install}/include
+        -DPNG_LIBRARY=${_libpng_install}/lib/libpng16.a
+        -DJPEG_INCLUDE_DIR=${_libjpeg_install}/include
+        -DJPEG_LIBRARY=${_libjpeg_install}/lib/libjpeg.a
+        -DTIFF_INCLUDE_DIR=${CMAKE_BINARY_DIR}/_tp_install/libtiff/include
+        -DTIFF_LIBRARY=${CMAKE_BINARY_DIR}/_tp_install/libtiff/lib/libtiff.a
+    LINK_LIBS vmav::tp::tiff vmav::tp::png vmav::tp::jpeg vmav::tp::zlib)
+add_dependencies(leptonica-ep
+    zlib-ep libpng-ep libtiff-ep libjpeg-turbo-ep)
+
+set(_leptonica_install "${CMAKE_BINARY_DIR}/_tp_install/leptonica")
+# leptonica installs its headers under include/leptonica/, but v1's
+# subtitle_convert.c (and Tesseract's own build) does `#include
+# <allheaders.h>` without the leptonica/ prefix. Expose both paths.
+file(MAKE_DIRECTORY "${_leptonica_install}/include/leptonica")
+target_include_directories(vmav_tp_leptonica SYSTEM INTERFACE
+    "${_leptonica_install}/include/leptonica")
+add_library(vmav::tp::leptonica ALIAS vmav_tp_leptonica)
+
+message(STATUS "VmavThirdParty: leptonica v1.84.1 (vendored static, ExternalProject)")
+
+# === Tesseract 5.5.2 (ExternalProject) ========================
+# C++17 OCR engine. Uses leptonica for image I/O + pre-processing.
+# Tesseract's CMake build is well-behaved when given its deps via the
+# standard `find_package(Leptonica CONFIG)` mechanism — leptonica's
+# install includes a cmake/leptonica/LeptonicaConfig.cmake. We point
+# Tesseract's CMAKE_PREFIX_PATH at the leptonica install dir and
+# disable every optional feature we don't need (training tools,
+# OpenMP, libarchive, libcurl).
+
+set(_tesseract_dir "${CMAKE_SOURCE_DIR}/third_party/tesseract")
+if(NOT EXISTS "${_tesseract_dir}/CMakeLists.txt")
+    message(FATAL_ERROR
+        "third_party/tesseract submodule missing at ${_tesseract_dir}.\n"
+        "Run:  git submodule update --init --recursive")
+endif()
+
+vmav_tp_add_external(tesseract "${_tesseract_dir}"
+    STATIC_LIB "lib/libtesseract.a"
+    CMAKE_ARGS
+        # Tesseract's CMake builds + tests + training off.
+        -DBUILD_TRAINING_TOOLS=OFF
+        -DBUILD_TESTS=OFF
+        -DINSTALL_CONFIGS=OFF
+        # Disable optional deps. We don't ship libarchive / libcurl /
+        # OpenMP / ICU; auto-detection would otherwise pick up host
+        # libs and break the static link plan.
+        -DDISABLE_ARCHIVE=ON
+        -DDISABLE_CURL=ON
+        -DOPENMP_BUILD=OFF
+        -DUSE_SYSTEM_ICU=OFF
+        -DSW_BUILD=OFF
+        # libtiff is vendored — leave Tesseract's libtiff codepath on
+        # and provide the install via CMAKE_PREFIX_PATH (below).
+        # GRAPHICS_DISABLED stays OFF because tesseract pulls
+        # ScrollView etc. in regardless when building shared — but
+        # we're building static so the disabled GUI is moot.
+        # Point find_package() lookups at our vendored deps:
+        "-DCMAKE_PREFIX_PATH=${_leptonica_install};${CMAKE_BINARY_DIR}/_tp_install/libtiff;${_libpng_install};${_libjpeg_install};${_zlib_install}"
+        -DLeptonica_DIR=${_leptonica_install}/lib/cmake/leptonica
+    LINK_LIBS vmav::tp::leptonica vmav::tp::tiff vmav::tp::png
+              vmav::tp::jpeg vmav::tp::zlib)
+add_dependencies(tesseract-ep
+    leptonica-ep libtiff-ep libpng-ep libjpeg-turbo-ep zlib-ep)
+
+set(_tesseract_install "${CMAKE_BINARY_DIR}/_tp_install/tesseract")
+# Tesseract is C++; force CMake to use the C++ linker driver on any
+# binary that consumes vmav_tp_tesseract. Without this, our C-only
+# binaries try to link with `cc` and fail to resolve libc++/libstdc++
+# symbols (std::ios_base, std::locale, std::ctype, …).
+set_property(TARGET vmav_tp_tesseract
+    PROPERTY IMPORTED_LINK_INTERFACE_LANGUAGES "CXX")
+add_library(vmav::tp::tesseract ALIAS vmav_tp_tesseract)
+
+message(STATUS "VmavThirdParty: Tesseract 5.5.2 (vendored static, ExternalProject)")
+
 # === OpenSSL 3.3.7 LTS (autoconf-style ExternalProject) =======
 # OpenSSL uses its own Perl-based Configure script, not CMake. Wire it
 # up via a custom ExternalProject CONFIGURE_COMMAND. Each platform has

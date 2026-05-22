@@ -11,11 +11,21 @@ project(vmavificient
     VERSION ${VMAV_VERSION}
     DESCRIPTION "Professional-grade AV1 encoding CLI"
     HOMEPAGE_URL "https://github.com/joeltordjman/VMAVIFICIENT"
-    LANGUAGES C)
+    # CXX needed because Tesseract (vmav::tp::tesseract) is a C++17
+    # static lib. The project source stays in C; we just need CMake
+    # to know about the C++ toolchain so it can pick the C++ driver
+    # when linking binaries that consume Tesseract (via the
+    # IMPORTED_LINK_INTERFACE_LANGUAGES=CXX property on
+    # vmav_tp_tesseract).
+    LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "" FORCE)

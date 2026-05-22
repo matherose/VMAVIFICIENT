@@ -114,6 +114,10 @@ vmav_add_unit_test(NAME test_audio_encode
     SOURCES unit/test_audio_encode.c
     LINK_LIBS vmav::encode)
 
+vmav_add_unit_test(NAME test_tesseract_link
+    SOURCES unit/test_tesseract_link.c
+    LINK_LIBS vmav::tp::tesseract vmav::tp::leptonica)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     # test_subproc: invokes POSIX-only binaries (/bin/echo, /bin/sh).
     # test_cache: relies on env-var cache-dir override and `rm -rf`
