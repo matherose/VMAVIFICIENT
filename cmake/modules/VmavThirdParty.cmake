@@ -758,6 +758,28 @@ function(vmav_tp_add_cargo_c name)
         IMPORTED_LOCATION "${_byproduct}")
     target_include_directories(vmav_tp_${name} SYSTEM INTERFACE
         "${_install_dir}/include")
+
+    # Rust's libstd pulls in platform-specific syscall surface that
+    # isn't included in the staticlib archive itself. Each target needs
+    # the OS-level libs the Rust runtime depends on:
+    #   * Linux musl: libunwind (no libgcc_s on musl) + libc/libm/libpthread/libdl
+    #   * macOS:      iconv + libSystem (linker resolves these implicitly,
+    #                 but cargo-c's pkg-config still lists them)
+    #   * Windows GNU: Win32 surface used by Rust std (net/crypto/RNG/etc.)
+    # zig cc and llvm-mingw both ship the relevant import libs so a bare
+    # `-lws2_32` etc. resolves at link time.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_libraries(vmav_tp_${name} INTERFACE
+            unwind pthread dl m c)
+    elseif(WIN32)
+        target_link_libraries(vmav_tp_${name} INTERFACE
+            ws2_32 ntdll userenv bcrypt advapi32 cfgmgr32
+            credui crypt32 cryptnet dbghelp iphlpapi kernel32
+            mswsock ncrypt ole32 oleaut32 powrprof psapi
+            rpcrt4 secur32 shell32 synchronization user32
+            uuid winhttp wininet winmm winspool wldap32)
+    endif()
+    # macOS: nothing extra — libSystem + libc are linked by the driver.
 endfunction()
 
 # === libdovi 3.3.2 ============================================
