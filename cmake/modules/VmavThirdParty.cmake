@@ -453,6 +453,44 @@ add_library(vmav::tp::tesseract ALIAS vmav_tp_tesseract)
 
 message(STATUS "VmavThirdParty: Tesseract 5.5.2 (vendored static, ExternalProject)")
 
+# === SVT-AV1-HDR v4.1.0 (juliobbv-p fork, ExternalProject) ====
+# AV1 encoder used for the actual video encode. We pin the juliobbv-p
+# HDR fork (not upstream SVT-AV1) because Phase 4's encoder needs the
+# fork's --enable-hdr (HDR10/HDR10+) and Dolby Vision RPU passthrough
+# paths that upstream doesn't carry — those are why v1 always required
+# the fork. CMake build, no extra deps beyond libc/libpthread.
+#
+# Built as a static archive; consumers link against vmav::tp::svtav1
+# and get the SvtAv1Enc.h C API header on their include path.
+
+set(_svtav1_dir "${CMAKE_SOURCE_DIR}/third_party/svt-av1-hdr")
+if(NOT EXISTS "${_svtav1_dir}/CMakeLists.txt")
+    message(FATAL_ERROR
+        "third_party/svt-av1-hdr submodule missing at ${_svtav1_dir}.\n"
+        "Run:  git submodule update --init --recursive")
+endif()
+
+vmav_tp_add_external(svtav1 "${_svtav1_dir}"
+    STATIC_LIB "lib/libSvtAv1Enc.a"
+    CMAKE_ARGS
+        # We need the encoder library only — skip the CLI app + tests.
+        -DBUILD_APPS=OFF
+        -DBUILD_TESTING=OFF
+        # SVT-AV1 has its own NATIVE_BUILD flag that enables -march=native
+        # if left at default; force off for deterministic cross-builds.
+        -DNATIVE=OFF)
+
+set(_svtav1_install "${CMAKE_BINARY_DIR}/_tp_install/svtav1")
+# Headers install under include/svt-av1/ — expose that as an extra
+# INTERFACE include path so consumers can `#include <EbSvtAv1Enc.h>`
+# without the `svt-av1/` prefix (matches v1's source).
+file(MAKE_DIRECTORY "${_svtav1_install}/include/svt-av1")
+target_include_directories(vmav_tp_svtav1 SYSTEM INTERFACE
+    "${_svtav1_install}/include/svt-av1")
+add_library(vmav::tp::svtav1 ALIAS vmav_tp_svtav1)
+
+message(STATUS "VmavThirdParty: SVT-AV1-HDR v4.1.0 (juliobbv-p, vendored static, ExternalProject)")
+
 # === OpenSSL 3.3.7 LTS (autoconf-style ExternalProject) =======
 # OpenSSL uses its own Perl-based Configure script, not CMake. Wire it
 # up via a custom ExternalProject CONFIGURE_COMMAND. Each platform has

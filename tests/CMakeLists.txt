@@ -122,6 +122,10 @@ vmav_add_unit_test(NAME test_subtitle_convert
     SOURCES unit/test_subtitle_convert.c
     LINK_LIBS vmav::encode vmav::tp::avcodec)
 
+vmav_add_unit_test(NAME test_svtav1_link
+    SOURCES unit/test_svtav1_link.c
+    LINK_LIBS vmav::tp::svtav1)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     # test_subproc: invokes POSIX-only binaries (/bin/echo, /bin/sh).
     # test_cache: relies on env-var cache-dir override and `rm -rf`
