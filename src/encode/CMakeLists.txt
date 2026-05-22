@@ -1,14 +1,20 @@
 add_library(vmav_encode STATIC
-    encoder_preset.c)
+    encoder_preset.c
+    audio_encode.c)
 
 add_library(vmav::encode ALIAS vmav_encode)
 
 target_link_libraries(vmav_encode
     PRIVATE
         vmav::compile_options
+        vmav::tp::avformat
+        vmav::tp::avcodec
+        vmav::tp::swresample
+        vmav::tp::avutil
     PUBLIC
         vmav::foundations
-        vmav::util)
+        vmav::util
+        vmav::media)
 
 target_include_directories(vmav_encode
     PUBLIC

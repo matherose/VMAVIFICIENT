@@ -31,3 +31,6 @@
 [submodule "third_party/hdr10plus_tool"]
 	path = third_party/hdr10plus_tool
 	url = https://github.com/quietvoid/hdr10plus_tool.git
+[submodule "third_party/opus"]
+	path = third_party/opus
+	url = https://github.com/xiph/opus.git

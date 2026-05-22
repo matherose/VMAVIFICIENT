@@ -499,6 +499,35 @@ add_library(vmav::tp::curl ALIAS vmav_tp_curl)
 
 message(STATUS "VmavThirdParty: libcurl 8.7.1 (vendored static, ExternalProject)")
 
+# === libopus 1.5.2 (CMake ExternalProject) ====================
+# Audio codec for the .opus output tracks. Built before FFmpeg so
+# FFmpeg's configure can pick it up via --enable-libopus and emit the
+# `libopus` encoder/decoder + `opus` muxer. Audio code links lavc
+# (not libopus directly), so we don't expose vmav::tp::opus to the
+# rest of the tree — but the static lib must exist on disk when
+# FFmpeg's configure probe runs.
+
+set(_opus_dir "${CMAKE_SOURCE_DIR}/third_party/opus")
+if(NOT EXISTS "${_opus_dir}/CMakeLists.txt")
+    message(FATAL_ERROR
+        "third_party/opus submodule missing at ${_opus_dir}.\n"
+        "Run:  git submodule update --init --recursive")
+endif()
+
+vmav_tp_add_external(opus "${_opus_dir}"
+    STATIC_LIB "lib/libopus.a"
+    CMAKE_ARGS
+        -DOPUS_BUILD_SHARED_LIBRARY=OFF
+        -DOPUS_BUILD_TESTING=OFF
+        -DOPUS_BUILD_PROGRAMS=OFF
+        -DOPUS_INSTALL_PKG_CONFIG_MODULE=ON
+        -DOPUS_INSTALL_CMAKE_CONFIG_MODULE=OFF)
+
+set(_opus_install "${CMAKE_BINARY_DIR}/_tp_install/opus")
+add_library(vmav::tp::opus ALIAS vmav_tp_opus)
+
+message(STATUS "VmavThirdParty: libopus 1.5.2 (vendored static, ExternalProject)")
+
 # === FFmpeg n8.1.1 (autoconf-style ExternalProject) ===========
 # The biggest dep by far: ~3000 source files producing 6 static libs.
 # Builds via FFmpeg's own ./configure (Bourne shell, not autoconf
@@ -564,6 +593,12 @@ file(WRITE "${_ffmpeg_cc}"
 "#!/bin/sh\nexec \"${CMAKE_C_COMPILER}\" ${_ffmpeg_cc_flags} \"$@\"\n")
 execute_process(COMMAND chmod +x "${_ffmpeg_cc}")
 
+# FFmpeg's configure runs tiny probe programs that #include <opus.h>
+# and try to link against `-lopus`; bake the libopus install paths
+# into extra-cflags / extra-ldflags so those probes succeed.
+set(_ffmpeg_extra_cflags "-I${_opus_install}/include -I${_opus_install}/include/opus")
+set(_ffmpeg_extra_ldflags "-L${_opus_install}/lib")
+
 # Whether to allow x86 assembly. zig cc doesn't bundle nasm, so we
 # disable x86asm on x86_64 targets. ARM/aarch64 GAS-style asm is
 # handled by clang's integrated assembler — keep that path on.
@@ -578,6 +613,7 @@ ExternalProject_Add(ffmpeg-ep
     BINARY_DIR  "${_ffmpeg_build}"
     INSTALL_DIR "${_ffmpeg_install}"
     CONFIGURE_COMMAND
+        ${CMAKE_COMMAND} -E env "PKG_CONFIG_LIBDIR=${_opus_install}/lib/pkgconfig"
         "${_ffmpeg_dir}/configure"
             --prefix=<INSTALL_DIR>
             --enable-cross-compile
@@ -604,7 +640,17 @@ ExternalProject_Add(ffmpeg-ep
             # etc.) — we want a deterministic set of inputs.
             --disable-autodetect
             ${_ffmpeg_asm_args}
-            --pkg-config=false
+            # libopus: encoder + decoder + ogg muxer/demuxer for the .opus
+            # output files. The audio code uses lavc's `libopus` encoder
+            # (not libopus directly), so we just need FFmpeg to see it.
+            # FFmpeg's libopus detection is pkg-config-only, so we keep
+            # pkg-config enabled but PKG_CONFIG_LIBDIR (set in the env
+            # below) constrains it to look ONLY at our opus install —
+            # no host system lib leakage.
+            --enable-libopus
+            "--extra-cflags=${_ffmpeg_extra_cflags}"
+            "--extra-ldflags=${_ffmpeg_extra_ldflags}"
+            "--extra-libs=-lopus"
     # `make -j` (unbounded) on GHA's macos-14 runner spawns ~3000
     # compile processes for FFmpeg's source tree and trips
     # posix_spawn: EAGAIN under the runner's per-user process limit.
@@ -626,7 +672,8 @@ ExternalProject_Add(ffmpeg-ep
     LOG_CONFIGURE TRUE
     LOG_BUILD TRUE
     LOG_INSTALL TRUE
-    LOG_OUTPUT_ON_FAILURE TRUE)
+    LOG_OUTPUT_ON_FAILURE TRUE
+    DEPENDS opus-ep)
 
 # Expose the six FFmpeg libs as IMPORTED targets. Order matters at
 # link time: avformat depends on avcodec, avcodec on avutil, etc.
@@ -647,7 +694,8 @@ target_link_libraries(vmav_tp_avformat INTERFACE
     vmav_tp_avcodec vmav_tp_swresample vmav_tp_avutil)
 target_link_libraries(vmav_tp_avfilter INTERFACE
     vmav_tp_avformat vmav_tp_avcodec vmav_tp_swresample vmav_tp_swscale vmav_tp_avutil)
-target_link_libraries(vmav_tp_avcodec INTERFACE vmav_tp_swresample vmav_tp_avutil)
+target_link_libraries(vmav_tp_avcodec INTERFACE
+    vmav_tp_swresample vmav_tp_avutil vmav_tp_opus)
 target_link_libraries(vmav_tp_swresample INTERFACE vmav_tp_avutil)
 target_link_libraries(vmav_tp_swscale INTERFACE vmav_tp_avutil)
 

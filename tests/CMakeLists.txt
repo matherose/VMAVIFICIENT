@@ -110,6 +110,10 @@ vmav_add_unit_test(NAME test_media_rpu
     SOURCES unit/test_media_rpu.c
     LINK_LIBS vmav::media)
 
+vmav_add_unit_test(NAME test_audio_encode
+    SOURCES unit/test_audio_encode.c
+    LINK_LIBS vmav::encode)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     # test_subproc: invokes POSIX-only binaries (/bin/echo, /bin/sh).
     # test_cache: relies on env-var cache-dir override and `rm -rf`
