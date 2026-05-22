@@ -605,8 +605,14 @@ ExternalProject_Add(ffmpeg-ep
             --disable-autodetect
             ${_ffmpeg_asm_args}
             --pkg-config=false
+    # `make -j` (unbounded) on GHA's macos-14 runner spawns ~3000
+    # compile processes for FFmpeg's source tree and trips
+    # posix_spawn: EAGAIN under the runner's per-user process limit.
+    # `-j4` is enough parallelism to be fast on every CI runner
+    # we use (Linux ubuntu = 4 cores, macos-14 ~3-4 cores) without
+    # exhausting the limit.
     BUILD_COMMAND
-        make -j
+        make -j4
     INSTALL_COMMAND
         make install
     BUILD_BYPRODUCTS
