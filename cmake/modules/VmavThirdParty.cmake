@@ -377,13 +377,20 @@ vmav_tp_add_external(tesseract "${_tesseract_dir}"
         -DOPENMP_BUILD=OFF
         -DUSE_SYSTEM_ICU=OFF
         -DSW_BUILD=OFF
-        # libtiff is vendored — leave Tesseract's libtiff codepath on
-        # and provide the install via CMAKE_PREFIX_PATH (below).
-        # GRAPHICS_DISABLED stays OFF because tesseract pulls
-        # ScrollView etc. in regardless when building shared — but
-        # we're building static so the disabled GUI is moot.
-        # Point find_package() lookups at our vendored deps:
-        "-DCMAKE_PREFIX_PATH=${_leptonica_install};${CMAKE_BINARY_DIR}/_tp_install/libtiff;${_libpng_install};${_libjpeg_install};${_zlib_install}"
+        # Disable Tesseract's direct libtiff codepath. Our subtitle
+        # pipeline OCRs in-memory PIX buffers (PGS bitmaps → leptonica
+        # PIX → TessBaseAPISetImage2), never TIFF files. Leaving it on
+        # has Tesseract `try_run()` a probe to detect leptonica's TIFF
+        # support — CMake reports that as "cross-compile mode" the
+        # moment CMAKE_OSX_ARCHITECTURES is set, so the probe fails
+        # on every CI runner.
+        -DDISABLE_TIFF=ON
+        # Tesseract finds leptonica via Leptonica_DIR pointing at the
+        # exported CMake config (lib/cmake/leptonica/Leptonica*.cmake).
+        # Leptonica's config carries the transitive deps it needs
+        # (libpng, libjpeg) via INTERFACE_LINK_LIBRARIES, so we don't
+        # need a multi-path CMAKE_PREFIX_PATH (which got mangled by
+        # ExternalProject's argument splitting at `;`).
         -DLeptonica_DIR=${_leptonica_install}/lib/cmake/leptonica
     LINK_LIBS vmav::tp::leptonica vmav::tp::tiff vmav::tp::png
               vmav::tp::jpeg vmav::tp::zlib)
