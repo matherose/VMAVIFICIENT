@@ -1,6 +1,7 @@
 add_library(vmav_encode STATIC
     encoder_preset.c
-    audio_encode.c)
+    audio_encode.c
+    subtitle_convert.c)
 
 add_library(vmav::encode ALIAS vmav_encode)
 
@@ -11,6 +12,9 @@ target_link_libraries(vmav_encode
         vmav::tp::avcodec
         vmav::tp::swresample
         vmav::tp::avutil
+        vmav::tp::tesseract
+        vmav::tp::leptonica
+        vmav::tp::zlib
     PUBLIC
         vmav::foundations
         vmav::util
