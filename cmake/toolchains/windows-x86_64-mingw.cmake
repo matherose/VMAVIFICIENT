@@ -29,6 +29,13 @@ endif()
 set(CMAKE_EXE_LINKER_FLAGS_INIT
     "-static -static-libgcc -Wl,-Bstatic -lpthread")
 
+# MinGW's <cmath> hides M_PI / M_E / etc. unless _USE_MATH_DEFINES is
+# defined before the header is pulled in. Tesseract's CMakeLists only
+# sets this for MSVC; we need it for our llvm-mingw builds too. Setting
+# it via the toolchain ensures every vendored C++ dep built with this
+# toolchain (Tesseract today, anything else later) sees the constants.
+set(CMAKE_CXX_FLAGS_INIT "-D_USE_MATH_DEFINES")
+
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
