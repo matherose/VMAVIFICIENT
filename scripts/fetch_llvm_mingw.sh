@@ -33,4 +33,25 @@ else
 fi
 
 "${INSTALL_DIR}/bin/x86_64-w64-mingw32-clang" --version
+
+# Case-sensitivity workaround: some upstream projects (Tesseract is the
+# first we've hit) hardcode capitalized Win32 lib names like `Ws2_32`
+# in their link lines. llvm-mingw ships only lowercase archives —
+# `libws2_32.a`, etc. Native Windows links case-insensitively; Linux
+# cross-compile via lld is case-sensitive and errors with
+# "unable to find library -lWs2_32".
+#
+# Provide forwarding symlinks for the lowercase archives under the
+# capitalized names that upstream projects use. List grows on demand
+# as we discover more case-mismatch references.
+for arch_dir in "${INSTALL_DIR}"/*-w64-mingw32/lib; do
+    [ -d "${arch_dir}" ] || continue
+    for cased in Ws2_32; do
+        lower="$(echo "${cased}" | tr '[:upper:]' '[:lower:]')"
+        if [ -f "${arch_dir}/lib${lower}.a" ] && [ ! -e "${arch_dir}/lib${cased}.a" ]; then
+            ln -s "lib${lower}.a" "${arch_dir}/lib${cased}.a"
+        fi
+    done
+done
+
 echo "${INSTALL_DIR}"
