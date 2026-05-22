@@ -308,6 +308,12 @@ endif()
 vmav_tp_add_external(leptonica "${_leptonica_dir}"
     STATIC_LIB "lib/libleptonica.a"
     CMAKE_ARGS
+        # leptonica 1.84.1 declares `cmake_minimum_required(VERSION 3.1.3)`.
+        # CMake 4.x removed compatibility for < 3.5. Tell CMake to use
+        # 3.5 policies for this subproject so configure doesn't bail.
+        # (The other vendored deps either declare ≥ 3.5 or use the
+        # `min...max` range form CMake 4 accepts.)
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5
         -DBUILD_PROG=OFF
         -DSW_BUILD=OFF
         # Disable optional codecs we don't vendor. Leaving these ON
