@@ -78,6 +78,26 @@ vmav_add_unit_test(NAME test_media_probe
     SOURCES unit/test_media_probe.c
     LINK_LIBS vmav::media)
 
+vmav_add_unit_test(NAME test_media_hdr
+    SOURCES unit/test_media_hdr.c
+    LINK_LIBS vmav::media)
+
+vmav_add_unit_test(NAME test_media_tracks
+    SOURCES unit/test_media_tracks.c
+    LINK_LIBS vmav::media)
+
+vmav_add_unit_test(NAME test_media_crop
+    SOURCES unit/test_media_crop.c
+    LINK_LIBS vmav::media)
+
+vmav_add_unit_test(NAME test_media_analysis
+    SOURCES unit/test_media_analysis.c
+    LINK_LIBS vmav::media)
+
+vmav_add_unit_test(NAME test_media_naming
+    SOURCES unit/test_media_naming.c
+    LINK_LIBS vmav::media)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     # test_subproc: invokes POSIX-only binaries (/bin/echo, /bin/sh).
     # test_cache: relies on env-var cache-dir override and `rm -rf`
