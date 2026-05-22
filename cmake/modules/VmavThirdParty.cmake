@@ -441,6 +441,14 @@ set(_tesseract_install "${CMAKE_BINARY_DIR}/_tp_install/tesseract")
 # symbols (std::ios_base, std::locale, std::ctype, …).
 set_property(TARGET vmav_tp_tesseract
     PROPERTY IMPORTED_LINK_INTERFACE_LANGUAGES "CXX")
+# On Windows, Tesseract calls into Winsock (send/recv/socket/
+# WSAStartup/...) for its network I/O paths; the static archive
+# references those symbols with __declspec(dllimport), so consumers
+# need -lws2_32 in their link line. Same propagation pattern as
+# libdovi/libhdr10plus on Windows.
+if(WIN32)
+    target_link_libraries(vmav_tp_tesseract INTERFACE ws2_32)
+endif()
 add_library(vmav::tp::tesseract ALIAS vmav_tp_tesseract)
 
 message(STATUS "VmavThirdParty: Tesseract 5.5.2 (vendored static, ExternalProject)")
