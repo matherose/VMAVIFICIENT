@@ -496,6 +496,14 @@ vmav_tp_add_external(svtav1 "${_svtav1_dir}"
         # SVT-AV1 has its own NATIVE_BUILD flag that enables -march=native
         # if left at default; force off for deterministic cross-builds.
         -DNATIVE=OFF
+        # Gate out enc_handle.c's `SVT_INFO("Build date: %s %s", __DATE__,
+        # __TIME__)` line. zig cc enables `-Werror=date-time` by default
+        # for musl targets, so the __DATE__ expansion errors out. SVT-AV1
+        # already has a REPRODUCIBLE_BUILDS option that hides that line
+        # behind `#if !REPRODUCIBLE_BUILDS` — enabling it is the right
+        # answer, both for the warning and for our overall reproducible-
+        # build posture (matches our VmavReproducible cmake module).
+        -DREPRODUCIBLE_BUILDS=ON
         "-DCMAKE_C_FLAGS_RELEASE=${_svtav1_release_flags}"
         "-DCMAKE_CXX_FLAGS_RELEASE=${_svtav1_release_flags}")
 
