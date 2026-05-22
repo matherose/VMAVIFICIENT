@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 # Download and install a musl sysroot for cross-compilation. We use
-# the prebuilt cross-toolchain tarballs from musl.cc and keep only the
-# sysroot directory — clang is provided separately (apt-installed
-# clang-20 on CI, Homebrew clang locally on macOS).
+# Bootlin's prebuilt toolchain tarballs and keep only the sysroot —
+# clang is provided separately (apt-installed clang-20 on CI).
+#
+# Why Bootlin: musl.cc is intermittently unreachable from GHA runners
+# (cloud-IP throttling); Bootlin's Apache-served toolchains.bootlin.com
+# is reliably available from CI. Tarballs ship a stable layout:
+#     <tarball-name>/<triple>/sysroot/        ← the sysroot we want
+# where <triple> is the buildroot-style triple, e.g.
+# `aarch64-buildroot-linux-musl`. clang doesn't care about the triple
+# encoded in the sysroot path — only what we pass to `--target=`.
 #
 # Usage:
 #   scripts/fetch_musl_sysroot.sh <triple> [install_dir]
@@ -11,55 +18,64 @@
 #   scripts/fetch_musl_sysroot.sh x86_64-linux-musl
 #   scripts/fetch_musl_sysroot.sh aarch64-linux-musl
 #
-# After running, the sysroot lives at
-#   ${install_dir}/${triple}/
-# and the script prints that path on stdout.
-#
-# Why musl.cc: it's the de-facto-standard mirror of musl-cross-make
-# tarballs, maintained by Z. King. Stable for years. Tarballs are
-# ~30MB each. We only need the sysroot portion (musl headers +
-# libc.a/libc.so + crt1.o etc.); the bundled gcc binaries are
-# discarded — clang cross-compiles to the triple using --target=
-# + --sysroot=.
+# Prints the sysroot path on stdout (the `<triple>/sysroot/` subdir).
 set -euo pipefail
 
 TRIPLE="${1:?Usage: $0 <triple> [install_dir]}"
-INSTALL_DIR="${2:-${HOME}/.toolchains/musl-${TRIPLE}-cross}"
+INSTALL_BASE="${2:-${HOME}/.toolchains/musl-sysroots}"
 
-# Pin tarball revision via the SHA-suffixed filename so CI is
-# reproducible. musl.cc has long-stable URLs but the tarball content
-# can be rebuilt; pinning here guards against silent breakage.
-TARBALL="${TRIPLE}-cross.tgz"
-URL="https://musl.cc/${TARBALL}"
+# Bootlin's stable 2024.02-1 release. Pin specifically — Bootlin
+# publishes new releases occasionally and we want reproducible CI.
+BOOTLIN_RELEASE="2024.02-1"
 
 case "${TRIPLE}" in
-    x86_64-linux-musl|aarch64-linux-musl) ;;
+    x86_64-linux-musl)
+        # x86-64-v3 requires Haswell+ (AVX2). We can ship binaries
+        # compiled against this sysroot to any x86_64 host because
+        # the sysroot's libc.a contains generic code; runtime SIMD
+        # is what bumps the floor, and our actual code paths gate
+        # SIMD per-feature.
+        _bootlin_arch="x86-64-v3"
+        _bootlin_triple="x86_64-buildroot-linux-musl"
+        ;;
+    aarch64-linux-musl)
+        _bootlin_arch="aarch64"
+        _bootlin_triple="aarch64-buildroot-linux-musl"
+        ;;
     *)
         echo "fetch_musl_sysroot: unsupported triple: ${TRIPLE}" >&2
         exit 1
         ;;
 esac
 
-if [ -d "${INSTALL_DIR}/${TRIPLE}/lib" ] && \
-   [ -f "${INSTALL_DIR}/${TRIPLE}/lib/libc.a" ]; then
-    echo "fetch_musl_sysroot: already installed at ${INSTALL_DIR}"
-    echo "${INSTALL_DIR}"
+TARBALL_NAME="${_bootlin_arch}--musl--stable-${BOOTLIN_RELEASE}"
+URL="https://toolchains.bootlin.com/downloads/releases/toolchains/${_bootlin_arch}/tarballs/${TARBALL_NAME}.tar.bz2"
+
+INSTALL_DIR="${INSTALL_BASE}/${TRIPLE}"
+SYSROOT="${INSTALL_DIR}/${_bootlin_triple}/sysroot"
+
+if [ -f "${SYSROOT}/lib/libc.a" ] || [ -f "${SYSROOT}/usr/lib/libc.a" ]; then
+    echo "fetch_musl_sysroot: already installed at ${SYSROOT}" >&2
+    echo "${SYSROOT}"
     exit 0
 fi
 
-DOWNLOAD="$(mktemp -t "musl-${TRIPLE}.XXXXXX.tgz")"
+DOWNLOAD="$(mktemp -t "musl-${TRIPLE}.XXXXXX.tar.bz2")"
 trap 'rm -f "${DOWNLOAD}"' EXIT
 
-echo "fetch_musl_sysroot: downloading ${URL}"
-curl --fail --silent --show-error --location -o "${DOWNLOAD}" "${URL}"
+echo "fetch_musl_sysroot: downloading ${URL}" >&2
+curl --fail --silent --show-error --location --max-time 600 \
+    -o "${DOWNLOAD}" "${URL}"
 
 mkdir -p "${INSTALL_DIR}"
-tar -xzf "${DOWNLOAD}" -C "${INSTALL_DIR}" --strip-components=1
+tar -xjf "${DOWNLOAD}" -C "${INSTALL_DIR}" --strip-components=1
 
-# Sanity-check: the sysroot subdir should contain a libc.a.
-if [ ! -f "${INSTALL_DIR}/${TRIPLE}/lib/libc.a" ]; then
-    echo "fetch_musl_sysroot: tarball layout unexpected — no ${TRIPLE}/lib/libc.a" >&2
+# Sanity-check the layout. Bootlin sysroots have libc.a in usr/lib
+# (or lib for some builds). Either works for clang's --sysroot.
+if [ ! -f "${SYSROOT}/lib/libc.a" ] && [ ! -f "${SYSROOT}/usr/lib/libc.a" ]; then
+    echo "fetch_musl_sysroot: tarball layout unexpected — no libc.a in ${SYSROOT}" >&2
+    ls -la "${SYSROOT}" >&2 || true
     exit 1
 fi
 
-echo "${INSTALL_DIR}"
+echo "${SYSROOT}"
