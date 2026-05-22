@@ -39,34 +39,39 @@ jobs:
           clang-format --dry-run --Werror "${files[@]}"
 
   build-linux-x86_64-musl:
-    name: build / linux-x86_64-musl (zig)
+    name: build / linux-x86_64-musl (clang+musl)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
       - uses: lukka/get-cmake@latest
-      - name: Install nasm (for SVT-AV1-HDR x86 ASM)
+      - name: Install clang-20 + lld-20 + nasm
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends nasm
-      - name: Fetch zig toolchain
+          # Use the official LLVM apt repo to get clang-20 on Ubuntu
+          # 24.04 (default ships clang-18, which has the same assembler
+          # gaps that pushed us off zig). nasm for SVT-AV1 x86 ASM.
+          wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 20
+          sudo apt-get install -y --no-install-recommends \
+              clang-20 lld-20 llvm-20 nasm
+      - name: Fetch musl sysroot (x86_64-linux-musl)
         run: |
-          dir="$(bash scripts/fetch_zig.sh | tail -n 1)"
-          echo "${dir}" >> "$GITHUB_PATH"
+          dir="$(bash scripts/fetch_musl_sysroot.sh x86_64-linux-musl \
+                  | tail -n 1)"
+          echo "VMAV_MUSL_SYSROOT=${dir}/x86_64-linux-musl" >> "$GITHUB_ENV"
       - name: Add Rust musl target (for libdovi/libhdr10plus cargo-c builds)
         run: rustup target add x86_64-unknown-linux-musl
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-c
-      - name: Point cargo at zig cc as the musl linker
+      - name: Point cargo at clang-20 as the musl linker
         run: |
-          # Static-archive builds still link a probe binary; zig cc bakes
-          # the musl sysroot so we don't have to install musl-cross.
-          wrapper="${HOME}/.cargo/zig-cc-x86_64-musl.sh"
-          cat > "${wrapper}" <<'EOF'
+          wrapper="${HOME}/.cargo/clang-x86_64-musl.sh"
+          cat > "${wrapper}" <<EOF
           #!/bin/sh
-          exec zig cc -target x86_64-linux-musl "$@"
+          exec clang-20 --target=x86_64-linux-musl --sysroot=${VMAV_MUSL_SYSROOT} -fuse-ld=lld "\$@"
           EOF
           chmod +x "${wrapper}"
           {
@@ -85,32 +90,36 @@ jobs:
         run: ctest --test-dir build/linux-x86_64-musl --output-on-failure
 
   build-linux-aarch64-musl:
-    name: build / linux-aarch64-musl (zig cross)
+    name: build / linux-aarch64-musl (clang+musl cross)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
       - uses: lukka/get-cmake@latest
-      - name: Install qemu-user-static
+      - name: Install clang-20 + lld-20 + qemu-user-static
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends qemu-user-static
-      - name: Fetch zig toolchain
+          wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 20
+          sudo apt-get install -y --no-install-recommends \
+              clang-20 lld-20 llvm-20 qemu-user-static
+      - name: Fetch musl sysroot (aarch64-linux-musl)
         run: |
-          dir="$(bash scripts/fetch_zig.sh | tail -n 1)"
-          echo "${dir}" >> "$GITHUB_PATH"
+          dir="$(bash scripts/fetch_musl_sysroot.sh aarch64-linux-musl \
+                  | tail -n 1)"
+          echo "VMAV_MUSL_SYSROOT=${dir}/aarch64-linux-musl" >> "$GITHUB_ENV"
       - name: Add Rust aarch64 musl target
         run: rustup target add aarch64-unknown-linux-musl
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-c
-      - name: Point cargo at zig cc as the aarch64-musl linker
+      - name: Point cargo at clang-20 as the aarch64-musl linker
         run: |
-          wrapper="${HOME}/.cargo/zig-cc-aarch64-musl.sh"
-          cat > "${wrapper}" <<'EOF'
+          wrapper="${HOME}/.cargo/clang-aarch64-musl.sh"
+          cat > "${wrapper}" <<EOF
           #!/bin/sh
-          exec zig cc -target aarch64-linux-musl "$@"
+          exec clang-20 --target=aarch64-linux-musl --sysroot=${VMAV_MUSL_SYSROOT} -fuse-ld=lld "\$@"
           EOF
           chmod +x "${wrapper}"
           {

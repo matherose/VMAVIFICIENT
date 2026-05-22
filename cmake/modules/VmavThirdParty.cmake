@@ -470,44 +470,15 @@ if(NOT EXISTS "${_svtav1_dir}/CMakeLists.txt")
         "Run:  git submodule update --init --recursive")
 endif()
 
-# SVT-AV1's SIMD code paths run into a few zig cc limitations when
-# cross-compiling to Linux musl. macOS builds use Apple Clang and don't
-# need any of these workarounds.
+# Keep CONFIG_ARM_NEON_IS_GUARANTEED=1 on aarch64-Linux as a deployment
+# assumption: NEON is mandatory in Armv8.0-A by ISA spec, and skipping
+# the hwcap-probe code paths is harmless. The AVX-512 and ASM_NEON
+# workarounds we needed under zig cc are gone now that we run clang-20
+# on Linux (see project-toolchain-llvm-only memory entry).
 set(_svtav1_release_flags "-O3 -DNDEBUG")
-set(_svtav1_extra_cmake_args)
-
-if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    # Clang 15+ split the AVX-512 intrinsics behind a `-mevex512`
-    # sub-feature. SVT-AV1's AVX-512 sources (cdef_avx512.c, etc.) use
-    # `_mm512_*` intrinsics with COMPILE_FLAGS `-mavx512f` only, so
-    # they error with `requires target feature 'evex512'`. Skip the
-    # AVX-512 path entirely; AVX2/FMA/SSE4 stay on.
-    list(APPEND _svtav1_extra_cmake_args -DENABLE_AVX512=OFF)
-endif()
-
 if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    # Two separate aarch64 issues, two separate workarounds:
-    #
-    # 1. zig cc's aarch64-linux-musl target rejects the
-    #    `-march=armv8.2-a+dotprod` etc. flags SVT-AV1 uses to detect
-    #    advanced ISAs, so HAVE_{NEON_DOTPROD,SVE,SVE2,...} all probe
-    #    to 0. With only HAVE_NEON=1, `common_dsp_rtcd.c:148` references
-    #    an `hwcap` variable that's only declared when at least one of
-    #    the advanced ISAs is on. CONFIG_ARM_NEON_IS_GUARANTEED=1 makes
-    #    the source take the alternate code path that doesn't need the
-    #    hwcap probe (NEON is mandatory in Armv8.0-A by ISA spec).
     set(_svtav1_release_flags
         "${_svtav1_release_flags} -DCONFIG_ARM_NEON_IS_GUARANTEED=1")
-    # 2. LLVM's integrated assembler (used by zig cc) chokes on the
-    #    `.irp` macro instantiations in Source/Lib/ASM_NEON/itx.S —
-    #    rejects valid `bl` and `b.lt` mnemonics with "invalid
-    #    instruction mnemonic". This is an llvm-as bug for our specific
-    #    macro form. Disable the ASM_NEON path entirely; the SVT-AV1
-    #    C_DEFAULT fallback (still using NEON-via-intrinsics in C) keeps
-    #    the encoder working at moderate speed. Reintroduce when
-    #    upstream LLVM fixes the assembler, or when we ship a system-
-    #    GAS-based aarch64 cross toolchain.
-    list(APPEND _svtav1_extra_cmake_args -DENABLE_NEON=OFF)
 endif()
 
 vmav_tp_add_external(svtav1 "${_svtav1_dir}"
@@ -527,7 +498,6 @@ vmav_tp_add_external(svtav1 "${_svtav1_dir}"
         # answer, both for the warning and for our overall reproducible-
         # build posture (matches our VmavReproducible cmake module).
         -DREPRODUCIBLE_BUILDS=ON
-        ${_svtav1_extra_cmake_args}
         "-DCMAKE_C_FLAGS_RELEASE=${_svtav1_release_flags}"
         "-DCMAKE_CXX_FLAGS_RELEASE=${_svtav1_release_flags}")
 
