@@ -34,14 +34,27 @@ if(NOT DEFINED VMAV_MUSL_SYSROOT)
     else()
         message(FATAL_ERROR
             "linux-x86_64-musl toolchain: VMAV_MUSL_SYSROOT not set.\n"
-            "Run scripts/fetch_musl_sysroot.sh x86_64-linux-musl and pass\n"
-            "  -DVMAV_MUSL_SYSROOT=<path>/x86_64-linux-musl\n"
-            "or export VMAV_MUSL_SYSROOT in the environment.")
+            "Run scripts/fetch_musl_sysroot.sh x86_64-linux-musl and set\n"
+            "  VMAV_MUSL_SYSROOT  = <bootlin-base>/<triple>/sysroot\n"
+            "  VMAV_GCC_TOOLCHAIN = <bootlin-base>")
+    endif()
+endif()
+if(NOT DEFINED VMAV_GCC_TOOLCHAIN)
+    if(DEFINED ENV{VMAV_GCC_TOOLCHAIN})
+        set(VMAV_GCC_TOOLCHAIN "$ENV{VMAV_GCC_TOOLCHAIN}")
+    else()
+        message(FATAL_ERROR
+            "linux-x86_64-musl toolchain: VMAV_GCC_TOOLCHAIN not set "
+            "(needed for crtbeginT.o / libgcc.a lookup).")
     endif()
 endif()
 
 set(_target "x86_64-linux-musl")
-set(_sysroot_flags "--target=${_target} --sysroot=${VMAV_MUSL_SYSROOT}")
+# `--gcc-toolchain=` makes clang find the GCC support files (crt*.o,
+# libgcc.a, libgcc_eh.a) bundled in Bootlin's tarball. Without it clang
+# emits `cannot open crtbeginT.o` + `unable to find library -lgcc`.
+set(_sysroot_flags
+    "--target=${_target} --sysroot=${VMAV_MUSL_SYSROOT} --gcc-toolchain=${VMAV_GCC_TOOLCHAIN}")
 set(CMAKE_C_FLAGS_INIT             "${_sysroot_flags}")
 set(CMAKE_CXX_FLAGS_INIT           "${_sysroot_flags}")
 set(CMAKE_EXE_LINKER_FLAGS_INIT    "${_sysroot_flags} -fuse-ld=lld -static")

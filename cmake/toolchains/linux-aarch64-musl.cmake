@@ -30,14 +30,24 @@ if(NOT DEFINED VMAV_MUSL_SYSROOT)
     else()
         message(FATAL_ERROR
             "linux-aarch64-musl toolchain: VMAV_MUSL_SYSROOT not set.\n"
-            "Run scripts/fetch_musl_sysroot.sh aarch64-linux-musl and pass\n"
-            "  -DVMAV_MUSL_SYSROOT=<path>/aarch64-linux-musl\n"
-            "or export VMAV_MUSL_SYSROOT in the environment.")
+            "Run scripts/fetch_musl_sysroot.sh aarch64-linux-musl and set\n"
+            "  VMAV_MUSL_SYSROOT  = <bootlin-base>/<triple>/sysroot\n"
+            "  VMAV_GCC_TOOLCHAIN = <bootlin-base>")
+    endif()
+endif()
+if(NOT DEFINED VMAV_GCC_TOOLCHAIN)
+    if(DEFINED ENV{VMAV_GCC_TOOLCHAIN})
+        set(VMAV_GCC_TOOLCHAIN "$ENV{VMAV_GCC_TOOLCHAIN}")
+    else()
+        message(FATAL_ERROR
+            "linux-aarch64-musl toolchain: VMAV_GCC_TOOLCHAIN not set "
+            "(needed for crtbeginT.o / libgcc.a lookup).")
     endif()
 endif()
 
 set(_target "aarch64-linux-musl")
-set(_sysroot_flags "--target=${_target} --sysroot=${VMAV_MUSL_SYSROOT}")
+set(_sysroot_flags
+    "--target=${_target} --sysroot=${VMAV_MUSL_SYSROOT} --gcc-toolchain=${VMAV_GCC_TOOLCHAIN}")
 set(CMAKE_C_FLAGS_INIT             "${_sysroot_flags}")
 set(CMAKE_CXX_FLAGS_INIT           "${_sysroot_flags}")
 set(CMAKE_EXE_LINKER_FLAGS_INIT    "${_sysroot_flags} -fuse-ld=lld -static")

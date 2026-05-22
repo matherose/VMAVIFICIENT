@@ -18,7 +18,11 @@
 #   scripts/fetch_musl_sysroot.sh x86_64-linux-musl
 #   scripts/fetch_musl_sysroot.sh aarch64-linux-musl
 #
-# Prints the sysroot path on stdout (the `<triple>/sysroot/` subdir).
+# Prints two lines on stdout:
+#   1. the Bootlin toolchain base dir (needed by `clang --gcc-toolchain=`
+#      so clang finds crt files + libgcc.a)
+#   2. the sysroot path (`<base>/<bootlin-triple>/sysroot/`)
+# Caller is expected to read them via `mapfile` or `tail -n N`.
 set -euo pipefail
 
 TRIPLE="${1:?Usage: $0 <triple> [install_dir]}"
@@ -56,6 +60,7 @@ SYSROOT="${INSTALL_DIR}/${_bootlin_triple}/sysroot"
 
 if [ -f "${SYSROOT}/lib/libc.a" ] || [ -f "${SYSROOT}/usr/lib/libc.a" ]; then
     echo "fetch_musl_sysroot: already installed at ${SYSROOT}" >&2
+    echo "${INSTALL_DIR}"
     echo "${SYSROOT}"
     exit 0
 fi
@@ -78,4 +83,5 @@ if [ ! -f "${SYSROOT}/lib/libc.a" ] && [ ! -f "${SYSROOT}/usr/lib/libc.a" ]; the
     exit 1
 fi
 
+echo "${INSTALL_DIR}"
 echo "${SYSROOT}"

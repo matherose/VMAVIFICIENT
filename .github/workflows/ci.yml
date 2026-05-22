@@ -58,9 +58,10 @@ jobs:
               clang-20 lld-20 llvm-20 nasm
       - name: Fetch musl sysroot (x86_64-linux-musl, via Bootlin)
         run: |
-          sysroot="$(bash scripts/fetch_musl_sysroot.sh x86_64-linux-musl \
-                      | tail -n 1)"
-          echo "VMAV_MUSL_SYSROOT=${sysroot}" >> "$GITHUB_ENV"
+          # Script prints two lines: <gcc-toolchain-base>\n<sysroot>.
+          mapfile -t out < <(bash scripts/fetch_musl_sysroot.sh x86_64-linux-musl)
+          echo "VMAV_GCC_TOOLCHAIN=${out[-2]}" >> "$GITHUB_ENV"
+          echo "VMAV_MUSL_SYSROOT=${out[-1]}"  >> "$GITHUB_ENV"
       - name: Add Rust musl target (for libdovi/libhdr10plus cargo-c builds)
         run: rustup target add x86_64-unknown-linux-musl
       - uses: taiki-e/install-action@v2
@@ -71,7 +72,10 @@ jobs:
           wrapper="${HOME}/.cargo/clang-x86_64-musl.sh"
           cat > "${wrapper}" <<EOF
           #!/bin/sh
-          exec clang-20 --target=x86_64-linux-musl --sysroot=${VMAV_MUSL_SYSROOT} -fuse-ld=lld "\$@"
+          exec clang-20 --target=x86_64-linux-musl \
+              --sysroot=${VMAV_MUSL_SYSROOT} \
+              --gcc-toolchain=${VMAV_GCC_TOOLCHAIN} \
+              -fuse-ld=lld "\$@"
           EOF
           chmod +x "${wrapper}"
           {
@@ -106,9 +110,9 @@ jobs:
               clang-20 lld-20 llvm-20 qemu-user-static
       - name: Fetch musl sysroot (aarch64-linux-musl, via Bootlin)
         run: |
-          sysroot="$(bash scripts/fetch_musl_sysroot.sh aarch64-linux-musl \
-                      | tail -n 1)"
-          echo "VMAV_MUSL_SYSROOT=${sysroot}" >> "$GITHUB_ENV"
+          mapfile -t out < <(bash scripts/fetch_musl_sysroot.sh aarch64-linux-musl)
+          echo "VMAV_GCC_TOOLCHAIN=${out[-2]}" >> "$GITHUB_ENV"
+          echo "VMAV_MUSL_SYSROOT=${out[-1]}"  >> "$GITHUB_ENV"
       - name: Add Rust aarch64 musl target
         run: rustup target add aarch64-unknown-linux-musl
       - uses: taiki-e/install-action@v2
@@ -119,7 +123,10 @@ jobs:
           wrapper="${HOME}/.cargo/clang-aarch64-musl.sh"
           cat > "${wrapper}" <<EOF
           #!/bin/sh
-          exec clang-20 --target=aarch64-linux-musl --sysroot=${VMAV_MUSL_SYSROOT} -fuse-ld=lld "\$@"
+          exec clang-20 --target=aarch64-linux-musl \
+              --sysroot=${VMAV_MUSL_SYSROOT} \
+              --gcc-toolchain=${VMAV_GCC_TOOLCHAIN} \
+              -fuse-ld=lld "\$@"
           EOF
           chmod +x "${wrapper}"
           {
