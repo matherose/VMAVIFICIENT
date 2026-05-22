@@ -470,6 +470,23 @@ if(NOT EXISTS "${_svtav1_dir}/CMakeLists.txt")
         "Run:  git submodule update --init --recursive")
 endif()
 
+# On aarch64-linux-musl (zig cross), SVT-AV1's `if (hwcap & AOM_AARCH64_HWCAP_NEON)`
+# references an `hwcap` variable that's only declared when at least one
+# of HAVE_{ARM_CRC32,NEON_DOTPROD,SVE} is on — zig cc's aarch64-linux-musl
+# target rejects the `-march=armv8.2-a+dotprod` etc. flags so SVT-AV1's
+# CMake probes turn all those off, leaving the file unable to compile.
+# Force CONFIG_ARM_NEON_IS_GUARANTEED=1 to take the source's alternate
+# code path that doesn't need the hwcap probe. Safe assumption:
+# aarch64-linux-musl is Armv8.0-A which mandates NEON by ISA spec.
+#
+# Append via *_FLAGS_RELEASE (which CMake appends to *_FLAGS, preserving
+# the toolchain's `-target` flag set via CMAKE_*_FLAGS_INIT).
+set(_svtav1_release_flags "-O3 -DNDEBUG")
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(_svtav1_release_flags
+        "${_svtav1_release_flags} -DCONFIG_ARM_NEON_IS_GUARANTEED=1")
+endif()
+
 vmav_tp_add_external(svtav1 "${_svtav1_dir}"
     STATIC_LIB "lib/libSvtAv1Enc.a"
     CMAKE_ARGS
@@ -478,7 +495,9 @@ vmav_tp_add_external(svtav1 "${_svtav1_dir}"
         -DBUILD_TESTING=OFF
         # SVT-AV1 has its own NATIVE_BUILD flag that enables -march=native
         # if left at default; force off for deterministic cross-builds.
-        -DNATIVE=OFF)
+        -DNATIVE=OFF
+        "-DCMAKE_C_FLAGS_RELEASE=${_svtav1_release_flags}"
+        "-DCMAKE_CXX_FLAGS_RELEASE=${_svtav1_release_flags}")
 
 set(_svtav1_install "${CMAKE_BINARY_DIR}/_tp_install/svtav1")
 # Headers install under include/svt-av1/ — expose that as an extra

@@ -46,6 +46,10 @@ jobs:
         with:
           submodules: recursive
       - uses: lukka/get-cmake@latest
+      - name: Install nasm (for SVT-AV1-HDR x86 ASM)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends nasm
       - name: Fetch zig toolchain
         run: |
           dir="$(bash scripts/fetch_zig.sh | tail -n 1)"
@@ -164,7 +168,7 @@ jobs:
         with:
           submodules: recursive
       - uses: lukka/get-cmake@latest
-      - name: Install wine (for ctest)
+      - name: Install wine + nasm
         run: |
           sudo apt-get update -qq
           # Ubuntu's `wine` package provides the /usr/bin/wine launcher
@@ -172,7 +176,9 @@ jobs:
           # because Ubuntu 24.04's standalone `wine64` doesn't ship
           # /usr/bin/wine64 — it lives in /usr/lib/wine/ and isn't on
           # PATH by default.
-          sudo apt-get install -y --no-install-recommends wine
+          # nasm is needed for SVT-AV1-HDR's x86 ASM (cross-compile from
+          # linux to windows still runs nasm on the build host).
+          sudo apt-get install -y --no-install-recommends wine nasm
           command -v wine
           wine --version
       - name: Fetch llvm-mingw
