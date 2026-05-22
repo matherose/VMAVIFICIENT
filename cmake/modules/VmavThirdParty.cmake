@@ -379,12 +379,19 @@ vmav_tp_add_external(tesseract "${_tesseract_dir}"
         -DSW_BUILD=OFF
         # Disable Tesseract's direct libtiff codepath. Our subtitle
         # pipeline OCRs in-memory PIX buffers (PGS bitmaps → leptonica
-        # PIX → TessBaseAPISetImage2), never TIFF files. Leaving it on
-        # has Tesseract `try_run()` a probe to detect leptonica's TIFF
-        # support — CMake reports that as "cross-compile mode" the
-        # moment CMAKE_OSX_ARCHITECTURES is set, so the probe fails
-        # on every CI runner.
+        # PIX → TessBaseAPISetImage2), never TIFF files.
         -DDISABLE_TIFF=ON
+        # Tesseract runs `check_leptonica_tiff_support()` (a try_run
+        # probe) UNCONDITIONALLY before DISABLE_TIFF gates anything.
+        # CMake reports try_run as cross-compile mode the moment
+        # CMAKE_OSX_ARCHITECTURES / CMAKE_TOOLCHAIN_FILE is set —
+        # which is every job we run, native or not. Pre-set the
+        # cache result so CMake skips the probe entirely. "0" means
+        # the probe succeeded → "leptonica has TIFF". Combined with
+        # DISABLE_TIFF=ON above, the (NOT LEPT_TIFF_RESULT EQUAL 0)
+        # branch never fires and Tesseract simply notes leptonica
+        # has TIFF and leaves DISABLE_TIFF alone.
+        -DLEPT_TIFF_RESULT=0
         # Tesseract finds leptonica via Leptonica_DIR pointing at the
         # exported CMake config (lib/cmake/leptonica/Leptonica*.cmake).
         # Leptonica's config carries the transitive deps it needs
