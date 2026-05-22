@@ -305,8 +305,17 @@ if(NOT EXISTS "${_leptonica_dir}/CMakeLists.txt")
         "Run:  git submodule update --init --recursive")
 endif()
 
+# Leptonica appends VERSION to its lib name on Windows but not
+# elsewhere: `libleptonica-1.84.1.a` on MinGW, `libleptonica.a` on
+# Linux/macOS. Same pattern as zlib (libz.a / libzlibstatic.a).
+if(WIN32)
+    set(_leptonica_static_rel "lib/libleptonica-1.84.1.a")
+else()
+    set(_leptonica_static_rel "lib/libleptonica.a")
+endif()
+
 vmav_tp_add_external(leptonica "${_leptonica_dir}"
-    STATIC_LIB "lib/libleptonica.a"
+    STATIC_LIB "${_leptonica_static_rel}"
     CMAKE_ARGS
         # leptonica 1.84.1 declares `cmake_minimum_required(VERSION 3.1.3)`.
         # CMake 4.x removed compatibility for < 3.5. Tell CMake to use
@@ -362,8 +371,17 @@ if(NOT EXISTS "${_tesseract_dir}/CMakeLists.txt")
         "Run:  git submodule update --init --recursive")
 endif()
 
+# Tesseract appends MAJORMINOR to its lib name on Windows but not
+# elsewhere: `libtesseract55.a` on MinGW, `libtesseract.a` on
+# Linux/macOS.
+if(WIN32)
+    set(_tesseract_static_rel "lib/libtesseract55.a")
+else()
+    set(_tesseract_static_rel "lib/libtesseract.a")
+endif()
+
 vmav_tp_add_external(tesseract "${_tesseract_dir}"
-    STATIC_LIB "lib/libtesseract.a"
+    STATIC_LIB "${_tesseract_static_rel}"
     CMAKE_ARGS
         # Tesseract's CMake builds + tests + training off.
         -DBUILD_TRAINING_TOOLS=OFF
