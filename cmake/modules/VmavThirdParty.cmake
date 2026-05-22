@@ -392,6 +392,18 @@ vmav_tp_add_external(tesseract "${_tesseract_dir}"
         # branch never fires and Tesseract simply notes leptonica
         # has TIFF and leaves DISABLE_TIFF alone.
         -DLEPT_TIFF_RESULT=0
+        # Disable AVX-512 dotproduct path. Tesseract's CMake probes
+        # `-mavx512f` via check_cxx_compiler_flag — Clang ACCEPTS the
+        # flag, so the probe says yes, but its AVX-512 intrinsics also
+        # need `-mevex512` (a Clang 15+ split) which isn't propagated
+        # to dotproductavx512.cpp's COMPILE_FLAGS. The file then errors
+        # with "_mm512_setzero_ps requires target feature 'evex512'".
+        # CheckCompilerFlag.cmake early-returns when the result var is
+        # already in the cache, so pre-setting HAVE_AVX512F:BOOL=OFF
+        # skips the probe and drops the file from the source list. The
+        # AVX2/FMA/SSE4.1 paths still light up; we just don't get the
+        # 512-bit SIMD — which is irrelevant for subtitle-bitmap OCR.
+        -DHAVE_AVX512F:BOOL=OFF
         # Tesseract finds leptonica via Leptonica_DIR pointing at the
         # exported CMake config (lib/cmake/leptonica/Leptonica*.cmake).
         # Leptonica's config carries the transitive deps it needs
