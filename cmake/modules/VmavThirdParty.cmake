@@ -817,12 +817,11 @@ set(_ffmpeg_extra_cflags "-I${_opus_install}/include -I${_opus_install}/include/
 set(_ffmpeg_extra_ldflags "-L${_opus_install}/lib")
 
 # Whether to allow x86 assembly. zig cc doesn't bundle nasm, so we
-# disable x86asm on x86_64 targets. ARM/aarch64 GAS-style asm is
-# handled by clang's integrated assembler — keep that path on.
+# FFmpeg's x86 ASM kernels need nasm — installed via apt on Linux CI
+# and bundled with the macOS toolchain (Homebrew nasm). The Windows
+# mingw cross job runs configure on Linux too, so the same apt nasm
+# covers it. No reason to disable now that we have nasm everywhere.
 set(_ffmpeg_asm_args "")
-if(_ffmpeg_arch STREQUAL "x86_64")
-    list(APPEND _ffmpeg_asm_args "--disable-x86asm" "--disable-asm")
-endif()
 
 include(ExternalProject)
 ExternalProject_Add(ffmpeg-ep
@@ -1027,15 +1026,16 @@ function(vmav_tp_add_cargo_c name)
     # Rust's libstd pulls in platform-specific syscall surface that
     # isn't included in the staticlib archive itself. Each target needs
     # the OS-level libs the Rust runtime depends on:
-    #   * Linux musl: libunwind (no libgcc_s on musl) + libc/libm/libpthread/libdl
+    #   * Linux glibc: gcc_s (panic-unwind) + libc/libm/libpthread/libdl
     #   * macOS:      iconv + libSystem (linker resolves these implicitly,
     #                 but cargo-c's pkg-config still lists them)
     #   * Windows GNU: Win32 surface used by Rust std (net/crypto/RNG/etc.)
-    # zig cc and llvm-mingw both ship the relevant import libs so a bare
-    # `-lws2_32` etc. resolves at link time.
+    # Linux glibc Rust uses libgcc_s for unwinding (not libunwind — that's
+    # a musl-only thing). gcc-runtime is provided by Ubuntu's default
+    # libgcc-s1 package, already on every CI runner.
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_link_libraries(vmav_tp_${name} INTERFACE
-            unwind pthread dl m c)
+            gcc_s pthread dl m c)
     elseif(WIN32)
         target_link_libraries(vmav_tp_${name} INTERFACE
             ws2_32 ntdll userenv bcrypt advapi32 cfgmgr32
