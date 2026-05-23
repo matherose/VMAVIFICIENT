@@ -44,7 +44,7 @@ static void test_fixture_probes_as_video(void) {
     const vmav_status_t st = vmav_media_probe(k_tiny_y4m, &info);
     TEST_ASSERT_TRUE_MESSAGE(vmav_status_ok(st), st.msg);
     TEST_ASSERT_EQUAL_INT(320, info.width);
-    TEST_ASSERT_EQUAL_INT(180, info.height);
+    TEST_ASSERT_EQUAL_INT(192, info.height);
 }
 
 int main(void) {

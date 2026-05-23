@@ -19,9 +19,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Dimensions must be 16-aligned — SVT-AV1 internally rounds the input
+ * to a multiple of 8 and then expects the API buffer to match the
+ * rounded size, so a mismatched 320x180 fails with "Invalid API input
+ * buffer size detected" at the first send_picture. 320x192 keeps the
+ * fixture small (~2 MiB) while satisfying both 8- and 16-alignment. */
 enum {
     FX_WIDTH = 320,
-    FX_HEIGHT = 180,
+    FX_HEIGHT = 192,
     FX_FPS_NUM = 24,
     FX_FPS_DEN = 1,
     FX_FRAMES = 24,

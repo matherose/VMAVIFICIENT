@@ -86,8 +86,9 @@ function(vmav_add_integration_test)
             ${CMAKE_BINARY_DIR}/include)
     target_compile_definitions(${VMAV_IT_NAME}
         PRIVATE
-            "VMAV_FIXTURE_DIR=\"${_fixture_dir}\"")
-    add_dependencies(${VMAV_IT_NAME} vmav_fixtures)
+            "VMAV_FIXTURE_DIR=\"${_fixture_dir}\""
+            "VMAV_BIN=\"$<TARGET_FILE:vmavificient>\"")
+    add_dependencies(${VMAV_IT_NAME} vmav_fixtures vmavificient)
 
     add_test(NAME ${VMAV_IT_NAME} COMMAND ${VMAV_IT_NAME})
     set_tests_properties(${VMAV_IT_NAME} PROPERTIES LABELS integration)

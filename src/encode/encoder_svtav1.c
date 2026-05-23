@@ -1237,6 +1237,15 @@ vmav_status_t vmav_svtav1_encoder_open(const vmav_svtav1_spec_t *spec,
     enc->input_hdr.size = sizeof(EbBufferHeaderType);
     enc->input_hdr.p_buffer = (uint8_t *)&enc->input_pic;
     enc->input_hdr.pic_type = EB_AV1_INVALID_PICTURE;
+    /* SVT-AV1 validates n_filled_len on every send_picture even when
+     * the payload is the planar EbSvtIOFormat (it represents the
+     * logical YUV420 byte count, not a raw memcpy size). Without this
+     * line, the first send_picture returns EB_ErrorBadParameter
+     * (-2147479547) with the misleading message "Invalid API input
+     * buffer size detected." */
+    const uint32_t bytes_per_sample = (spec->bit_depth == 10) ? 2u : 1u;
+    enc->input_hdr.n_filled_len =
+        (uint32_t)spec->width * (uint32_t)spec->height * 3u / 2u * bytes_per_sample;
 
     *out = enc;
     return VMAV_OK_STATUS;
