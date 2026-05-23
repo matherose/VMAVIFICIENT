@@ -45,7 +45,12 @@ if(NOT DEFINED VMAV_GCC_TOOLCHAIN)
     endif()
 endif()
 
-set(_target "aarch64-linux-musl")
+# Match Bootlin's buildroot-style triple — needed so clang locates
+# the GCC support files (crtbeginT.o, libgcc.a, etc.) at the right
+# path under `<gcc-toolchain>/lib/gcc/<target>/<version>/`. The
+# vendor string is load-bearing for that lookup but cosmetic for the
+# code generator.
+set(_target "aarch64-buildroot-linux-musl")
 set(_sysroot_flags
     "--target=${_target} --sysroot=${VMAV_MUSL_SYSROOT} --gcc-toolchain=${VMAV_GCC_TOOLCHAIN}")
 set(CMAKE_C_FLAGS_INIT             "${_sysroot_flags}")

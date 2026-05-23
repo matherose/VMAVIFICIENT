@@ -72,7 +72,7 @@ jobs:
           wrapper="${HOME}/.cargo/clang-x86_64-musl.sh"
           cat > "${wrapper}" <<EOF
           #!/bin/sh
-          exec clang-20 --target=x86_64-linux-musl \
+          exec clang-20 --target=x86_64-buildroot-linux-musl \
               --sysroot=${VMAV_MUSL_SYSROOT} \
               --gcc-toolchain=${VMAV_GCC_TOOLCHAIN} \
               -fuse-ld=lld "\$@"
@@ -123,7 +123,7 @@ jobs:
           wrapper="${HOME}/.cargo/clang-aarch64-musl.sh"
           cat > "${wrapper}" <<EOF
           #!/bin/sh
-          exec clang-20 --target=aarch64-linux-musl \
+          exec clang-20 --target=aarch64-buildroot-linux-musl \
               --sysroot=${VMAV_MUSL_SYSROOT} \
               --gcc-toolchain=${VMAV_GCC_TOOLCHAIN} \
               -fuse-ld=lld "\$@"

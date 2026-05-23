@@ -49,7 +49,15 @@ if(NOT DEFINED VMAV_GCC_TOOLCHAIN)
     endif()
 endif()
 
-set(_target "x86_64-linux-musl")
+# Use Bootlin's buildroot-style triple for the clang --target. clang
+# locates the GCC support files at
+#   <gcc-toolchain>/lib/gcc/<target>/<version>/
+# and Bootlin stores them under `x86_64-buildroot-linux-musl`, not
+# `x86_64-linux-musl`. The vendor string in the triple is cosmetic for
+# the code generator but load-bearing for the file lookup, so we
+# match exactly. CMAKE_SYSTEM_PROCESSOR stays "x86_64" — that's what
+# downstream code (third-party deps' CPU-feature probes) looks at.
+set(_target "x86_64-buildroot-linux-musl")
 # `--gcc-toolchain=` makes clang find the GCC support files (crt*.o,
 # libgcc.a, libgcc_eh.a) bundled in Bootlin's tarball. Without it clang
 # emits `cannot open crtbeginT.o` + `unable to find library -lgcc`.
