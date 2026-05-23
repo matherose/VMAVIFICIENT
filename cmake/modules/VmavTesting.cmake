@@ -45,4 +45,50 @@ function(vmav_add_unit_test)
             ${CMAKE_SOURCE_DIR}/include
             ${CMAKE_BINARY_DIR}/include)
     add_test(NAME ${VMAV_TEST_NAME} COMMAND ${VMAV_TEST_NAME})
+    set_tests_properties(${VMAV_TEST_NAME} PROPERTIES LABELS unit)
+endfunction()
+
+# vmav_add_integration_test — like vmav_add_unit_test, plus:
+#   * depends on the `vmav_fixtures` custom target so the on-disk
+#     fixture files exist before the test binary runs;
+#   * stamps VMAV_FIXTURE_DIR into the test as a compile definition
+#     so test C code can locate fixtures without hard-coded paths;
+#   * tags the CTest entry with LABELS=integration so the unit and
+#     integration suites can be filtered separately (`ctest -L unit`
+#     vs `ctest -L integration`).
+function(vmav_add_integration_test)
+    cmake_parse_arguments(VMAV_IT "" "NAME" "SOURCES;LINK_LIBS" ${ARGN})
+    if(NOT VMAV_IT_NAME OR NOT VMAV_IT_SOURCES)
+        message(FATAL_ERROR "vmav_add_integration_test: NAME and SOURCES required")
+    endif()
+    if(NOT TARGET vmav_fixtures)
+        message(FATAL_ERROR
+            "vmav_add_integration_test(${VMAV_IT_NAME}): vmav_fixtures target "
+            "is not defined — add_subdirectory(fixtures) must run before "
+            "add_subdirectory(integration).")
+    endif()
+    get_target_property(_fixture_dir vmav_fixtures VMAV_FIXTURE_DIR)
+    if(NOT _fixture_dir)
+        message(FATAL_ERROR
+            "vmav_add_integration_test(${VMAV_IT_NAME}): VMAV_FIXTURE_DIR "
+            "property missing on vmav_fixtures target.")
+    endif()
+
+    add_executable(${VMAV_IT_NAME} ${VMAV_IT_SOURCES})
+    target_link_libraries(${VMAV_IT_NAME}
+        PRIVATE
+            vmav::compile_options
+            vmav::unity
+            ${VMAV_IT_LINK_LIBS})
+    target_include_directories(${VMAV_IT_NAME}
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/include
+            ${CMAKE_BINARY_DIR}/include)
+    target_compile_definitions(${VMAV_IT_NAME}
+        PRIVATE
+            "VMAV_FIXTURE_DIR=\"${_fixture_dir}\"")
+    add_dependencies(${VMAV_IT_NAME} vmav_fixtures)
+
+    add_test(NAME ${VMAV_IT_NAME} COMMAND ${VMAV_IT_NAME})
+    set_tests_properties(${VMAV_IT_NAME} PROPERTIES LABELS integration)
 endfunction()
