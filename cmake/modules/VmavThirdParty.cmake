@@ -470,36 +470,17 @@ if(NOT EXISTS "${_svtav1_dir}/CMakeLists.txt")
         "Run:  git submodule update --init --recursive")
 endif()
 
-# Keep CONFIG_ARM_NEON_IS_GUARANTEED=1 on aarch64-Linux as a deployment
-# assumption: NEON is mandatory in Armv8.0-A by ISA spec, and skipping
-# the hwcap-probe code paths is harmless. The AVX-512 and ASM_NEON
-# workarounds we needed under zig cc are gone now that we run clang-20
-# on Linux (see project-toolchain-llvm-only memory entry).
-set(_svtav1_release_flags "-O3 -DNDEBUG")
-if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    set(_svtav1_release_flags
-        "${_svtav1_release_flags} -DCONFIG_ARM_NEON_IS_GUARANTEED=1")
-endif()
-
 vmav_tp_add_external(svtav1 "${_svtav1_dir}"
     STATIC_LIB "lib/libSvtAv1Enc.a"
     CMAKE_ARGS
         # We need the encoder library only — skip the CLI app + tests.
         -DBUILD_APPS=OFF
         -DBUILD_TESTING=OFF
-        # SVT-AV1 has its own NATIVE_BUILD flag that enables -march=native
-        # if left at default; force off for deterministic cross-builds.
-        -DNATIVE=OFF
-        # Gate out enc_handle.c's `SVT_INFO("Build date: %s %s", __DATE__,
-        # __TIME__)` line. zig cc enables `-Werror=date-time` by default
-        # for musl targets, so the __DATE__ expansion errors out. SVT-AV1
-        # already has a REPRODUCIBLE_BUILDS option that hides that line
-        # behind `#if !REPRODUCIBLE_BUILDS` — enabling it is the right
-        # answer, both for the warning and for our overall reproducible-
-        # build posture (matches our VmavReproducible cmake module).
+        # SVT-AV1's NATIVE_BUILD flag enables -march=native. Off for
+        # deterministic builds; per-CPU-feature dispatch in SVT-AV1
+        # picks the right kernels at runtime regardless.
         -DREPRODUCIBLE_BUILDS=ON
-        "-DCMAKE_C_FLAGS_RELEASE=${_svtav1_release_flags}"
-        "-DCMAKE_CXX_FLAGS_RELEASE=${_svtav1_release_flags}")
+        -DNATIVE=OFF)
 
 set(_svtav1_install "${CMAKE_BINARY_DIR}/_tp_install/svtav1")
 # Headers install under include/svt-av1/ — expose that as an extra
