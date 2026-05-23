@@ -191,3 +191,28 @@ jobs:
         env:
           WINEDEBUG: -all
         run: ctest --test-dir build/windows-x86_64-mingw --output-on-failure
+
+  repro-check:
+    name: repro / linux-x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: lukka/get-cmake@latest
+      - name: Install clang-20 + lld-20 + nasm + pkg-config + meson + diffoscope
+        run: |
+          # diffoscope gives a structured diff when reproducibility breaks —
+          # without it triage means staring at `od` dumps.
+          wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 20
+          sudo apt-get install -y --no-install-recommends \
+              clang-20 lld-20 llvm-20 nasm pkg-config meson ninja-build diffoscope
+      - name: Add Rust gnu target
+        run: rustup target add x86_64-unknown-linux-gnu
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-c
+      - name: Two clean builds, sha256 compare
+        run: scripts/repro_check.sh --preset linux-x86_64
