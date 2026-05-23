@@ -118,6 +118,11 @@ jobs:
         with:
           submodules: recursive
       - uses: lukka/get-cmake@latest
+      - name: Install meson + nasm via Homebrew (for libvmaf + SVT-AV1)
+        run: |
+          # macos-14 runner ships ninja but not meson; nasm not on the
+          # default image either.
+          brew install meson nasm
       - name: Add Rust aarch64-apple-darwin target (host triple)
         run: rustup target add aarch64-apple-darwin
       - uses: taiki-e/install-action@v2

@@ -6,9 +6,9 @@
 
 #include "unity.h"
 
-#include <libvmaf/libvmaf.h>
-
 #include <stddef.h>
+
+#include <libvmaf/libvmaf.h>
 
 void setUp(void) {
 }
