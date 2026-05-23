@@ -1,6 +1,7 @@
 add_library(vmav_encode STATIC
     encoder_preset.c
     encoder_svtav1.c
+    encoder_vmaf.c
     audio_encode.c
     subtitle_convert.c)
 
@@ -17,6 +18,7 @@ target_link_libraries(vmav_encode
         vmav::tp::leptonica
         vmav::tp::zlib
         vmav::tp::svtav1
+        vmav::tp::vmaf
     PUBLIC
         vmav::foundations
         vmav::util

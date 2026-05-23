@@ -134,6 +134,10 @@ vmav_add_unit_test(NAME test_encoder_svtav1
     SOURCES unit/test_encoder_svtav1.c
     LINK_LIBS vmav::encode)
 
+vmav_add_unit_test(NAME test_encoder_vmaf
+    SOURCES unit/test_encoder_vmaf.c
+    LINK_LIBS vmav::encode)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     # test_subproc: invokes POSIX-only binaries (/bin/echo, /bin/sh).
     # test_cache: relies on env-var cache-dir override and `rm -rf`
