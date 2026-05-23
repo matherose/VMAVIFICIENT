@@ -15,10 +15,17 @@
 #   1  — sha256 differs; reproducibility broken.
 #   2  — invocation or build error.
 #
-# The script performs two full clean builds in distinct directories
-# (build/repro-a, build/repro-b) so third-party static archives are also
-# regenerated each round. If diffoscope is on PATH, a side-by-side
-# decomposition is printed on mismatch to speed up triage.
+# The script performs two full clean builds in the SAME directory
+# (build/repro), wiping it between rounds. We deliberately do NOT use
+# distinct per-round directories — third-party deps (Tesseract, OpenSSL,
+# FFmpeg) bake their absolute build paths into objects via __FILE__-style
+# strings, so two different parent paths would never produce identical
+# binaries until every ExternalProject also gets -ffile-prefix-map flags
+# threaded through its configure/meson/cargo invocations. That's a
+# Phase 6 concern; what we gate here is the stronger and simpler
+# guarantee: given the same source tree at the same path, two clean
+# builds produce byte-identical output. If diffoscope is on PATH, a
+# side-by-side decomposition is printed on mismatch to speed up triage.
 
 set -euo pipefail
 
@@ -61,23 +68,26 @@ case "$preset" in
     *)         bin_relpath="src/vmavificient"     ;;
 esac
 
-# Override the preset's binaryDir per round so the two builds live in
-# parallel trees we can shasum independently.
+# Both rounds use the same build dir (cleaned between) so third-party
+# build paths are identical across rounds. The override (-B) is still
+# needed because the preset's default binaryDir is `build/<preset>`,
+# which may already exist with stale objects from prior dev work.
+build_dir="build/repro"
+
 run_round() {
     local label="$1"
-    local dir="build/repro-${label}"
 
-    echo "==> [round-${label}] cleaning ${dir}"
-    rm -rf "$dir"
+    echo "==> [round-${label}] cleaning ${build_dir}"
+    rm -rf "$build_dir"
 
     echo "==> [round-${label}] configure"
-    cmake --preset "$preset" -B "$dir" >/dev/null
+    cmake --preset "$preset" -B "$build_dir" >/dev/null
 
     echo "==> [round-${label}] build"
-    cmake --build "$dir" --target vmavificient >/dev/null
+    cmake --build "$build_dir" --target vmavificient >/dev/null
 
     local snapshot="/tmp/vmav-repro-${label}"
-    cp "$dir/$bin_relpath" "$snapshot"
+    cp "$build_dir/$bin_relpath" "$snapshot"
     if command -v shasum >/dev/null 2>&1; then
         shasum -a 256 "$snapshot" | awk '{print $1}'
     else
