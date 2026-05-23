@@ -28,13 +28,26 @@ target_compile_options(vmav_compile_options INTERFACE
     "-D__TIME__=\"redacted\""
     "-D__TIMESTAMP__=\"redacted\"")
 
-# Linker flags vary per target. LLD on Linux accepts both --build-id and
-# --sort-section; mach-o (Apple ld64) understands neither; lld in PE mode
-# (llvm-mingw) accepts --build-id but not --sort-section. Scope per system.
+# Linker flags vary per target — every ELF/PE platform has a
+# "embed something non-deterministic" knob that has to be turned off
+# explicitly:
 #
-# Phase 0 had these flags off entirely because zig cc's lld wrapper rejected
-# them; we no longer use zig cc, so the linux gate (which is where
-# scripts/repro_check.sh runs in CI) gets the full set.
+#   * Linux LLD          — `--build-id` defaults to a content+timestamp
+#                          hash; `--sort-section` randomizes layout.
+#   * lld in PE mode     — `--build-id` is the only Linux-style knob;
+#     (llvm-mingw)         section ordering is already deterministic
+#                          because the PE format has no equivalent of
+#                          ELF's `SHF_LINK_ORDER` reordering.
+#   * Apple ld64         — no flag needed. Default LC_UUID is a hash
+#                          of the linker output bits; stripping it with
+#                          `-no_uuid` removes the load command entirely
+#                          and dyld refuses to load the binary. Given
+#                          deterministic content (SOURCE_DATE_EPOCH +
+#                          our prefix-maps above), the content-derived
+#                          UUID is itself deterministic.
+#
+# Phase 0 had every flag off because zig cc's lld wrapper rejected them;
+# we no longer use zig cc, so the supported set is on per-platform.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(vmav_compile_options INTERFACE
         "LINKER:--build-id=none"

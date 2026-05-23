@@ -69,10 +69,31 @@ case "$preset" in
 esac
 
 # Both rounds use the same build dir (cleaned between) so third-party
-# build paths are identical across rounds. The override (-B) is still
-# needed because the preset's default binaryDir is `build/<preset>`,
-# which may already exist with stale objects from prior dev work.
-build_dir="build/repro"
+# build paths are identical across rounds. We use the preset's default
+# binaryDir (build/<preset>) so the final round-b output lines up with
+# everything downstream that expects `build/<preset>/...` — CI's
+# artifact upload, packaging, etc.
+build_dir="build/${preset}"
+
+# What we wipe between rounds: every direct child of build/<preset>
+# EXCEPT third_party_install/ and *-prefix/. This is the contract we
+# verify: our PROJECT links deterministically against an identical
+# third-party install. The dep tree itself is treated as cacheable
+# input — its bytes are identical between rounds because we don't
+# touch it. Proving the dep build is *itself* deterministic is a
+# separate, slower validation that belongs in a tag/nightly flow.
+#
+# When the dir doesn't exist yet (first round, cold cache) this is
+# a no-op and the next cmake --preset creates everything from scratch.
+clean_for_round() {
+    if [ ! -d "$build_dir" ]; then
+        return
+    fi
+    find "$build_dir" -mindepth 1 -maxdepth 1 \
+        ! -name 'third_party_install' \
+        ! -name '*-prefix' \
+        -exec rm -rf {} +
+}
 
 # IMPORTANT: every informational echo in this function must go to stderr.
 # Callers capture run_round's stdout into $(...) to read the sha256 — if
@@ -82,11 +103,11 @@ build_dir="build/repro"
 run_round() {
     local label="$1"
 
-    echo "==> [round-${label}] cleaning ${build_dir}" >&2
-    rm -rf "$build_dir"
+    echo "==> [round-${label}] cleaning project state (preserving third_party)" >&2
+    clean_for_round
 
     echo "==> [round-${label}] configure" >&2
-    cmake --preset "$preset" -B "$build_dir" >&2
+    cmake --preset "$preset" >&2
 
     echo "==> [round-${label}] build" >&2
     cmake --build "$build_dir" --target vmavificient >&2
