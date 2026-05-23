@@ -119,6 +119,13 @@ function(vmav_tp_add_external name source_dir)
             -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
             -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
             -DBUILD_SHARED_LIBS=OFF
+            # Force the lib dir to a simple `lib/`. On Debian-derivative
+            # native builds, GNUInstallDirs puts libs into
+            # `lib/x86_64-linux-gnu/` (multiarch) by default — that
+            # breaks our STATIC_LIB path predictions and the
+            # `lib/pkgconfig/` lookups downstream consumers (FFmpeg
+            # config probing opus, etc.) do.
+            -DCMAKE_INSTALL_LIBDIR=lib
             ${_fwd_args}
             ${VMAV_EP_CMAKE_ARGS}
         BUILD_BYPRODUCTS "${_byproduct}"
@@ -141,6 +148,13 @@ function(vmav_tp_add_external name source_dir)
         ${VMAV_EP_INCLUDE_DIRS})
     if(VMAV_EP_LINK_LIBS)
         target_link_libraries(vmav_tp_${name} INTERFACE ${VMAV_EP_LINK_LIBS})
+    endif()
+    # Linux glibc: each C library needs the standard `-lm -lpthread
+    # -ldl -lrt` system libs propagated to consumers, since glibc
+    # splits these out of libc proper. macOS auto-links them via
+    # libSystem; Windows MinGW already has them in the .a we ship.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_libraries(vmav_tp_${name} INTERFACE m pthread dl rt)
     endif()
 endfunction()
 
@@ -904,7 +918,7 @@ target_link_libraries(vmav_tp_swscale INTERFACE vmav_tp_avutil)
 
 # Platform link-time system libs.
 if(UNIX AND NOT APPLE)
-    target_link_libraries(vmav_tp_avutil INTERFACE m pthread)
+    target_link_libraries(vmav_tp_avutil INTERFACE m pthread dl rt)
 elseif(APPLE)
     target_link_libraries(vmav_tp_avutil INTERFACE
         "-framework CoreFoundation"
