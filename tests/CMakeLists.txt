@@ -142,6 +142,14 @@ vmav_add_unit_test(NAME test_crf_search
     SOURCES unit/test_crf_search.c
     LINK_LIBS vmav::encode)
 
+vmav_add_unit_test(NAME test_video_encode
+    SOURCES unit/test_video_encode.c
+    LINK_LIBS vmav::encode)
+
+vmav_add_unit_test(NAME test_final_mux
+    SOURCES unit/test_final_mux.c
+    LINK_LIBS vmav::encode)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     # test_subproc: invokes POSIX-only binaries (/bin/echo, /bin/sh).
     # test_cache: relies on env-var cache-dir override and `rm -rf`

@@ -3,6 +3,8 @@ add_library(vmav_encode STATIC
     encoder_svtav1.c
     encoder_vmaf.c
     crf_search.c
+    video_encode.c
+    final_mux.c
     audio_encode.c
     subtitle_convert.c)
 
