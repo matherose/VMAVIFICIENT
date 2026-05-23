@@ -846,7 +846,9 @@ ExternalProject_Add(ffmpeg-ep
     INSTALL_DIR "${_ffmpeg_install}"
     CONFIGURE_COMMAND
         ${CMAKE_COMMAND} -E env "PKG_CONFIG_LIBDIR=${_opus_install}/lib/pkgconfig"
-        "${_ffmpeg_dir}/configure"
+        bash "${CMAKE_SOURCE_DIR}/scripts/ffmpeg-configure-wrapper.sh"
+            "${_opus_install}"
+            "${_ffmpeg_dir}/configure"
             --prefix=<INSTALL_DIR>
             ${_ffmpeg_cross_args}
             "--target-os=${_ffmpeg_target_os}"
