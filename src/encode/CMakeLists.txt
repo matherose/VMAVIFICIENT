@@ -2,6 +2,7 @@ add_library(vmav_encode STATIC
     encoder_preset.c
     encoder_svtav1.c
     encoder_vmaf.c
+    crf_search.c
     audio_encode.c
     subtitle_convert.c)
 
