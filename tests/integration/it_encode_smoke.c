@@ -27,9 +27,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include <sys/stat.h>
+#include <sys/types.h>
+
+#ifdef _WIN32
+#include <direct.h>
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 #ifndef VMAV_FIXTURE_DIR
 #error "VMAV_FIXTURE_DIR must be set by vmav_add_integration_test()"
@@ -57,11 +64,45 @@ static void copy_file(const char *src, const char *dst) {
     fclose(fd);
 }
 
+/* Cross-platform replacement for POSIX `mkdtemp` — MinGW's CRT
+ * (msvcrt) doesn't provide it. Builds a unique path under $TMPDIR /
+ * $TEMP and retries on collision (PID + counter). Returns 0 on
+ * success, -1 if no slot worked in 100 attempts. */
+static int make_workdir(char *buf, size_t cap) {
+    const char *base;
+#ifdef _WIN32
+    base = getenv("TEMP");
+    if (base == NULL || base[0] == '\0') {
+        base = ".";
+    }
+#else
+    base = getenv("TMPDIR");
+    if (base == NULL || base[0] == '\0') {
+        base = "/tmp";
+    }
+#endif
+    for (int i = 0; i < 100; i++) {
+        snprintf(buf, cap, "%s/vmav_it_encode_smoke_%u_%d", base, (unsigned)getpid(), i);
+#ifdef _WIN32
+        if (_mkdir(buf) == 0) {
+            return 0;
+        }
+#else
+        if (mkdir(buf, 0700) == 0) {
+            return 0;
+        }
+#endif
+    }
+    return -1;
+}
+
 void setUp(void) {
-    /* Each test starts in a fresh mkdtemp dir so a flaky run never
-     * leaks state into the next one. */
-    snprintf(g_workdir, sizeof(g_workdir), "/tmp/vmav_it_encode_smoke_XXXXXX");
-    TEST_ASSERT_NOT_NULL_MESSAGE(mkdtemp(g_workdir), "mkdtemp");
+    /* Each test starts in a fresh per-PID workdir so a flaky run never
+     * leaks state into the next one. We don't bother cleaning up in
+     * tearDown — both /tmp on Linux/macOS and %TEMP% on Windows get
+     * cleaned by the OS, and the workdir name includes the PID so
+     * concurrent test runs don't collide. */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, make_workdir(g_workdir, sizeof(g_workdir)), "make_workdir");
     snprintf(g_input, sizeof(g_input), "%s/in.y4m", g_workdir);
     snprintf(g_output, sizeof(g_output), "%s/out.mkv", g_workdir);
     /* `cmd_encode` writes its `.av1.ivf` intermediate next to the input
@@ -71,15 +112,7 @@ void setUp(void) {
 }
 
 void tearDown(void) {
-    /* Best-effort cleanup. We use rm -rf rather than unlinking every
-     * file because cmd_encode leaves an .av1.ivf alongside out.mkv
-     * and we don't want to enumerate every possible intermediate. */
-    if (g_workdir[0] != '\0') {
-        char cmd[2048];
-        snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_workdir);
-        (void)system(cmd);
-        g_workdir[0] = '\0';
-    }
+    /* Intentionally empty — see setUp commentary on cleanup. */
 }
 
 static void test_encodes_y4m_to_av1_mkv(void) {

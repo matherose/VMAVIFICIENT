@@ -380,6 +380,18 @@ jobs:
         with:
           name: ci-build-linux-x86_64
           path: build/linux-x86_64
+      - name: Inspect downloaded tree + restore exec bits
+        # actions/upload-artifact@v4 zips the payload, and while v4 docs
+        # claim to preserve perms on Linux/macOS, in practice the zip
+        # round-trip strips the +x bit and ctest reports every test as
+        # "Not Run" (the file exists but isn't executable). Force +x on
+        # everything CTest will try to invoke. The `ls -R | head` line
+        # gives us a quick signal in CI logs that the tree shape
+        # actually survived the download.
+        run: |
+          ls -la build/linux-x86_64/ | head -20
+          ls -la build/linux-x86_64/tests/ | head -20
+          find build/linux-x86_64 -maxdepth 3 -type f \( -name 'test_*' -o -name 'it_*' -o -name 'vmavificient' \) -exec chmod +x {} +
       - name: Test
         run: ctest --test-dir build/linux-x86_64 --output-on-failure
 
@@ -396,6 +408,9 @@ jobs:
         with:
           name: ci-build-linux-aarch64
           path: build/linux-aarch64
+      - name: Restore exec bits stripped by upload-artifact zip
+        run: |
+          find build/linux-aarch64 -maxdepth 3 -type f \( -name 'test_*' -o -name 'it_*' -o -name 'vmavificient' \) -exec chmod +x {} +
       - name: Test
         run: ctest --test-dir build/linux-aarch64 --output-on-failure
 
@@ -412,6 +427,9 @@ jobs:
         with:
           name: ci-build-macos-arm64
           path: build/macos-arm64
+      - name: Restore exec bits stripped by upload-artifact zip
+        run: |
+          find build/macos-arm64 -maxdepth 3 -type f \( -name 'test_*' -o -name 'it_*' -o -name 'vmavificient' \) -exec chmod +x {} +
       - name: Test
         run: ctest --test-dir build/macos-arm64 --output-on-failure
 
@@ -432,6 +450,10 @@ jobs:
         with:
           name: ci-build-windows-x86_64-mingw
           path: build/windows-x86_64-mingw
+      - name: Restore exec bits (.exe doesn't need it on wine but the
+          fixture and any wrapper scripts might)
+        run: |
+          find build/windows-x86_64-mingw -maxdepth 3 -type f \( -name 'test_*.exe' -o -name 'it_*.exe' -o -name 'vmavificient.exe' \) -exec chmod +x {} +
       - name: Test (under wine)
         env:
           WINEDEBUG: -all
