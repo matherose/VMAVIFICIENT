@@ -823,6 +823,22 @@ set(_ffmpeg_extra_ldflags "-L${_opus_install}/lib")
 # covers it. No reason to disable now that we have nasm everywhere.
 set(_ffmpeg_asm_args "")
 
+# --enable-cross-compile is only needed when build host arch/os differs
+# from target. Native builds must NOT pass it — when set, FFmpeg's
+# configure looks for `<target>-pkg-config` (cross-prefix style) instead
+# of plain `pkg-config`, so the opus probe can't find anything regardless
+# of PKG_CONFIG_LIBDIR. Only the Windows-mingw-from-Linux job is a real
+# cross-build.
+#
+# (Generator expressions evaluate to empty string but still leave an
+# empty `''` argument in the command list — FFmpeg's argv parser then
+# treats that as an option and breaks. Build the list with a regular
+# `if` instead.)
+set(_ffmpeg_cross_args "")
+if(_ffmpeg_target_os STREQUAL "mingw32")
+    list(APPEND _ffmpeg_cross_args "--enable-cross-compile")
+endif()
+
 include(ExternalProject)
 ExternalProject_Add(ffmpeg-ep
     SOURCE_DIR  "${_ffmpeg_dir}"
@@ -832,15 +848,7 @@ ExternalProject_Add(ffmpeg-ep
         ${CMAKE_COMMAND} -E env "PKG_CONFIG_LIBDIR=${_opus_install}/lib/pkgconfig"
         "${_ffmpeg_dir}/configure"
             --prefix=<INSTALL_DIR>
-            # --enable-cross-compile was needed for the zig-cc era when
-            # we built linux-musl from a glibc host. Native builds with
-            # apt clang + matching arch must NOT pass it — when set,
-            # FFmpeg's configure looks for `<target>-pkg-config` (cross-
-            # style) instead of plain `pkg-config`, so the opus probe
-            # can't find anything regardless of PKG_CONFIG_LIBDIR.
-            # Windows-mingw cross-from-Linux still cross-compiles, so
-            # keep the flag for that target only.
-            $<$<STREQUAL:${_ffmpeg_target_os},mingw32>:--enable-cross-compile>
+            ${_ffmpeg_cross_args}
             "--target-os=${_ffmpeg_target_os}"
             "--arch=${_ffmpeg_arch}"
             "--cc=${_ffmpeg_cc}"
