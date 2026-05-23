@@ -74,17 +74,22 @@ esac
 # which may already exist with stale objects from prior dev work.
 build_dir="build/repro"
 
+# IMPORTANT: every informational echo in this function must go to stderr.
+# Callers capture run_round's stdout into $(...) to read the sha256 — if
+# the "==> [round-a] ..." labels leaked into stdout, the equality check
+# below would diff on the label strings, not on the actual binary, and
+# wrongly report a mismatch when the build is in fact reproducible.
 run_round() {
     local label="$1"
 
-    echo "==> [round-${label}] cleaning ${build_dir}"
+    echo "==> [round-${label}] cleaning ${build_dir}" >&2
     rm -rf "$build_dir"
 
-    echo "==> [round-${label}] configure"
-    cmake --preset "$preset" -B "$build_dir" >/dev/null
+    echo "==> [round-${label}] configure" >&2
+    cmake --preset "$preset" -B "$build_dir" >&2
 
-    echo "==> [round-${label}] build"
-    cmake --build "$build_dir" --target vmavificient >/dev/null
+    echo "==> [round-${label}] build" >&2
+    cmake --build "$build_dir" --target vmavificient >&2
 
     local snapshot="/tmp/vmav-repro-${label}"
     cp "$build_dir/$bin_relpath" "$snapshot"
