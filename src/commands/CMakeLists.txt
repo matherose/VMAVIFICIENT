@@ -14,7 +14,8 @@ target_link_libraries(vmav_commands
     PUBLIC
         vmav::foundations
         vmav::integrations
-        vmav::media)
+        vmav::media
+        vmav::encode)
 
 target_include_directories(vmav_commands
     PUBLIC
