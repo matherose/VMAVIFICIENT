@@ -232,11 +232,17 @@ int cmd_encode_run(int argc, char **argv) {
 
     /* Declare every cleanup-touched local up-front so the `goto cleanup`
      * paths below never reach the free() block with garbage pointers
-     * (Clang's -Wsometimes-uninitialized catches that otherwise). */
+     * (Clang's -Wsometimes-uninitialized catches that otherwise).
+     *
+     * `path_buf_t` typedef avoids the awkward `char (*x)[N]`
+     * pointer-to-array declarator, which clang-format 18 and 22
+     * disagree on (CI runs 18). With the typedef both versions see
+     * a plain `path_buf_t *x` and produce identical output. */
+    typedef char path_buf_t[1024];
     vmav_mux_audio_t *mux_audio = NULL;
-    char (*audio_paths)[1024] = NULL;
+    path_buf_t *audio_paths = NULL;
     vmav_mux_sub_t *mux_subs = NULL;
-    char (*sub_paths)[1024] = NULL;
+    path_buf_t *sub_paths = NULL;
     size_t audio_mux_count = 0;
     size_t sub_mux_count = 0;
 
