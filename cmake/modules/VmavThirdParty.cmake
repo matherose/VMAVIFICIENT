@@ -882,6 +882,13 @@ ExternalProject_Add(ffmpeg-ep
             # below) constrains it to look ONLY at our opus install —
             # no host system lib leakage.
             --enable-libopus
+            # Static FFmpeg + static libopus: tell pkg-config to use
+            # Libs.private (pulls in -lm and other system deps libopus
+            # needs at static-link time). FFmpeg's own configure
+            # explicitly suggests this when CC has -static, but we
+            # may as well always opt in — the only effect is more
+            # complete link-line resolution for the probe.
+            --pkg-config-flags=--static
             "--extra-cflags=${_ffmpeg_extra_cflags}"
             "--extra-ldflags=${_ffmpeg_extra_ldflags}"
             "--extra-libs=-lopus"
