@@ -832,7 +832,15 @@ ExternalProject_Add(ffmpeg-ep
         ${CMAKE_COMMAND} -E env "PKG_CONFIG_LIBDIR=${_opus_install}/lib/pkgconfig"
         "${_ffmpeg_dir}/configure"
             --prefix=<INSTALL_DIR>
-            --enable-cross-compile
+            # --enable-cross-compile was needed for the zig-cc era when
+            # we built linux-musl from a glibc host. Native builds with
+            # apt clang + matching arch must NOT pass it — when set,
+            # FFmpeg's configure looks for `<target>-pkg-config` (cross-
+            # style) instead of plain `pkg-config`, so the opus probe
+            # can't find anything regardless of PKG_CONFIG_LIBDIR.
+            # Windows-mingw cross-from-Linux still cross-compiles, so
+            # keep the flag for that target only.
+            $<$<STREQUAL:${_ffmpeg_target_os},mingw32>:--enable-cross-compile>
             "--target-os=${_ffmpeg_target_os}"
             "--arch=${_ffmpeg_arch}"
             "--cc=${_ffmpeg_cc}"
