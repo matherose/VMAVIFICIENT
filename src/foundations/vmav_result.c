@@ -36,6 +36,10 @@ const char *vmav_code_str(vmav_code_t code) {
         return "decode-error";
     case VMAV_ERR_INVARIANT:
         return "invariant-violated";
+    case VMAV_ERR_AGAIN:
+        return "again";
+    case VMAV_ERR_EOF:
+        return "end-of-stream";
     }
     return "unknown";
 }

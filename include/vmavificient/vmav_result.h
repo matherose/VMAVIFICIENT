@@ -27,7 +27,12 @@ typedef enum {
     VMAV_ERR_FFMPEG,
     VMAV_ERR_ENCODE,
     VMAV_ERR_DECODE,
-    VMAV_ERR_INVARIANT
+    VMAV_ERR_INVARIANT,
+    /* Control-flow signals (not really errors) used by streaming APIs
+     * like vmav_svtav1_encoder_recv. Caller should branch on these
+     * before treating the status as a hard failure. */
+    VMAV_ERR_AGAIN, /* nothing ready yet — push more input or retry */
+    VMAV_ERR_EOF    /* end of stream — no more output coming */
 } vmav_code_t;
 
 /* A status is either VMAV_OK with an empty message, or a non-OK code
