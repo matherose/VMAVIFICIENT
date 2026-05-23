@@ -43,3 +43,6 @@
 [submodule "third_party/svt-av1-hdr"]
 	path = third_party/svt-av1-hdr
 	url = https://github.com/juliobbv-p/svt-av1-hdr.git
+[submodule "third_party/vmaf"]
+	path = third_party/vmaf
+	url = https://github.com/Netflix/vmaf.git

@@ -1108,3 +1108,98 @@ vmav_tp_add_cargo_c(libhdr10plus
 add_library(vmav::tp::hdr10plus ALIAS vmav_tp_libhdr10plus)
 
 message(STATUS "VmavThirdParty: libhdr10plus 2.1.5 (cargo-c, target ${_rust_target})")
+
+# === libvmaf v3.0.0 (meson ExternalProject) ===================
+# Netflix's VMAF reference encoder-quality metric. Built via meson
+# (not CMake) — meson and ninja must be on PATH (apt-installed on
+# CI, Homebrew/pip locally).
+#
+# `built_in_models=true` embeds the VMAF model JSON files (vmaf_v0.6.1,
+# vmaf_v0.6.1neg, vmaf_4k_v0.6.1) directly into libvmaf.a so the
+# resulting binary stays single-file — no need to ship the model
+# files separately.
+
+set(_vmaf_dir "${CMAKE_SOURCE_DIR}/third_party/vmaf/libvmaf")
+if(NOT EXISTS "${_vmaf_dir}/meson.build")
+    message(FATAL_ERROR
+        "third_party/vmaf submodule missing at ${_vmaf_dir}.\n"
+        "Run:  git submodule update --init --recursive")
+endif()
+
+find_program(MESON_EXECUTABLE meson REQUIRED)
+find_program(NINJA_EXECUTABLE ninja REQUIRED)
+
+set(_vmaf_install "${CMAKE_BINARY_DIR}/_tp_install/vmaf")
+set(_vmaf_build "${CMAKE_BINARY_DIR}/_tp_build/vmaf")
+
+# Cross-build to windows-mingw needs a meson cross-file. Generate it
+# at configure time so the toolchain paths are correct for whatever
+# llvm-mingw the runner installed.
+set(_vmaf_cross_args "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(_vmaf_cross_file "${_vmaf_build}/meson-cross-mingw.txt")
+    file(WRITE "${_vmaf_cross_file}"
+"[binaries]
+c = '${CMAKE_C_COMPILER}'
+cpp = '${CMAKE_CXX_COMPILER}'
+ar = '${CMAKE_AR}'
+strip = 'x86_64-w64-mingw32-strip'
+
+[host_machine]
+system = 'windows'
+cpu_family = 'x86_64'
+cpu = 'x86_64'
+endian = 'little'
+")
+    list(APPEND _vmaf_cross_args "--cross-file=${_vmaf_cross_file}")
+endif()
+
+include(ExternalProject)
+ExternalProject_Add(vmaf-ep
+    SOURCE_DIR  "${_vmaf_dir}"
+    BINARY_DIR  "${_vmaf_build}"
+    INSTALL_DIR "${_vmaf_install}"
+    CONFIGURE_COMMAND
+        "${MESON_EXECUTABLE}" setup
+            --prefix=<INSTALL_DIR>
+            --libdir=lib
+            --buildtype=release
+            --default-library=static
+            -Denable_tests=false
+            -Denable_docs=false
+            -Denable_avx512=false
+            -Denable_cuda=false
+            -Dbuilt_in_models=true
+            ${_vmaf_cross_args}
+            --reconfigure
+            <BINARY_DIR>
+            <SOURCE_DIR>
+    BUILD_COMMAND   "${MESON_EXECUTABLE}" compile -C <BINARY_DIR>
+    INSTALL_COMMAND "${MESON_EXECUTABLE}" install -C <BINARY_DIR>
+    BUILD_BYPRODUCTS "${_vmaf_install}/lib/libvmaf.a"
+    UPDATE_DISCONNECTED TRUE
+    LOG_CONFIGURE TRUE
+    LOG_BUILD TRUE
+    LOG_INSTALL TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE)
+
+# Pre-create include dir so IMPORTED target can reference it now.
+file(MAKE_DIRECTORY "${_vmaf_install}/include")
+
+add_library(vmav_tp_vmaf STATIC IMPORTED GLOBAL)
+add_dependencies(vmav_tp_vmaf vmaf-ep)
+set_target_properties(vmav_tp_vmaf PROPERTIES
+    IMPORTED_LOCATION "${_vmaf_install}/lib/libvmaf.a")
+target_include_directories(vmav_tp_vmaf SYSTEM INTERFACE
+    "${_vmaf_install}/include")
+# libvmaf is C++ internally with feature DSP that pulls in libm +
+# pthread. Same propagation pattern as our other Linux static libs.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(vmav_tp_vmaf INTERFACE m pthread dl rt)
+endif()
+# libvmaf is C++; consumers need the C++ linker driver.
+set_property(TARGET vmav_tp_vmaf
+    PROPERTY IMPORTED_LINK_INTERFACE_LANGUAGES "CXX")
+add_library(vmav::tp::vmaf ALIAS vmav_tp_vmaf)
+
+message(STATUS "VmavThirdParty: libvmaf v3.0.0 (meson, built-in models)")
