@@ -1,6 +1,5 @@
 #include "vmavificient/vmav_log.h"
 #include "vmavificient/vmav_os.h"
-#include "vmavificient/vmav_subproc.h"
 #include "vmavificient/vmav_ui.h"
 #include "vmavificient/vmav_version.h"
 
@@ -8,33 +7,6 @@
 
 #include <stdio.h>
 #include <string.h>
-
-static void check_ffmpeg(vmav_ui_table_t *t) {
-    const char *ffmpeg_argv[] = {"ffmpeg", "-version", NULL};
-    vmav_subproc_spec_t spec = {
-        .exe = "ffmpeg",
-        .argv = ffmpeg_argv,
-        .capture_stdout = true,
-        .capture_stderr = true,
-        .timeout_ms = 3000,
-    };
-    vmav_subproc_result_t r;
-    memset(&r, 0, sizeof(r));
-    vmav_status_t st = vmav_subproc_run(&spec, &r);
-    if (vmav_status_ok(st) && r.exit_code == 0 && r.stdout_buf.data != NULL) {
-        char line[96];
-        const size_t n = strcspn(r.stdout_buf.data, "\n");
-        snprintf(line,
-                 sizeof(line),
-                 "%.*s",
-                 (int)(n < sizeof(line) - 1 ? n : sizeof(line) - 1),
-                 r.stdout_buf.data);
-        vmav_ui_table_add(t, "ffmpeg", line);
-    } else {
-        vmav_ui_table_add(t, "ffmpeg", "not found (will be vendored in Phase 3)");
-    }
-    vmav_subproc_result_free(&r);
-}
 
 static void check_path(vmav_ui_table_t *t, const char *label, vmav_status_t (*fn)(char *, size_t)) {
     char buf[VMAV_PATH_MAX];
@@ -72,7 +44,10 @@ int cmd_doctor_run(int argc, char **argv) {
     vmav_status_t vt = vmav_term_enable_vt();
     vmav_ui_table_add(t, "vt support", vmav_status_ok(vt) ? "ok" : vt.msg);
 
-    check_ffmpeg(t);
+    /* No runtime dep checks needed: everything (libavformat / SVT-AV1 /
+     * tesseract / libcurl / libopus / etc.) is vendored and statically
+     * linked. If we ever add an *optional* runtime tool that augments
+     * vmavificient (e.g. dovi_tool for DV RPU injection), check it here. */
 
     vmav_ui_table_render(t, stdout);
     vmav_ui_table_free(t);

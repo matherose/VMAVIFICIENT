@@ -14,10 +14,12 @@ extern "C" {
  * subtitles (vmav_subtitle_convert_pgs / passthrough text subs) into
  * the output .mkv.
  *
- * Implementation shells out to the vendored FFmpeg binary via vmav_subproc.
- * That gives us rock-solid `-c copy` behavior plus standard FFmpeg track
- * metadata handling (language, title, dispositions) — much more
- * compatible across players than the libavformat-based mux v1 used to do. */
+ * Implementation uses libavformat directly (no `ffmpeg` subprocess) so
+ * vmavificient ships as a true single binary — no runtime PATH
+ * dependency on the user having ffmpeg installed. Stream-copy is
+ * preserved (every input's codecpar copied byte-for-byte into the
+ * output), and per-stream metadata + dispositions are set the same
+ * way the ffmpeg CLI would have. */
 
 typedef struct {
     const char *path;

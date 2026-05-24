@@ -383,12 +383,6 @@ jobs:
       - name: Restore exec bits stripped by upload-artifact zip
         run: |
           find build/linux-x86_64 -maxdepth 3 -type f \( -name 'test_*' -o -name 'it_*' -o -name 'vmavificient' \) -exec chmod +x {} +
-      - name: Install ffmpeg (vmav_final_mux shells out to it — see
-          src/encode/final_mux.c; the vendored libavformat is link-only,
-          we never produce an ffmpeg CLI binary)
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Test
         run: ctest --test-dir build/linux-x86_64 --output-on-failure
 
@@ -408,10 +402,6 @@ jobs:
       - name: Restore exec bits stripped by upload-artifact zip
         run: |
           find build/linux-aarch64 -maxdepth 3 -type f \( -name 'test_*' -o -name 'it_*' -o -name 'vmavificient' \) -exec chmod +x {} +
-      - name: Install ffmpeg (runtime dep of vmav_final_mux)
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Test
         run: ctest --test-dir build/linux-aarch64 --output-on-failure
 
@@ -431,8 +421,6 @@ jobs:
       - name: Restore exec bits stripped by upload-artifact zip
         run: |
           find build/macos-arm64 -maxdepth 3 -type f \( -name 'test_*' -o -name 'it_*' -o -name 'vmavificient' \) -exec chmod +x {} +
-      - name: Install ffmpeg (runtime dep of vmav_final_mux)
-        run: brew install ffmpeg
       - name: Test
         run: ctest --test-dir build/macos-arm64 --output-on-failure
 
@@ -457,11 +445,7 @@ jobs:
           fixture and any wrapper scripts might)
         run: |
           find build/windows-x86_64-mingw -maxdepth 3 -type f \( -name 'test_*.exe' -o -name 'it_*.exe' -o -name 'vmavificient.exe' \) -exec chmod +x {} +
-      - name: Test (under wine — skip integration tests, which need
-          ffmpeg.exe on wine's PATH; that's not yet wired)
+      - name: Test (under wine)
         env:
           WINEDEBUG: -all
-        # ctest -L unit runs only the LABELS=unit set; integration
-        # tests stay defined so they show up in test summaries with a
-        # "skipped" disposition under windows.
-        run: ctest --test-dir build/windows-x86_64-mingw --output-on-failure -L unit
+        run: ctest --test-dir build/windows-x86_64-mingw --output-on-failure
