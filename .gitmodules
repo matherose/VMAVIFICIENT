@@ -46,3 +46,6 @@
 [submodule "third_party/vmaf"]
 	path = third_party/vmaf
 	url = https://github.com/Netflix/vmaf.git
+[submodule "third_party/dav1d"]
+	path = third_party/dav1d
+	url = https://code.videolan.org/videolan/dav1d.git

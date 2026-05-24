@@ -313,6 +313,55 @@ static void fill_svt_spec(vmav_svtav1_spec_t *out, const probe_ctx_t *ctx, int c
     out->color_range = par->color_range;
 }
 
+/* Drain at most one packet from the encoder into *pkts. Returns:
+ *   VMAV_OK    — a packet was stored, *pkt_count advanced.
+ *   AGAIN/EOF  — encoder is not yet ready / fully drained; caller decides.
+ *   error      — propagate.
+ *
+ * Extracted so the per-frame drain and the post-EOS drain in
+ * score_one_crf can share the storage discipline. We MUST interleave
+ * recv with send during normal pumping: SVT-AV1's input queue is sized
+ * around look_ahead_distance (~120 with our presets) and never reclaims
+ * slots unless we drain output. With 480 frames/sample × N samples per
+ * trial, a tight send-only loop deadlocks the encoder after ~130 frames
+ * — main thread blocks in svt_get_empty_object waiting for a slot that
+ * a worker would only free if we called recv. */
+static vmav_status_t
+try_drain_one_packet(vmav_svtav1_encoder_t *enc, AVPacket ***pkts, int *pkt_count, int *pkt_cap) {
+    const uint8_t *data = NULL;
+    size_t size = 0;
+    int64_t pts = 0;
+    bool is_key = false;
+    vmav_status_t st = vmav_svtav1_encoder_recv(enc, &data, &size, &pts, &is_key);
+    if (!vmav_status_ok(st)) {
+        return st; /* AGAIN, EOF, or error — caller decides */
+    }
+    if (*pkt_count >= *pkt_cap) {
+        const int new_cap = *pkt_cap == 0 ? 64 : *pkt_cap * 2;
+        AVPacket **resized = realloc(*pkts, (size_t)new_cap * sizeof(AVPacket *));
+        if (resized == NULL) {
+            vmav_svtav1_encoder_release(enc);
+            return VMAV_ERR(VMAV_ERR_NO_MEM, "realloc av1_pkts");
+        }
+        *pkts = resized;
+        *pkt_cap = new_cap;
+    }
+    AVPacket *p = av_packet_alloc();
+    if (p == NULL || av_new_packet(p, (int)size) < 0) {
+        if (p != NULL) {
+            av_packet_free(&p);
+        }
+        vmav_svtav1_encoder_release(enc);
+        return VMAV_ERR(VMAV_ERR_NO_MEM, "av_packet for av1 byte buffer");
+    }
+    memcpy(p->data, data, size);
+    p->pts = pts;
+    p->flags = is_key ? AV_PKT_FLAG_KEY : 0;
+    (*pkts)[(*pkt_count)++] = p;
+    vmav_svtav1_encoder_release(enc);
+    return VMAV_OK_STATUS;
+}
+
 /* Score one CRF over all probe samples. Returns the harmonic-mean
  * pooled VMAF score across every frame of every sample. */
 static vmav_status_t score_one_crf(int crf, void *userdata, double *out_vmaf) {
@@ -407,58 +456,71 @@ static vmav_status_t score_one_crf(int crf, void *userdata, double *out_vmaf) {
                 ref_count++;
                 frames_done++;
                 av_frame_unref(ref);
+
+                /* Drain whatever is ready right now. AGAIN means
+                 * "no more output buffered, keep feeding"; we must
+                 * NOT block here or SVT would never get more input. */
+                for (;;) {
+                    const vmav_status_t rs =
+                        try_drain_one_packet(enc, &av1_pkts, &pkt_count, &pkt_cap);
+                    if (vmav_status_ok(rs)) {
+                        continue;
+                    }
+                    if (rs.code == VMAV_ERR_AGAIN) {
+                        break;
+                    }
+                    if (rs.code == VMAV_ERR_EOF) {
+                        /* Shouldn't happen pre-EOS; if it does, we're
+                         * done emitting and the trailing EOS drain
+                         * will be a no-op. */
+                        break;
+                    }
+                    st = rs;
+                    goto cleanup;
+                }
             }
         }
     }
 
-    /* Signal EOS and drain remaining AV1 packets. */
+    /* Signal EOS and drain remaining AV1 packets. After EOS, AGAIN
+     * means "still working, keep polling" — different from the
+     * pre-EOS path above where AGAIN means "stop draining now". */
     st = vmav_svtav1_encoder_send(enc, NULL, NULL, 0, /*eos=*/true);
     if (!vmav_status_ok(st)) {
         goto cleanup;
     }
     for (;;) {
-        const uint8_t *data = NULL;
-        size_t size = 0;
-        int64_t pts = 0;
-        bool is_key = false;
-        st = vmav_svtav1_encoder_recv(enc, &data, &size, &pts, &is_key);
-        if (!vmav_status_ok(st)) {
-            if (st.code == VMAV_ERR_EOF) {
-                st = VMAV_OK_STATUS;
-                break;
-            }
-            if (st.code == VMAV_ERR_AGAIN) {
-                continue;
-            }
-            goto cleanup;
+        const vmav_status_t rs = try_drain_one_packet(enc, &av1_pkts, &pkt_count, &pkt_cap);
+        if (vmav_status_ok(rs)) {
+            continue;
         }
-        if (pkt_count >= pkt_cap) {
-            pkt_cap = pkt_cap == 0 ? 64 : pkt_cap * 2;
-            AVPacket **resized = realloc(av1_pkts, (size_t)pkt_cap * sizeof(*av1_pkts));
-            if (resized == NULL) {
-                vmav_svtav1_encoder_release(enc);
-                st = VMAV_ERR(VMAV_ERR_NO_MEM, "realloc av1_pkts");
-                goto cleanup;
-            }
-            av1_pkts = resized;
+        if (rs.code == VMAV_ERR_AGAIN) {
+            continue;
         }
-        av1_pkts[pkt_count] = av_packet_alloc();
-        if (av1_pkts[pkt_count] == NULL || av_new_packet(av1_pkts[pkt_count], (int)size) < 0) {
-            vmav_svtav1_encoder_release(enc);
-            st = VMAV_ERR(VMAV_ERR_NO_MEM, "av_packet for av1 byte buffer");
-            goto cleanup;
+        if (rs.code == VMAV_ERR_EOF) {
+            st = VMAV_OK_STATUS;
+            break;
         }
-        memcpy(av1_pkts[pkt_count]->data, data, size);
-        av1_pkts[pkt_count]->pts = pts;
-        av1_pkts[pkt_count]->flags = is_key ? AV_PKT_FLAG_KEY : 0;
-        pkt_count++;
-        vmav_svtav1_encoder_release(enc);
+        st = rs;
+        goto cleanup;
     }
 
-    /* Decode AV1 packets back and submit (ref, decoded) pairs to vmaf. */
-    const AVCodec *av1_dec = avcodec_find_decoder(AV_CODEC_ID_AV1);
+    /* Decode AV1 packets back and submit (ref, decoded) pairs to vmaf.
+     *
+     * Explicitly request libdav1d by name. FFmpeg's `avcodec_find_decoder(
+     * AV_CODEC_ID_AV1)` returns the FIRST registered AV1 decoder, which
+     * since FFmpeg 5.0 is a parser-only stub that forwards to either a
+     * hwaccel or to libdav1d / libaom-av1. With hwaccels disabled at
+     * configure time (single-binary distribution + CPU-only requirement),
+     * the stub fails with "Failed to get pixel format" on every frame
+     * because no backing decoder is available. The libdav1d wrapper is
+     * a complete software decoder and never tries to negotiate hwaccel
+     * formats. */
+    const AVCodec *av1_dec = avcodec_find_decoder_by_name("libdav1d");
     if (av1_dec == NULL) {
-        st = VMAV_ERR(VMAV_ERR_FFMPEG, "no AV1 decoder in lavc");
+        st = VMAV_ERR(VMAV_ERR_FFMPEG,
+                      "libdav1d AV1 decoder not built into FFmpeg "
+                      "(check --enable-libdav1d in VmavThirdParty.cmake)");
         goto cleanup;
     }
     AVCodecContext *av1_ctx = avcodec_alloc_context3(av1_dec);

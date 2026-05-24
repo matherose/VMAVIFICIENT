@@ -745,6 +745,91 @@ add_library(vmav::tp::opus ALIAS vmav_tp_opus)
 
 message(STATUS "VmavThirdParty: libopus 1.5.2 (vendored static, ExternalProject)")
 
+# === libdav1d 1.5.1 (meson ExternalProject) ===================
+# CPU-only AV1 decoder, needed by the CRF search path to decode our
+# own encoded AV1 packets back into frames for VMAF scoring.
+#
+# Why vendored: FFmpeg's built-in `av1` codec since ~5.0 is only a
+# bitstream parser — it forwards actual decoding to either a hwaccel
+# (av1_videotoolbox / cuvid / ...) or to libdav1d / libaom-av1.
+# We explicitly disable hwaccels (single-binary distribution + the
+# user has CPU-only as a hard requirement), so we need a software
+# backend. libdav1d is fast, MIT-licensed, and small.
+set(_dav1d_dir "${CMAKE_SOURCE_DIR}/third_party/dav1d")
+if(NOT EXISTS "${_dav1d_dir}/meson.build")
+    message(FATAL_ERROR
+        "third_party/dav1d submodule missing at ${_dav1d_dir}.\n"
+        "Run:  git submodule update --init --recursive")
+endif()
+
+# meson + ninja: same toolchain libvmaf uses; idempotent find_program.
+find_program(MESON_EXECUTABLE meson REQUIRED)
+find_program(NINJA_EXECUTABLE ninja REQUIRED)
+
+set(_dav1d_install "${CMAKE_BINARY_DIR}/_tp_install/dav1d")
+set(_dav1d_build "${CMAKE_BINARY_DIR}/_tp_build/dav1d")
+
+# Same cross-file pattern as libvmaf for windows-mingw target.
+set(_dav1d_cross_args "")
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(_dav1d_cross_file "${_dav1d_build}/meson-cross-mingw.txt")
+    file(WRITE "${_dav1d_cross_file}"
+"[binaries]
+c = '${CMAKE_C_COMPILER}'
+cpp = '${CMAKE_CXX_COMPILER}'
+ar = '${CMAKE_AR}'
+strip = 'x86_64-w64-mingw32-strip'
+
+[host_machine]
+system = 'windows'
+cpu_family = 'x86_64'
+cpu = 'x86_64'
+endian = 'little'
+")
+    list(APPEND _dav1d_cross_args "--cross-file=${_dav1d_cross_file}")
+endif()
+
+include(ExternalProject)
+ExternalProject_Add(dav1d-ep
+    SOURCE_DIR  "${_dav1d_dir}"
+    BINARY_DIR  "${_dav1d_build}"
+    INSTALL_DIR "${_dav1d_install}"
+    CONFIGURE_COMMAND
+        "${MESON_EXECUTABLE}" setup
+            --prefix=<INSTALL_DIR>
+            --libdir=lib
+            --buildtype=release
+            --default-library=static
+            -Denable_tools=false
+            -Denable_tests=false
+            -Denable_examples=false
+            ${_dav1d_cross_args}
+            --reconfigure
+            <BINARY_DIR>
+            <SOURCE_DIR>
+    BUILD_COMMAND   "${MESON_EXECUTABLE}" compile -C <BINARY_DIR>
+    INSTALL_COMMAND "${MESON_EXECUTABLE}" install -C <BINARY_DIR>
+    BUILD_BYPRODUCTS "${_dav1d_install}/lib/libdav1d.a"
+    UPDATE_DISCONNECTED TRUE
+    LOG_CONFIGURE TRUE
+    LOG_BUILD TRUE
+    LOG_INSTALL TRUE
+    LOG_OUTPUT_ON_FAILURE TRUE)
+
+file(MAKE_DIRECTORY "${_dav1d_install}/include")
+add_library(vmav_tp_dav1d STATIC IMPORTED GLOBAL)
+add_dependencies(vmav_tp_dav1d dav1d-ep)
+set_target_properties(vmav_tp_dav1d PROPERTIES
+    IMPORTED_LOCATION "${_dav1d_install}/lib/libdav1d.a")
+target_include_directories(vmav_tp_dav1d SYSTEM INTERFACE
+    "${_dav1d_install}/include")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(vmav_tp_dav1d INTERFACE m pthread dl rt)
+endif()
+add_library(vmav::tp::dav1d ALIAS vmav_tp_dav1d)
+
+message(STATUS "VmavThirdParty: libdav1d 1.5.1 (vendored static, ExternalProject)")
+
 # === FFmpeg n8.1.1 (autoconf-style ExternalProject) ===========
 # The biggest dep by far: ~3000 source files producing 6 static libs.
 # Builds via FFmpeg's own ./configure (Bourne shell, not autoconf
@@ -840,12 +925,17 @@ if(_ffmpeg_target_os STREQUAL "mingw32")
 endif()
 
 include(ExternalProject)
+# Path-separator for PKG_CONFIG_LIBDIR. POSIX uses ':', Windows uses
+# ';'. Since FFmpeg's configure runs on the BUILD host (always
+# Linux/macOS for our setup, even when cross-compiling to Windows),
+# this is always ':'.
+set(_ffmpeg_pkgconfig "${_opus_install}/lib/pkgconfig:${_dav1d_install}/lib/pkgconfig")
 ExternalProject_Add(ffmpeg-ep
     SOURCE_DIR  "${_ffmpeg_dir}"
     BINARY_DIR  "${_ffmpeg_build}"
     INSTALL_DIR "${_ffmpeg_install}"
     CONFIGURE_COMMAND
-        ${CMAKE_COMMAND} -E env "PKG_CONFIG_LIBDIR=${_opus_install}/lib/pkgconfig"
+        ${CMAKE_COMMAND} -E env "PKG_CONFIG_LIBDIR=${_ffmpeg_pkgconfig}"
         bash "${CMAKE_SOURCE_DIR}/scripts/ffmpeg-configure-wrapper.sh"
             "${_opus_install}"
             "${_ffmpeg_dir}/configure"
@@ -873,6 +963,22 @@ ExternalProject_Add(ffmpeg-ep
             # Don't auto-detect host system libs (libxml2, libfreetype,
             # etc.) — we want a deterministic set of inputs.
             --disable-autodetect
+            # CPU-only by user requirement: no hardware acceleration
+            # paths compiled in, regardless of build host capabilities.
+            # `--disable-autodetect` already skips probes, but these
+            # explicit disables make the contract obvious in the build
+            # log and survive future configure refactors that might
+            # add a default-on hwaccel.
+            --disable-hwaccels
+            --disable-videotoolbox
+            --disable-vaapi
+            --disable-vdpau
+            --disable-d3d11va
+            --disable-dxva2
+            --disable-cuda-llvm
+            --disable-cuvid
+            --disable-nvenc
+            --disable-nvdec
             ${_ffmpeg_asm_args}
             # libopus: encoder + decoder + ogg muxer/demuxer for the .opus
             # output files. The audio code uses lavc's `libopus` encoder
@@ -882,6 +988,12 @@ ExternalProject_Add(ffmpeg-ep
             # below) constrains it to look ONLY at our opus install —
             # no host system lib leakage.
             --enable-libopus
+            # libdav1d: CPU AV1 decoder. Required for the CRF search
+            # which decodes our own AV1 output back for VMAF scoring;
+            # FFmpeg's built-in `av1` codec is parser-only since 5.0
+            # and needs a software backend or a hwaccel (which we
+            # disabled above) to actually produce decoded frames.
+            --enable-libdav1d
             # Static FFmpeg + static libopus: tell pkg-config to use
             # Libs.private (pulls in -lm and other system deps libopus
             # needs at static-link time). FFmpeg's own configure
@@ -889,9 +1001,9 @@ ExternalProject_Add(ffmpeg-ep
             # may as well always opt in — the only effect is more
             # complete link-line resolution for the probe.
             --pkg-config-flags=--static
-            "--extra-cflags=${_ffmpeg_extra_cflags}"
-            "--extra-ldflags=${_ffmpeg_extra_ldflags}"
-            "--extra-libs=-lopus"
+            "--extra-cflags=${_ffmpeg_extra_cflags} -I${_dav1d_install}/include"
+            "--extra-ldflags=${_ffmpeg_extra_ldflags} -L${_dav1d_install}/lib"
+            "--extra-libs=-lopus -ldav1d"
     # `make -j` (unbounded) on GHA's macos-14 runner spawns ~3000
     # compile processes for FFmpeg's source tree and trips
     # posix_spawn: EAGAIN under the runner's per-user process limit.
@@ -914,7 +1026,7 @@ ExternalProject_Add(ffmpeg-ep
     LOG_BUILD TRUE
     LOG_INSTALL TRUE
     LOG_OUTPUT_ON_FAILURE TRUE
-    DEPENDS opus-ep)
+    DEPENDS opus-ep dav1d-ep)
 
 # Expose the six FFmpeg libs as IMPORTED targets. Order matters at
 # link time: avformat depends on avcodec, avcodec on avutil, etc.
@@ -936,7 +1048,7 @@ target_link_libraries(vmav_tp_avformat INTERFACE
 target_link_libraries(vmav_tp_avfilter INTERFACE
     vmav_tp_avformat vmav_tp_avcodec vmav_tp_swresample vmav_tp_swscale vmav_tp_avutil)
 target_link_libraries(vmav_tp_avcodec INTERFACE
-    vmav_tp_swresample vmav_tp_avutil vmav_tp_opus)
+    vmav_tp_swresample vmav_tp_avutil vmav_tp_opus vmav_tp_dav1d)
 target_link_libraries(vmav_tp_swresample INTERFACE vmav_tp_avutil)
 target_link_libraries(vmav_tp_swscale INTERFACE vmav_tp_avutil)
 
