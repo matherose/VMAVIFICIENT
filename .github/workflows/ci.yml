@@ -380,18 +380,15 @@ jobs:
         with:
           name: ci-build-linux-x86_64
           path: build/linux-x86_64
-      - name: Inspect downloaded tree + restore exec bits
-        # actions/upload-artifact@v4 zips the payload, and while v4 docs
-        # claim to preserve perms on Linux/macOS, in practice the zip
-        # round-trip strips the +x bit and ctest reports every test as
-        # "Not Run" (the file exists but isn't executable). Force +x on
-        # everything CTest will try to invoke. The `ls -R | head` line
-        # gives us a quick signal in CI logs that the tree shape
-        # actually survived the download.
+      - name: Restore exec bits stripped by upload-artifact zip
         run: |
-          ls -la build/linux-x86_64/ | head -20
-          ls -la build/linux-x86_64/tests/ | head -20
           find build/linux-x86_64 -maxdepth 3 -type f \( -name 'test_*' -o -name 'it_*' -o -name 'vmavificient' \) -exec chmod +x {} +
+      - name: Install ffmpeg (vmav_final_mux shells out to it — see
+          src/encode/final_mux.c; the vendored libavformat is link-only,
+          we never produce an ffmpeg CLI binary)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Test
         run: ctest --test-dir build/linux-x86_64 --output-on-failure
 
@@ -411,6 +408,10 @@ jobs:
       - name: Restore exec bits stripped by upload-artifact zip
         run: |
           find build/linux-aarch64 -maxdepth 3 -type f \( -name 'test_*' -o -name 'it_*' -o -name 'vmavificient' \) -exec chmod +x {} +
+      - name: Install ffmpeg (runtime dep of vmav_final_mux)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Test
         run: ctest --test-dir build/linux-aarch64 --output-on-failure
 
@@ -430,6 +431,8 @@ jobs:
       - name: Restore exec bits stripped by upload-artifact zip
         run: |
           find build/macos-arm64 -maxdepth 3 -type f \( -name 'test_*' -o -name 'it_*' -o -name 'vmavificient' \) -exec chmod +x {} +
+      - name: Install ffmpeg (runtime dep of vmav_final_mux)
+        run: brew install ffmpeg
       - name: Test
         run: ctest --test-dir build/macos-arm64 --output-on-failure
 
@@ -454,7 +457,11 @@ jobs:
           fixture and any wrapper scripts might)
         run: |
           find build/windows-x86_64-mingw -maxdepth 3 -type f \( -name 'test_*.exe' -o -name 'it_*.exe' -o -name 'vmavificient.exe' \) -exec chmod +x {} +
-      - name: Test (under wine)
+      - name: Test (under wine — skip integration tests, which need
+          ffmpeg.exe on wine's PATH; that's not yet wired)
         env:
           WINEDEBUG: -all
-        run: ctest --test-dir build/windows-x86_64-mingw --output-on-failure
+        # ctest -L unit runs only the LABELS=unit set; integration
+        # tests stay defined so they show up in test summaries with a
+        # "skipped" disposition under windows.
+        run: ctest --test-dir build/windows-x86_64-mingw --output-on-failure -L unit
