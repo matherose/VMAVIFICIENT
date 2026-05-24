@@ -286,6 +286,27 @@ int cmd_encode_run(int argc, char **argv) {
             const vmav_track_t *t = &tracks.audio[i];
             vmav_audio_build_filename(
                 audio_paths[i], sizeof(audio_paths[i]), base, t->language, fv);
+            /* Disambiguate when multiple tracks share the same
+             * language + French-variant (the canonical schema produces
+             * one filename per <lang,fv> pair; a Blu-ray with two
+             * English audio dubs would otherwise have the second one
+             * overwrite the first). Inject `.<stream_index>` before
+             * the .opus extension only when we'd collide. */
+            for (size_t j = 0; j < i; j++) {
+                if (strcmp(audio_paths[j], audio_paths[i]) == 0) {
+                    char *dot = strrchr(audio_paths[i], '.');
+                    if (dot != NULL) {
+                        char suffix[16];
+                        const int n = snprintf(suffix, sizeof(suffix), ".%d", t->stream_index);
+                        if (n > 0 && n < (int)sizeof(suffix) &&
+                            strlen(audio_paths[i]) + (size_t)n + 1 < sizeof(audio_paths[i])) {
+                            memmove(dot + n, dot, strlen(dot) + 1);
+                            memcpy(dot, suffix, (size_t)n);
+                        }
+                    }
+                    break;
+                }
+            }
             VMAV_LOG_INFO("encode: audio[%zu] '%s' (%dch %s) → %s",
                           i,
                           t->language,
@@ -346,6 +367,26 @@ int cmd_encode_run(int argc, char **argv) {
                 fprintf(stderr, "vmavificient encode: subtitle[%zu]: %s\n", i, st.msg);
                 exit_code = 1;
                 goto cleanup;
+            }
+            /* A forced-subtitle track on a short clip can legitimately
+             * OCR to zero events (no forced caption appeared in this
+             * sample window). libavformat's srt demuxer then rejects
+             * the empty file as "invalid data", which would kill the
+             * mux. Drop the empty sidecar and skip adding it to the
+             * mux spec.
+             *
+             * `scr.subtitle_count` is left untouched when the convert
+             * skipped (output_path existed with non-zero size from a
+             * previous run), so we also need to honor `scr.skipped` —
+             * otherwise a re-mux that reuses cached SRTs would drop
+             * every subtitle track. */
+            if (scr.subtitle_count == 0 && !scr.skipped) {
+                VMAV_LOG_INFO(
+                    "encode: subtitle[%zu] PGS '%s' produced 0 events — skipping (file removed)",
+                    i,
+                    t->language);
+                remove(sub_paths[sub_mux_count]);
+                continue;
             }
             mux_subs[sub_mux_count].path = sub_paths[sub_mux_count];
             mux_subs[sub_mux_count].language = t->language;

@@ -41,11 +41,16 @@
 #include <libavutil/mem.h>
 #include <sys/stat.h>
 
-/* Per-input bookkeeping. */
+/* Per-input bookkeeping. `pending` holds the next packet we've already
+ * read from this input but haven't yet written, so the n-way merge in
+ * pump_inputs_merged can peek a PTS from every live input before
+ * choosing which one to emit next. */
 typedef struct {
     AVFormatContext *fmt;
     int in_stream_index;  /* index in fmt->streams of the stream we keep */
     AVStream *out_stream; /* corresponding output stream in ofmt_ctx */
+    AVPacket *pending;    /* next pkt to write, or NULL if eof / not yet primed */
+    bool eof;
 } mux_input_t;
 
 static const char *fmt_av_err(int errnum, char *buf, size_t bufsize) {
@@ -132,46 +137,124 @@ static vmav_status_t copy_chapters(AVFormatContext *src, AVFormatContext *dst) {
     return VMAV_OK_STATUS;
 }
 
-static vmav_status_t pump_one_input(AVFormatContext *in_fmt,
-                                    int in_stream_idx,
-                                    AVStream *out_stream,
-                                    AVFormatContext *ofmt_ctx) {
-    AVStream *in_stream = in_fmt->streams[in_stream_idx];
-    AVPacket *pkt = av_packet_alloc();
-    if (pkt == NULL) {
-        return VMAV_ERR(VMAV_ERR_NO_MEM, "av_packet_alloc");
+/* Refill input->pending with the next packet for our chosen stream.
+ * Drops packets from other streams (cover-art attached_pic, etc).
+ * Sets eof on stream end. */
+static vmav_status_t refill_pending(mux_input_t *in) {
+    if (in->eof) {
+        return VMAV_OK_STATUS;
     }
-    vmav_status_t status = VMAV_OK_STATUS;
+    if (in->pending != NULL && in->pending->buf != NULL) {
+        return VMAV_OK_STATUS;
+    }
+    if (in->pending == NULL) {
+        in->pending = av_packet_alloc();
+        if (in->pending == NULL) {
+            return VMAV_ERR(VMAV_ERR_NO_MEM, "av_packet_alloc");
+        }
+    }
     while (true) {
-        int rc = av_read_frame(in_fmt, pkt);
+        const int rc = av_read_frame(in->fmt, in->pending);
         if (rc == AVERROR_EOF) {
-            break;
+            in->eof = true;
+            return VMAV_OK_STATUS;
         }
         if (rc < 0) {
             char errbuf[256];
-            status = VMAV_ERR(
+            return VMAV_ERR(
                 VMAV_ERR_FFMPEG, "av_read_frame: %s", fmt_av_err(rc, errbuf, sizeof(errbuf)));
-            break;
         }
-        if (pkt->stream_index != in_stream_idx) {
-            av_packet_unref(pkt);
+        if (in->pending->stream_index != in->in_stream_index) {
+            av_packet_unref(in->pending);
             continue;
         }
-        pkt->stream_index = out_stream->index;
-        av_packet_rescale_ts(pkt, in_stream->time_base, out_stream->time_base);
-        pkt->pos = -1;
-        rc = av_interleaved_write_frame(ofmt_ctx, pkt);
-        av_packet_unref(pkt);
-        if (rc < 0) {
-            char errbuf[256];
-            status = VMAV_ERR(VMAV_ERR_FFMPEG,
-                              "av_interleaved_write_frame: %s",
-                              fmt_av_err(rc, errbuf, sizeof(errbuf)));
-            break;
+        return VMAV_OK_STATUS;
+    }
+}
+
+/* Convert pending->pts (or DTS fallback) to AV_TIME_BASE microseconds
+ * so we can compare timestamps across inputs with differing native
+ * time bases. Streams without timestamps sink to the end. */
+static int64_t pending_ts_us(const mux_input_t *in) {
+    if (in->eof || in->pending == NULL || in->pending->buf == NULL) {
+        return INT64_MAX;
+    }
+    const AVStream *s = in->fmt->streams[in->in_stream_index];
+    int64_t ts = in->pending->pts;
+    if (ts == AV_NOPTS_VALUE) {
+        ts = in->pending->dts;
+    }
+    if (ts == AV_NOPTS_VALUE) {
+        return INT64_MAX;
+    }
+    return av_rescale_q(ts, s->time_base, AV_TIME_BASE_Q);
+}
+
+/* Write pending packet of `in` to the output, rewriting stream_index
+ * and rescaling timestamps from input to output time base. */
+static vmav_status_t emit_pending(mux_input_t *in, AVFormatContext *ofmt_ctx) {
+    AVStream *in_stream = in->fmt->streams[in->in_stream_index];
+    in->pending->stream_index = in->out_stream->index;
+    av_packet_rescale_ts(in->pending, in_stream->time_base, in->out_stream->time_base);
+    in->pending->pos = -1;
+    const int rc = av_interleaved_write_frame(ofmt_ctx, in->pending);
+    av_packet_unref(in->pending);
+    if (rc < 0) {
+        char errbuf[256];
+        return VMAV_ERR(VMAV_ERR_FFMPEG,
+                        "av_interleaved_write_frame: %s",
+                        fmt_av_err(rc, errbuf, sizeof(errbuf)));
+    }
+    return VMAV_OK_STATUS;
+}
+
+/* N-way merge across all live inputs: every step picks the input with
+ * the smallest pending-packet timestamp and writes that packet next.
+ *
+ * Sequentially pumping each input (video, then audio[0], then audio[1],
+ * ...) would feed audio at PTS 0 to the muxer AFTER video packets at
+ * PTS 5min were already written. Matroska handles that by spawning new
+ * clusters per backwards jump and many players treat the resulting
+ * audio stream as broken / unplayable (muted on playback). The merge
+ * keeps every stream's packets in monotonically-increasing PTS order
+ * so the output is well-formed for every consumer. */
+static vmav_status_t
+pump_inputs_merged(mux_input_t *inputs, size_t input_count, AVFormatContext *ofmt_ctx) {
+    /* Prime every input. */
+    for (size_t i = 0; i < input_count; i++) {
+        const vmav_status_t st = refill_pending(&inputs[i]);
+        if (!vmav_status_ok(st)) {
+            return st;
         }
     }
-    av_packet_free(&pkt);
-    return status;
+    while (true) {
+        ssize_t best = -1;
+        int64_t best_ts = INT64_MAX;
+        for (size_t i = 0; i < input_count; i++) {
+            if (inputs[i].eof) {
+                continue;
+            }
+            if (inputs[i].pending == NULL || inputs[i].pending->buf == NULL) {
+                continue;
+            }
+            const int64_t ts = pending_ts_us(&inputs[i]);
+            if (ts < best_ts || (ts == best_ts && best < 0)) {
+                best_ts = ts;
+                best = (ssize_t)i;
+            }
+        }
+        if (best < 0) {
+            return VMAV_OK_STATUS;
+        }
+        const vmav_status_t st = emit_pending(&inputs[best], ofmt_ctx);
+        if (!vmav_status_ok(st)) {
+            return st;
+        }
+        const vmav_status_t rs = refill_pending(&inputs[best]);
+        if (!vmav_status_ok(rs)) {
+            return rs;
+        }
+    }
 }
 
 vmav_status_t vmav_final_mux(const vmav_final_mux_spec_t *spec, vmav_final_mux_result_t *out) {
@@ -332,12 +415,9 @@ vmav_status_t vmav_final_mux(const vmav_final_mux_spec_t *spec, vmav_final_mux_r
     }
     header_written = true;
 
-    for (size_t i = 0; i < input_count; i++) {
-        status = pump_one_input(
-            inputs[i].fmt, inputs[i].in_stream_index, inputs[i].out_stream, ofmt_ctx);
-        if (!vmav_status_ok(status)) {
-            goto cleanup;
-        }
+    status = pump_inputs_merged(inputs, input_count, ofmt_ctx);
+    if (!vmav_status_ok(status)) {
+        goto cleanup;
     }
 
     rc = av_write_trailer(ofmt_ctx);
@@ -368,6 +448,9 @@ cleanup:
     }
     if (inputs != NULL) {
         for (size_t i = 0; i < input_count; i++) {
+            if (inputs[i].pending != NULL) {
+                av_packet_free(&inputs[i].pending);
+            }
             if (inputs[i].fmt != NULL) {
                 avformat_close_input(&inputs[i].fmt);
             }
