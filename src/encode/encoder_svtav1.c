@@ -1289,9 +1289,17 @@ vmav_status_t vmav_svtav1_encoder_send(vmav_svtav1_encoder_t *enc,
     enc->input_pic.luma = (uint8_t *)planes[0];
     enc->input_pic.cb = (uint8_t *)planes[1];
     enc->input_pic.cr = (uint8_t *)planes[2];
-    enc->input_pic.y_stride = (uint32_t)linesize[0];
-    enc->input_pic.cb_stride = (uint32_t)linesize[1];
-    enc->input_pic.cr_stride = (uint32_t)linesize[2];
+    /* SVT-AV1's EbSvtIOFormat.{y,cb,cr}_stride is expressed in SAMPLES,
+     * not bytes — but libavformat's AVFrame.linesize[] is in bytes.
+     * For 8-bit that's equal; for 10-bit a sample occupies 2 bytes,
+     * so we have to divide by bytes_per_sample to convert. Without
+     * this, SVT's NEON unpacker (`svt_unpack_and_2bcompress_neon`)
+     * walks 2× past each row and SIGSEGVs at the first send_picture
+     * with a 10-bit input (HDR HEVC, HEVC Main 10, etc.). */
+    const uint32_t bytes_per_sample = (enc->bit_depth == 10) ? 2u : 1u;
+    enc->input_pic.y_stride = (uint32_t)linesize[0] / bytes_per_sample;
+    enc->input_pic.cb_stride = (uint32_t)linesize[1] / bytes_per_sample;
+    enc->input_pic.cr_stride = (uint32_t)linesize[2] / bytes_per_sample;
     enc->input_hdr.pts = pts;
     enc->input_hdr.flags = 0;
     const EbErrorType rc = svt_av1_enc_send_picture(enc->svt_handle, &enc->input_hdr);
