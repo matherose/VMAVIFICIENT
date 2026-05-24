@@ -12,3 +12,14 @@ vmav_add_integration_test(NAME it_fixtures_smoke
 vmav_add_integration_test(NAME it_encode_smoke
     SOURCES it_encode_smoke.c
     LINK_LIBS vmav::media vmav::foundations)
+
+# Phase 5 m3 (it_pgs_to_srt) intentionally deferred to post-v2.0.
+# Generating a real PGS bitstream programmatically needs either
+# ffmpeg's pgssub *encoder* (only the decoder ships in stock builds)
+# or ~300 lines of fixture C to hand-author a multi-segment PGS
+# (PCS/WDS/PDS/ODS/END) + bitmap rasterizer for Tesseract to OCR.
+# The unit suite (tests/unit/test_subtitle_convert.c) already covers
+# everything testable without a real bitmap (iso639 mapping, filename
+# builder, codec classification, bad-arg paths); the PGS parser itself
+# is bit-for-bit ported from v1 which has years of Blu-ray runtime
+# validation. Worth revisiting if we ever hit a real regression here.
