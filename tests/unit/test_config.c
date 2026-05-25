@@ -16,8 +16,15 @@
 #ifdef _WIN32
 #include <direct.h>
 #include <process.h>
+/* MSVCRT/UCRT have no POSIX setenv/unsetenv; route through _putenv_s
+ * (empty value removes the var). We use a vmav_-prefixed wrapper so
+ * we don't tangle with any forward-declarations in UCRT headers. */
+#define VMAV_SETENV(k, v, overwrite) _putenv_s((k), (v))
+#define VMAV_UNSETENV(k) _putenv_s((k), "")
 #else
 #include <unistd.h>
+#define VMAV_SETENV(k, v, overwrite) setenv((k), (v), (overwrite))
+#define VMAV_UNSETENV(k) unsetenv((k))
 #endif
 
 static char g_workdir[1024];
@@ -56,12 +63,12 @@ void setUp(void) {
      * on macOS it falls back to $HOME/Library/Application Support.
      * We isolate by setting XDG_CONFIG_HOME on Linux, HOME on macOS. */
 #ifdef __APPLE__
-    setenv("HOME", g_workdir, 1);
+    VMAV_SETENV("HOME", g_workdir, 1);
 #else
-    setenv("XDG_CONFIG_HOME", g_workdir, 1);
+    VMAV_SETENV("XDG_CONFIG_HOME", g_workdir, 1);
 #endif
     /* Clean any env that would influence the resolver. */
-    unsetenv("TMDB_API_KEY");
+    VMAV_UNSETENV("TMDB_API_KEY");
 }
 
 void tearDown(void) {
@@ -106,11 +113,11 @@ static void test_resolve_api_key_env_wins(void) {
     snprintf(cfg.tmdb_api_key, sizeof(cfg.tmdb_api_key), "from-config");
     TEST_ASSERT_TRUE(vmav_status_ok(vmav_config_save(&cfg)));
 
-    setenv("TMDB_API_KEY", "from-env", 1);
+    VMAV_SETENV("TMDB_API_KEY", "from-env", 1);
     char resolved[128];
     TEST_ASSERT_TRUE(vmav_status_ok(vmav_config_resolve_api_key(resolved, sizeof(resolved))));
     TEST_ASSERT_EQUAL_STRING("from-env", resolved);
-    unsetenv("TMDB_API_KEY");
+    VMAV_UNSETENV("TMDB_API_KEY");
 }
 
 static void test_resolve_api_key_falls_back_to_config(void) {
