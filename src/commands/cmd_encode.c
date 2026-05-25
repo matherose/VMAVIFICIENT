@@ -70,6 +70,8 @@ typedef struct {
     bool config_mode; /* --config → interactive setup, then exit */
     bool dry_run;     /* --dry-run → run through CRF + naming, print plan, exit */
     bool grain_only;  /* --grain-only → like --dry-run + dump preset knobs */
+    bool quiet;       /* --quiet → vmav_log level WARN+ only */
+    bool verbose;     /* --verbose → vmav_log level DEBUG; SVT stderr stays on */
     bool show_help;
     /* Naming overrides — applied only when scene-style naming is in
      * effect (i.e. with --tmdb). Defaults of UNKNOWN/0 mean "use
@@ -78,6 +80,12 @@ typedef struct {
     bool source_override_set;
     vmav_naming_lang_tag_t lang_override;
     bool lang_override_set;
+    /* Additional SRT sidecar files supplied via --srt. Repeatable.
+     * These join the OCR'd subs at final-mux time; they don't go
+     * through OCR and aren't tracked in state.subs[]. */
+    const char **extra_srts; /* heap, freed in cleanup */
+    size_t extra_srt_count;
+    size_t extra_srt_cap;
 } encode_args_t;
 
 /* Lookup tables for the 12 source + 16 language CLI override flags.
@@ -158,6 +166,12 @@ static void print_help(FILE *out) {
           "  --grain-only              Like --dry-run, plus dump the\n"
           "                            resolved preset metadata (grain\n"
           "                            mode, VMAF target, bitrate tiers).\n"
+          "  --srt <path>              Attach an extra SRT sidecar to the\n"
+          "                            mux. Repeatable. Joins OCR'd PGS\n"
+          "                            subs.\n"
+          "  --quiet                   Suppress informational log lines\n"
+          "                            (level WARN+ only).\n"
+          "  --verbose                 Verbose log output (level DEBUG).\n"
           "  -h, --help                Show this help\n"
           "\n"
           "Quality preset shortcuts (each equivalent to --preset <name>):\n"
@@ -452,6 +466,27 @@ static vmav_status_t parse_args(int argc, char **argv, encode_args_t *out) {
             out->grain_only = true;
             continue;
         }
+        if (strcmp(arg, "--quiet") == 0) {
+            out->quiet = true;
+            continue;
+        }
+        if (strcmp(arg, "--verbose") == 0) {
+            out->verbose = true;
+            continue;
+        }
+        if (strcmp(arg, "--srt") == 0 && i + 1 < argc) {
+            if (out->extra_srt_count >= out->extra_srt_cap) {
+                const size_t new_cap = out->extra_srt_cap == 0 ? 4 : out->extra_srt_cap * 2;
+                const char **resized = realloc(out->extra_srts, new_cap * sizeof(*resized));
+                if (resized == NULL) {
+                    return VMAV_ERR(VMAV_ERR_NO_MEM, "--srt: realloc");
+                }
+                out->extra_srts = resized;
+                out->extra_srt_cap = new_cap;
+            }
+            out->extra_srts[out->extra_srt_count++] = argv[++i];
+            continue;
+        }
         /* Source overrides (12 flags). */
         {
             bool matched = false;
@@ -533,6 +568,16 @@ int cmd_encode_run(int argc, char **argv) {
     }
     if (args.config_mode) {
         return run_interactive_config();
+    }
+
+    /* Apply verbosity flags immediately so any subsequent log calls
+     * honor them. --verbose wins if both are given, matching v1's
+     * "they compose" doc (verbose overrides quiet for vmav_log; SVT
+     * stderr is unaffected either way for now). */
+    if (args.verbose) {
+        vmav_log_set_level(VMAV_LL_DEBUG);
+    } else if (args.quiet) {
+        vmav_log_set_level(VMAV_LL_WARN);
     }
 
     /* Probe the input. */
@@ -1132,8 +1177,12 @@ int cmd_encode_run(int argc, char **argv) {
             audio_mux_count++;
         }
     }
-    if (state.sub_count > 0) {
-        mux_subs = calloc(state.sub_count, sizeof(*mux_subs));
+    /* Sub slots = state.sub_count (OCR'd from input) + extra_srt_count
+     * (user-supplied via --srt). Empty OCR slots are skipped at write
+     * time. */
+    const size_t total_sub_slots = state.sub_count + args.extra_srt_count;
+    if (total_sub_slots > 0) {
+        mux_subs = calloc(total_sub_slots, sizeof(*mux_subs));
         if (mux_subs == NULL) {
             fprintf(stderr, "vmavificient encode: out of memory (mux_subs)\n");
             exit_code = 1;
@@ -1152,6 +1201,18 @@ int cmd_encode_run(int argc, char **argv) {
             mux_subs[sub_mux_count].track_name = NULL;
             mux_subs[sub_mux_count].is_forced = ss->is_forced;
             mux_subs[sub_mux_count].is_sdh = ss->is_sdh;
+            sub_mux_count++;
+        }
+        /* Append user-supplied --srt sidecars. We don't have language
+         * metadata for these, so default to "und" and unset disposition
+         * flags — the user can re-tag in mkvpropedit afterward if they
+         * want specific languages or forced flags. */
+        for (size_t j = 0; j < args.extra_srt_count; j++) {
+            mux_subs[sub_mux_count].path = args.extra_srts[j];
+            mux_subs[sub_mux_count].language = "und";
+            mux_subs[sub_mux_count].track_name = NULL;
+            mux_subs[sub_mux_count].is_forced = false;
+            mux_subs[sub_mux_count].is_sdh = false;
             sub_mux_count++;
         }
     }
@@ -1197,6 +1258,7 @@ cleanup:
     free(audio_paths);
     free(mux_subs);
     free(sub_paths);
+    free(args.extra_srts);
     vmav_media_tracks_free(&tracks);
     vmav_encode_state_free(&state);
     return exit_code;
