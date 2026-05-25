@@ -76,14 +76,28 @@ static void print_help(FILE *out) {
           "                            | super35_digital | imax_analog | imax_digital\n"
           "                            (default: live-action)\n"
           "  --target-vmaf <int>       VMAF target (default: per preset/resolution)\n"
+          "  --vmaf-target <int>       Alias for --target-vmaf (v1 spelling)\n"
           "  --crf <int>               Use given CRF directly, skip CRF search\n"
           "  --crf-min <int>           Clamp CRF search lower bound\n"
           "  --crf-max <int>           Clamp CRF search upper bound\n"
           "  --cache-dir <path>        Where to keep intermediates +\n"
           "                            resume state (default:\n"
           "                            <input-dir>/.vmavificient-cache)\n"
-          "  -h, --help                Show this help\n",
+          "  -h, --help                Show this help\n"
+          "\n"
+          "Quality preset shortcuts (each equivalent to --preset <name>):\n"
+          "  --animation               Animation content\n"
+          "  --super35_analog          Super 35mm analog film\n"
+          "  --super35_digital         Super 35mm digital\n"
+          "  --imax_analog             IMAX analog film\n"
+          "  --imax_digital            IMAX digital\n",
           out);
+}
+
+/* Set the preset directly from a canonical name. Used by the
+ * --animation / --super35_* / --imax_* shorthand flags. */
+static vmav_status_t set_preset_shortcut(encode_args_t *out, const char *name) {
+    return vmav_preset_from_string(name, &out->preset);
 }
 
 static vmav_status_t parse_args(int argc, char **argv, encode_args_t *out) {
@@ -107,8 +121,45 @@ static vmav_status_t parse_args(int argc, char **argv, encode_args_t *out) {
             }
             continue;
         }
-        if (strcmp(arg, "--target-vmaf") == 0 && i + 1 < argc) {
+        if ((strcmp(arg, "--target-vmaf") == 0 || strcmp(arg, "--vmaf-target") == 0) &&
+            i + 1 < argc) {
             out->target_vmaf = atoi(argv[++i]);
+            continue;
+        }
+        /* Preset shortcuts (v1 CLI parity). Each maps to --preset <name>. */
+        if (strcmp(arg, "--animation") == 0) {
+            const vmav_status_t st = set_preset_shortcut(out, "animation");
+            if (!vmav_status_ok(st)) {
+                return st;
+            }
+            continue;
+        }
+        if (strcmp(arg, "--super35_analog") == 0) {
+            const vmav_status_t st = set_preset_shortcut(out, "super35_analog");
+            if (!vmav_status_ok(st)) {
+                return st;
+            }
+            continue;
+        }
+        if (strcmp(arg, "--super35_digital") == 0) {
+            const vmav_status_t st = set_preset_shortcut(out, "super35_digital");
+            if (!vmav_status_ok(st)) {
+                return st;
+            }
+            continue;
+        }
+        if (strcmp(arg, "--imax_analog") == 0) {
+            const vmav_status_t st = set_preset_shortcut(out, "imax_analog");
+            if (!vmav_status_ok(st)) {
+                return st;
+            }
+            continue;
+        }
+        if (strcmp(arg, "--imax_digital") == 0) {
+            const vmav_status_t st = set_preset_shortcut(out, "imax_digital");
+            if (!vmav_status_ok(st)) {
+                return st;
+            }
             continue;
         }
         if (strcmp(arg, "--crf") == 0 && i + 1 < argc) {
