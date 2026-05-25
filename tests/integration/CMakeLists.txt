@@ -17,6 +17,14 @@ vmav_add_integration_test(NAME it_encode_resume
     SOURCES it_encode_resume.c
     LINK_LIBS vmav::media vmav::foundations vmav::encode)
 
+# Phase 8 m2: real-content smoke on a CC-licensed clip (Big Buck Bunny).
+# Compiles unconditionally but auto-skips when VMAV_FETCH_REAL_CONTENT
+# is OFF (the CMake option default) — the runtime branch keys on the
+# VMAV_REAL_CONTENT_ENABLED compile def.
+vmav_add_integration_test(NAME it_encode_bbb
+    SOURCES it_encode_bbb.c
+    LINK_LIBS vmav::media vmav::foundations vmav::encode)
+
 # Phase 5 m3 (it_pgs_to_srt) intentionally deferred to post-v2.0.
 # Generating a real PGS bitstream programmatically needs either
 # ffmpeg's pgssub *encoder* (only the decoder ships in stock builds)
