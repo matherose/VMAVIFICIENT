@@ -191,10 +191,11 @@ static cJSON *crop_to_json(const vmav_state_crop_t *c) {
         return NULL;
     }
     cJSON_AddItemToObject(o, "status", step_to_json(c->status));
-    cJSON_AddNumberToObject(o, "top", c->top);
-    cJSON_AddNumberToObject(o, "bottom", c->bottom);
-    cJSON_AddNumberToObject(o, "left", c->left);
-    cJSON_AddNumberToObject(o, "right", c->right);
+    cJSON_AddNumberToObject(o, "x", c->x);
+    cJSON_AddNumberToObject(o, "y", c->y);
+    cJSON_AddNumberToObject(o, "width", c->width);
+    cJSON_AddNumberToObject(o, "height", c->height);
+    cJSON_AddBoolToObject(o, "is_meaningful", c->is_meaningful);
     return o;
 }
 
@@ -204,10 +205,11 @@ static void crop_from_json(const cJSON *root, vmav_state_crop_t *out) {
         return;
     }
     out->status = json_to_step(o, "status");
-    out->top = vmav_json_get_int(o, "top", 0);
-    out->bottom = vmav_json_get_int(o, "bottom", 0);
-    out->left = vmav_json_get_int(o, "left", 0);
-    out->right = vmav_json_get_int(o, "right", 0);
+    out->x = vmav_json_get_int(o, "x", 0);
+    out->y = vmav_json_get_int(o, "y", 0);
+    out->width = vmav_json_get_int(o, "width", 0);
+    out->height = vmav_json_get_int(o, "height", 0);
+    out->is_meaningful = vmav_json_get_bool(o, "is_meaningful", false);
 }
 
 static cJSON *grain_to_json(const vmav_state_grain_t *g) {

@@ -20,6 +20,8 @@
 
 #include "vmavificient/vmav_audio.h"
 #include "vmavificient/vmav_crf_search.h"
+#include "vmavificient/vmav_crop.h"
+#include "vmavificient/vmav_encode_state.h"
 #include "vmavificient/vmav_final_mux.h"
 #include "vmavificient/vmav_hdr.h"
 #include "vmavificient/vmav_log.h"
@@ -178,6 +180,65 @@ int cmd_encode_run(int argc, char **argv) {
             return 1;
         }
     }
+
+    /* Resolve cache_dir: explicit --cache-dir or
+     * <dirname(input)>/.vmavificient-cache. */
+    char cache_dir[1024];
+    if (args.cache_dir != NULL) {
+        snprintf(cache_dir, sizeof(cache_dir), "%s", args.cache_dir);
+    } else {
+        st = vmav_encode_state_default_cache_dir(args.input, cache_dir, sizeof(cache_dir));
+        if (!vmav_status_ok(st)) {
+            fprintf(stderr, "vmavificient encode: cache_dir: %s\n", st.msg);
+            return 1;
+        }
+    }
+
+    /* Load resume state. Fresh on first run or when input changed. */
+    vmav_encode_state_t state;
+    bool resumable = false;
+    st = vmav_encode_state_load(cache_dir, args.input, &state, &resumable);
+    if (!vmav_status_ok(st)) {
+        fprintf(stderr, "vmavificient encode: state_load: %s\n", st.msg);
+        return 1;
+    }
+    if (resumable) {
+        VMAV_LOG_INFO("encode: resuming from cache_dir=%s", cache_dir);
+    } else {
+        VMAV_LOG_INFO("encode: fresh state in cache_dir=%s", cache_dir);
+    }
+
+    /* ---- Step: crop detection ---- */
+    if (state.crop.status != VMAV_STEP_COMPLETE) {
+        VMAV_LOG_INFO("encode: detecting crop via lavfi cropdetect");
+        vmav_crop_rect_t crop;
+        const vmav_status_t cst = vmav_crop_probe(args.input, &crop);
+        if (!vmav_status_ok(cst)) {
+            fprintf(stderr, "vmavificient encode: crop_probe: %s\n", cst.msg);
+            state.crop.status = VMAV_STEP_FAILED;
+            (void)vmav_encode_state_save(cache_dir, &state);
+            vmav_encode_state_free(&state);
+            return 1;
+        }
+        state.crop.status = VMAV_STEP_COMPLETE;
+        state.crop.x = crop.x;
+        state.crop.y = crop.y;
+        state.crop.width = crop.width;
+        state.crop.height = crop.height;
+        state.crop.is_meaningful = crop.is_meaningful;
+        const vmav_status_t sst = vmav_encode_state_save(cache_dir, &state);
+        if (!vmav_status_ok(sst)) {
+            fprintf(stderr, "vmavificient encode: state_save (crop): %s\n", sst.msg);
+            vmav_encode_state_free(&state);
+            return 1;
+        }
+    }
+    VMAV_LOG_INFO("encode: crop = (%d,%d) %dx%d (%s)",
+                  state.crop.x,
+                  state.crop.y,
+                  state.crop.width,
+                  state.crop.height,
+                  state.crop.is_meaningful ? "trim black bars" : "no-op / passthrough");
 
     /* Choose CRF: either user-provided or via CRF search. */
     int chosen_crf = args.crf;
@@ -460,5 +521,6 @@ cleanup:
     free(mux_subs);
     free(sub_paths);
     vmav_media_tracks_free(&tracks);
+    vmav_encode_state_free(&state);
     return exit_code;
 }

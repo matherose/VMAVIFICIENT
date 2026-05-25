@@ -143,7 +143,7 @@ static void test_save_and_load_round_trip(void) {
     TEST_ASSERT_EQUAL_INT64(2048, st.input_size);
 
     /* Populate every field. */
-    st.crop = (vmav_state_crop_t){VMAV_STEP_COMPLETE, 4, 8, 2, 6};
+    st.crop = (vmav_state_crop_t){VMAV_STEP_COMPLETE, 0, 140, 3840, 1880, true};
     st.grain = (vmav_state_grain_t){VMAV_STEP_COMPLETE, 0.42};
     st.crf = (vmav_state_crf_t){VMAV_STEP_COMPLETE, 31, 92.5, true};
 
@@ -175,10 +175,11 @@ static void test_save_and_load_round_trip(void) {
     TEST_ASSERT_TRUE(vmav_status_ok(vmav_encode_state_load(cache, input, &st2, &fp_match)));
     TEST_ASSERT_TRUE(fp_match);
     TEST_ASSERT_EQUAL_INT(VMAV_STEP_COMPLETE, st2.crop.status);
-    TEST_ASSERT_EQUAL_INT(4, st2.crop.top);
-    TEST_ASSERT_EQUAL_INT(8, st2.crop.bottom);
-    TEST_ASSERT_EQUAL_INT(2, st2.crop.left);
-    TEST_ASSERT_EQUAL_INT(6, st2.crop.right);
+    TEST_ASSERT_EQUAL_INT(0, st2.crop.x);
+    TEST_ASSERT_EQUAL_INT(140, st2.crop.y);
+    TEST_ASSERT_EQUAL_INT(3840, st2.crop.width);
+    TEST_ASSERT_EQUAL_INT(1880, st2.crop.height);
+    TEST_ASSERT_TRUE(st2.crop.is_meaningful);
     TEST_ASSERT_EQUAL_INT(VMAV_STEP_COMPLETE, st2.grain.status);
     TEST_ASSERT_EQUAL_DOUBLE(0.42, st2.grain.score);
     TEST_ASSERT_EQUAL_INT(VMAV_STEP_COMPLETE, st2.crf.status);

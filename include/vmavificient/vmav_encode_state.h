@@ -42,10 +42,12 @@ vmav_step_status_t vmav_step_status_from_str(const char *s);
 
 typedef struct {
     vmav_step_status_t status;
-    int top;
-    int bottom;
-    int left;
-    int right;
+    /* Crop rectangle in source pixels, mirrors vmav_crop_rect_t. */
+    int x;
+    int y;
+    int width;
+    int height;
+    bool is_meaningful; /* false means "no black bars worth cropping" */
 } vmav_state_crop_t;
 
 typedef struct {
