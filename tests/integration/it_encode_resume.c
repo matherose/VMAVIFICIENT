@@ -36,6 +36,9 @@
 #ifdef _WIN32
 #include <direct.h>
 #include <process.h>
+#include <windows.h>
+/* POSIX sleep(seconds) doesn't exist on Windows; map to Sleep(ms). */
+#define sleep(s) Sleep((s) * 1000)
 #else
 #include <unistd.h>
 #endif

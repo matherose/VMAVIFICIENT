@@ -1141,22 +1141,57 @@ static void apply_color_to_svtav1_cfg(EbSvtAv1EncConfiguration *cfg, const vmav_
     cfg->color_range = (s->color_range == 2) ? EB_CR_FULL_RANGE : EB_CR_STUDIO_RANGE;
 }
 
+/* SVT-AV1-HDR's EbSvtAv1MasteringDisplayInfo uses non-standard scales
+ * AND byte-swapped storage (see svt_aom_parse_mastering_display in
+ * metadata_handle.c). The struct is memcpy'd verbatim into the AV1
+ * OBU payload at key-frames, so we must pre-byteswap to land BE on
+ * the wire:
+ *
+ *   chromaticity → uint16_t = round(value × 65536), byte-swapped
+ *   max_luma     → uint32_t = round(value × 256),   byte-swapped
+ *   min_luma     → uint32_t = round(value × 16384), byte-swapped
+ *
+ * content_light_level uses the same byte-swap convention but with
+ * spec-native units (cd/m², no extra scale).
+ *
+ * v1 used the spec's 0.00002 / 0.0001 scales which produces wrong
+ * bitstream values with this fork — caught during V_for_Vendetta
+ * real-content validation (Phase 7 wrap-up). */
+static inline uint16_t svt_bswap16(uint16_t v) {
+    return (uint16_t)((v >> 8) | (v << 8));
+}
+
+static inline uint32_t svt_bswap32(uint32_t v) {
+    return (v >> 24) | ((v >> 8) & 0xFF00) | ((v << 8) & 0xFF0000) | (v << 24);
+}
+
+static inline uint16_t svt_clip16be(double x) {
+    if (x > 65535) {
+        x = 65535;
+    } else if (x < 0) {
+        x = 0;
+    }
+    return svt_bswap16((uint16_t)x);
+}
+
 static void apply_hdr10_to_svtav1_cfg(EbSvtAv1EncConfiguration *cfg, const vmav_svtav1_spec_t *s) {
     if (s->has_mastering) {
-        cfg->mastering_display.r.x = (uint16_t)(s->mastering_red_x * 50000 + 0.5);
-        cfg->mastering_display.r.y = (uint16_t)(s->mastering_red_y * 50000 + 0.5);
-        cfg->mastering_display.g.x = (uint16_t)(s->mastering_green_x * 50000 + 0.5);
-        cfg->mastering_display.g.y = (uint16_t)(s->mastering_green_y * 50000 + 0.5);
-        cfg->mastering_display.b.x = (uint16_t)(s->mastering_blue_x * 50000 + 0.5);
-        cfg->mastering_display.b.y = (uint16_t)(s->mastering_blue_y * 50000 + 0.5);
-        cfg->mastering_display.white_point.x = (uint16_t)(s->mastering_white_x * 50000 + 0.5);
-        cfg->mastering_display.white_point.y = (uint16_t)(s->mastering_white_y * 50000 + 0.5);
-        cfg->mastering_display.max_luma = (uint32_t)(s->mastering_max_luma * 10000 + 0.5);
-        cfg->mastering_display.min_luma = (uint32_t)(s->mastering_min_luma * 10000 + 0.5);
+        cfg->mastering_display.r.x = svt_clip16be(s->mastering_red_x * 65536.0 + 0.5);
+        cfg->mastering_display.r.y = svt_clip16be(s->mastering_red_y * 65536.0 + 0.5);
+        cfg->mastering_display.g.x = svt_clip16be(s->mastering_green_x * 65536.0 + 0.5);
+        cfg->mastering_display.g.y = svt_clip16be(s->mastering_green_y * 65536.0 + 0.5);
+        cfg->mastering_display.b.x = svt_clip16be(s->mastering_blue_x * 65536.0 + 0.5);
+        cfg->mastering_display.b.y = svt_clip16be(s->mastering_blue_y * 65536.0 + 0.5);
+        cfg->mastering_display.white_point.x = svt_clip16be(s->mastering_white_x * 65536.0 + 0.5);
+        cfg->mastering_display.white_point.y = svt_clip16be(s->mastering_white_y * 65536.0 + 0.5);
+        cfg->mastering_display.max_luma =
+            svt_bswap32((uint32_t)(s->mastering_max_luma * 256 + 0.5));
+        cfg->mastering_display.min_luma =
+            svt_bswap32((uint32_t)(s->mastering_min_luma * 16384 + 0.5));
     }
     if (s->has_cll) {
-        cfg->content_light_level.max_cll = s->cll_max_cll;
-        cfg->content_light_level.max_fall = s->cll_max_fall;
+        cfg->content_light_level.max_cll = svt_bswap16(s->cll_max_cll);
+        cfg->content_light_level.max_fall = svt_bswap16(s->cll_max_fall);
     }
 }
 

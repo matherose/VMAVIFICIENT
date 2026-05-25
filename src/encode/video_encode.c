@@ -100,6 +100,118 @@ static vmav_status_t ivf_patch_nframes(FILE *fp, uint32_t nframes) {
 /*  HDR metadata pull from source                                         */
 /* ====================================================================== */
 
+/* Extract mastering display + content-light-level from a decoded
+ * AVFrame's side data. For HEVC Blu-ray sources the HDR10 metadata
+ * lives in SEI inside the bitstream — libavformat exposes it on the
+ * AVFrame, not on AVCodecParameters (where nb_coded_side_data stays
+ * 0). Called by hdr_probe_first_frame as a complement to
+ * fill_hdr_from_codecpar. */
+static void apply_frame_hdr_side_data(vmav_svtav1_spec_t *spec, const AVFrame *frame) {
+    for (int i = 0; i < frame->nb_side_data; i++) {
+        const AVFrameSideData *sd = frame->side_data[i];
+        if (sd->type == AV_FRAME_DATA_MASTERING_DISPLAY_METADATA &&
+            sd->size >= (int)sizeof(AVMasteringDisplayMetadata)) {
+            AVMasteringDisplayMetadata m;
+            memcpy(&m, sd->data, sizeof(m));
+            if (m.has_primaries) {
+                spec->has_mastering = true;
+                spec->mastering_red_x = av_q2d(m.display_primaries[0][0]);
+                spec->mastering_red_y = av_q2d(m.display_primaries[0][1]);
+                spec->mastering_green_x = av_q2d(m.display_primaries[1][0]);
+                spec->mastering_green_y = av_q2d(m.display_primaries[1][1]);
+                spec->mastering_blue_x = av_q2d(m.display_primaries[2][0]);
+                spec->mastering_blue_y = av_q2d(m.display_primaries[2][1]);
+                spec->mastering_white_x = av_q2d(m.white_point[0]);
+                spec->mastering_white_y = av_q2d(m.white_point[1]);
+            }
+            if (m.has_luminance) {
+                spec->has_mastering = true;
+                spec->mastering_max_luma = av_q2d(m.max_luminance);
+                spec->mastering_min_luma = av_q2d(m.min_luminance);
+            }
+        } else if (sd->type == AV_FRAME_DATA_CONTENT_LIGHT_LEVEL &&
+                   sd->size >= (int)sizeof(AVContentLightMetadata)) {
+            AVContentLightMetadata cll;
+            memcpy(&cll, sd->data, sizeof(cll));
+            spec->has_cll = true;
+            spec->cll_max_cll = (uint16_t)cll.MaxCLL;
+            spec->cll_max_fall = (uint16_t)cll.MaxFALL;
+        }
+    }
+}
+
+/* Pre-probe: open a *separate* demuxer + decoder, decode exactly one
+ * frame, harvest HDR side data from it, then tear down. Adds ~50ms of
+ * I/O + decode per encode but is the only reliable way to surface
+ * mastering metadata for HEVC SEI sources before SVT-AV1 is opened
+ * (SVT needs HDR config at init time). Silent on failure — we'd
+ * rather lose HDR than fail the encode. */
+static void probe_hdr_from_first_frame(const char *input_path, vmav_svtav1_spec_t *spec) {
+    AVFormatContext *ifmt = NULL;
+    AVCodecContext *dec = NULL;
+    AVFrame *frame = NULL;
+    AVPacket *pkt = NULL;
+
+    if (avformat_open_input(&ifmt, input_path, NULL, NULL) < 0) {
+        return;
+    }
+    if (avformat_find_stream_info(ifmt, NULL) < 0) {
+        goto out;
+    }
+    const int vidx = av_find_best_stream(ifmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
+    if (vidx < 0) {
+        goto out;
+    }
+    AVStream *vs = ifmt->streams[vidx];
+    const AVCodec *codec = avcodec_find_decoder(vs->codecpar->codec_id);
+    if (codec == NULL) {
+        goto out;
+    }
+    dec = avcodec_alloc_context3(codec);
+    if (dec == NULL || avcodec_parameters_to_context(dec, vs->codecpar) < 0 ||
+        avcodec_open2(dec, codec, NULL) < 0) {
+        goto out;
+    }
+    pkt = av_packet_alloc();
+    frame = av_frame_alloc();
+    if (pkt == NULL || frame == NULL) {
+        goto out;
+    }
+    /* Decode loop until we land one frame. HEVC may need several
+     * packets to produce frame 0 (SPS/PPS, then I-frame). Cap at 32
+     * packets to bound the worst case. */
+    int packets_pulled = 0;
+    while (packets_pulled < 32 && av_read_frame(ifmt, pkt) >= 0) {
+        packets_pulled++;
+        if (pkt->stream_index != vidx) {
+            av_packet_unref(pkt);
+            continue;
+        }
+        if (avcodec_send_packet(dec, pkt) < 0) {
+            av_packet_unref(pkt);
+            continue;
+        }
+        av_packet_unref(pkt);
+        if (avcodec_receive_frame(dec, frame) == 0) {
+            apply_frame_hdr_side_data(spec, frame);
+            VMAV_LOG_INFO("video_encode: HDR probe: has_mastering=%d has_cll=%d (max_luma=%.0f "
+                          "min_luma=%.4f max_cll=%u max_fall=%u)",
+                          spec->has_mastering,
+                          spec->has_cll,
+                          spec->mastering_max_luma,
+                          spec->mastering_min_luma,
+                          spec->cll_max_cll,
+                          spec->cll_max_fall);
+            break;
+        }
+    }
+out:
+    av_frame_free(&frame);
+    av_packet_free(&pkt);
+    avcodec_free_context(&dec);
+    avformat_close_input(&ifmt);
+}
+
 static void fill_hdr_from_codecpar(vmav_svtav1_spec_t *spec, const AVCodecParameters *par) {
     spec->color_primaries = par->color_primaries;
     spec->color_trc = par->color_trc;
@@ -278,6 +390,13 @@ vmav_status_t vmav_video_encode(const vmav_video_encode_spec_t *spec,
         .crf = spec->crf,
     };
     fill_hdr_from_codecpar(&svt, vs->codecpar);
+    /* If the container path didn't surface HDR side data, probe one
+     * decoded frame — Blu-ray HEVC keeps HDR10 in SEI, which lavf
+     * only exposes via AVFrameSideData. Skip when both sides are
+     * already populated. */
+    if (!svt.has_mastering || !svt.has_cll) {
+        probe_hdr_from_first_frame(spec->input_path, &svt);
+    }
     status = vmav_svtav1_encoder_open(&svt, &enc);
     if (!vmav_status_ok(status)) {
         goto cleanup;
