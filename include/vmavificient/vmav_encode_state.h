@@ -71,7 +71,15 @@ typedef struct {
 
 typedef struct {
     vmav_step_status_t status;
+    /* Exactly one of crf / bitrate_kbps is non-zero on COMPLETE:
+     *   crf > 0          → CRF mode (search result, --crf override, or
+     *                      preset default).
+     *   bitrate_kbps > 0 → VBR mode (--bitrate override).
+     * vmaf is meaningful for CRF mode only (0 for VBR / --crf overrides
+     * that didn't run a search).
+     * escalated is meaningful for CRF mode when the search ran. */
     int crf;
+    int bitrate_kbps;
     double vmaf;
     bool escalated; /* true if CRF search needed pass 2 (3 samples) */
 } vmav_state_crf_t;

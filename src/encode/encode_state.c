@@ -268,6 +268,7 @@ static cJSON *crf_to_json(const vmav_state_crf_t *c) {
     }
     cJSON_AddItemToObject(o, "status", step_to_json(c->status));
     cJSON_AddNumberToObject(o, "crf", c->crf);
+    cJSON_AddNumberToObject(o, "bitrate_kbps", c->bitrate_kbps);
     cJSON_AddNumberToObject(o, "vmaf", c->vmaf);
     cJSON_AddBoolToObject(o, "escalated", c->escalated);
     return o;
@@ -280,6 +281,7 @@ static void crf_from_json(const cJSON *root, vmav_state_crf_t *out) {
     }
     out->status = json_to_step(o, "status");
     out->crf = vmav_json_get_int(o, "crf", 0);
+    out->bitrate_kbps = vmav_json_get_int(o, "bitrate_kbps", 0);
     out->vmaf = vmav_json_get_number(o, "vmaf", 0.0);
     out->escalated = vmav_json_get_bool(o, "escalated", false);
 }

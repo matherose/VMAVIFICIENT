@@ -145,7 +145,7 @@ static void test_save_and_load_round_trip(void) {
     /* Populate every field. */
     st.crop = (vmav_state_crop_t){VMAV_STEP_COMPLETE, 0, 140, 3840, 1880, true};
     st.grain = (vmav_state_grain_t){VMAV_STEP_COMPLETE, 0.42, 0.07};
-    st.crf = (vmav_state_crf_t){VMAV_STEP_COMPLETE, 31, 92.5, true};
+    st.crf = (vmav_state_crf_t){VMAV_STEP_COMPLETE, 31, 0, 92.5, true};
 
     vmav_state_audio_t a1 = {VMAV_STEP_COMPLETE, 1, "eng", "Surround 7.1", true, ""};
     snprintf(a1.output_path, sizeof(a1.output_path), "%s/a1.opus", wd);
@@ -185,6 +185,7 @@ static void test_save_and_load_round_trip(void) {
     TEST_ASSERT_EQUAL_DOUBLE(0.07, st2.grain.variance);
     TEST_ASSERT_EQUAL_INT(VMAV_STEP_COMPLETE, st2.crf.status);
     TEST_ASSERT_EQUAL_INT(31, st2.crf.crf);
+    TEST_ASSERT_EQUAL_INT(0, st2.crf.bitrate_kbps);
     TEST_ASSERT_EQUAL_DOUBLE(92.5, st2.crf.vmaf);
     TEST_ASSERT_TRUE(st2.crf.escalated);
 

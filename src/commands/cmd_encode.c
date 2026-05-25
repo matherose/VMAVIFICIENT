@@ -62,6 +62,7 @@ typedef struct {
     const char *cache_dir; /* explicit --cache-dir; NULL → default */
     vmav_preset_t preset;
     int crf;          /* > 0 → use directly, skip CRF search */
+    int bitrate;      /* > 0 → VBR mode at this kbps, skip CRF entirely */
     int target_vmaf;  /* 0 → derive from preset + resolution */
     int crf_min;      /* 0 → use VMAV_CRF_MIN */
     int crf_max;      /* 0 → use VMAV_CRF_MAX */
@@ -150,6 +151,9 @@ static void print_help(FILE *out) {
           "  --crf <int>               Use given CRF directly, skip CRF search\n"
           "  --crf-min <int>           Clamp CRF search lower bound\n"
           "  --crf-max <int>           Clamp CRF search upper bound\n"
+          "  --bitrate <kbps>          VBR mode at given bitrate;\n"
+          "                            skips CRF search entirely.\n"
+          "                            Mutually exclusive with --crf.\n"
           "  --cache-dir <path>        Where to keep intermediates +\n"
           "                            resume state (default:\n"
           "                            <input-dir>/.vmavificient-cache)\n"
@@ -239,11 +243,15 @@ static void print_plan(const encode_args_t *args,
             "grain         score=%.3f variance=%.3f\n",
             state->grain.score,
             state->grain.variance);
-    fprintf(stdout,
-            "CRF           %d (VMAF=%.2f%s)\n",
-            state->crf.crf,
-            state->crf.vmaf,
-            state->crf.escalated ? ", escalated" : "");
+    if (state->crf.bitrate_kbps > 0) {
+        fprintf(stdout, "rate control  VBR @ %d kbps\n", state->crf.bitrate_kbps);
+    } else {
+        fprintf(stdout,
+                "rate control  CRF %d (VMAF=%.2f%s)\n",
+                state->crf.crf,
+                state->crf.vmaf,
+                state->crf.escalated ? ", escalated" : "");
+    }
     if (state->tmdb.tmdb_id > 0) {
         fprintf(stdout,
                 "TMDB          %s (%d) [id=%d, lang=%s]\n",
@@ -434,6 +442,10 @@ static vmav_status_t parse_args(int argc, char **argv, encode_args_t *out) {
             out->crf = atoi(argv[++i]);
             continue;
         }
+        if (strcmp(arg, "--bitrate") == 0 && i + 1 < argc) {
+            out->bitrate = atoi(argv[++i]);
+            continue;
+        }
         if (strcmp(arg, "--crf-min") == 0 && i + 1 < argc) {
             out->crf_min = atoi(argv[++i]);
             continue;
@@ -528,6 +540,9 @@ static vmav_status_t parse_args(int argc, char **argv, encode_args_t *out) {
     }
     if (out->input == NULL) {
         return VMAV_ERR(VMAV_ERR_BAD_ARG, "missing input file");
+    }
+    if (out->crf > 0 && out->bitrate > 0) {
+        return VMAV_ERR(VMAV_ERR_BAD_ARG, "--crf and --bitrate are mutually exclusive");
     }
     return VMAV_OK_STATUS;
 }
@@ -787,15 +802,25 @@ int cmd_encode_run(int argc, char **argv) {
     }
 
     /* ---- Step: CRF search ----
-     * Three paths:
+     * Four paths:
      *   * state.crf already COMPLETE → reuse from cache
-     *   * args.crf > 0 → user override, persist as the chosen value
+     *   * args.bitrate > 0 → VBR override, skip CRF search entirely
+     *   * args.crf > 0 → CRF override, persist as the chosen value
      *   * else → run vmav_crf_search, persist result */
     if (state.crf.status != VMAV_STEP_COMPLETE) {
-        if (args.crf > 0) {
+        if (args.bitrate > 0) {
+            VMAV_LOG_INFO("encode: using user-provided bitrate=%d kbps (VBR, skipping CRF search)",
+                          args.bitrate);
+            state.crf.status = VMAV_STEP_COMPLETE;
+            state.crf.crf = 0;
+            state.crf.bitrate_kbps = args.bitrate;
+            state.crf.vmaf = 0.0;
+            state.crf.escalated = false;
+        } else if (args.crf > 0) {
             VMAV_LOG_INFO("encode: using user-provided CRF=%d (skipping search)", args.crf);
             state.crf.status = VMAV_STEP_COMPLETE;
             state.crf.crf = args.crf;
+            state.crf.bitrate_kbps = 0;
             state.crf.vmaf = 0.0;
             state.crf.escalated = false;
         } else {
@@ -825,6 +850,7 @@ int cmd_encode_run(int argc, char **argv) {
             }
             state.crf.status = VMAV_STEP_COMPLETE;
             state.crf.crf = r.crf;
+            state.crf.bitrate_kbps = 0;
             state.crf.vmaf = r.vmaf;
             state.crf.escalated = r.escalated;
             VMAV_LOG_INFO("encode: crf_search result CRF=%d VMAF=%.2f (escalated=%s)",
@@ -839,9 +865,17 @@ int cmd_encode_run(int argc, char **argv) {
             goto cleanup;
         }
     } else {
-        VMAV_LOG_INFO("encode: CRF=%d (from cache, VMAF=%.2f)", state.crf.crf, state.crf.vmaf);
+        if (state.crf.bitrate_kbps > 0) {
+            VMAV_LOG_INFO("encode: bitrate=%d kbps (from cache, VBR mode)",
+                          state.crf.bitrate_kbps);
+        } else {
+            VMAV_LOG_INFO("encode: CRF=%d (from cache, VMAF=%.2f)",
+                          state.crf.crf,
+                          state.crf.vmaf);
+        }
     }
     const int chosen_crf = state.crf.crf;
+    const int chosen_bitrate = state.crf.bitrate_kbps;
     const double chosen_vmaf = state.crf.vmaf;
 
     /* Finalize mkv_path early so --dry-run / --grain-only print the
@@ -1124,6 +1158,7 @@ int cmd_encode_run(int argc, char **argv) {
             .output_path = ivf_path,
             .preset = args.preset,
             .crf = chosen_crf,
+            .target_bitrate_kbps = chosen_bitrate,
         };
         vmav_video_encode_result_t ve_result;
         st = vmav_video_encode(&ve_spec, &ve_result);
@@ -1243,9 +1278,14 @@ int cmd_encode_run(int argc, char **argv) {
         VMAV_LOG_INFO("encode: final_mux (cached) → %s", state.mux.output_path);
     }
 
-    fprintf(stdout, "Encoded %s → %s (CRF %d", args.input, mkv_path, chosen_crf);
-    if (chosen_vmaf > 0.0) {
-        fprintf(stdout, ", VMAF %.2f", chosen_vmaf);
+    fprintf(stdout, "Encoded %s → %s (", args.input, mkv_path);
+    if (chosen_bitrate > 0) {
+        fprintf(stdout, "VBR %d kbps", chosen_bitrate);
+    } else {
+        fprintf(stdout, "CRF %d", chosen_crf);
+        if (chosen_vmaf > 0.0) {
+            fprintf(stdout, ", VMAF %.2f", chosen_vmaf);
+        }
     }
     fprintf(stdout, ", %zu audio, %zu subs", audio_mux_count, sub_mux_count);
     if (hdr.has_dolby_vision) {
