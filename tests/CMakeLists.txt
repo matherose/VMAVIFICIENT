@@ -150,6 +150,10 @@ vmav_add_unit_test(NAME test_final_mux
     SOURCES unit/test_final_mux.c
     LINK_LIBS vmav::encode)
 
+vmav_add_unit_test(NAME test_encode_state
+    SOURCES unit/test_encode_state.c
+    LINK_LIBS vmav::encode)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     # test_subproc: invokes POSIX-only binaries (/bin/echo, /bin/sh).
     # test_cache: relies on env-var cache-dir override and `rm -rf`

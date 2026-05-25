@@ -39,7 +39,8 @@
 
 typedef struct {
     const char *input;
-    const char *output; /* explicit -o/--output; NULL → derived */
+    const char *output;    /* explicit -o/--output; NULL → derived */
+    const char *cache_dir; /* explicit --cache-dir; NULL → default */
     vmav_preset_t preset;
     int crf;         /* > 0 → use directly, skip CRF search */
     int target_vmaf; /* 0 → derive from preset + resolution */
@@ -62,6 +63,9 @@ static void print_help(FILE *out) {
           "  --crf <int>               Use given CRF directly, skip CRF search\n"
           "  --crf-min <int>           Clamp CRF search lower bound\n"
           "  --crf-max <int>           Clamp CRF search upper bound\n"
+          "  --cache-dir <path>        Where to keep intermediates +\n"
+          "                            resume state (default:\n"
+          "                            <input-dir>/.vmavificient-cache)\n"
           "  -h, --help                Show this help\n",
           out);
 }
@@ -101,6 +105,10 @@ static vmav_status_t parse_args(int argc, char **argv, encode_args_t *out) {
         }
         if (strcmp(arg, "--crf-max") == 0 && i + 1 < argc) {
             out->crf_max = atoi(argv[++i]);
+            continue;
+        }
+        if (strcmp(arg, "--cache-dir") == 0 && i + 1 < argc) {
+            out->cache_dir = argv[++i];
             continue;
         }
         if (arg[0] == '-') {

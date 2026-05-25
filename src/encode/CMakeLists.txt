@@ -6,7 +6,8 @@ add_library(vmav_encode STATIC
     video_encode.c
     final_mux.c
     audio_encode.c
-    subtitle_convert.c)
+    subtitle_convert.c
+    encode_state.c)
 
 add_library(vmav::encode ALIAS vmav_encode)
 
@@ -22,6 +23,7 @@ target_link_libraries(vmav_encode
         vmav::tp::zlib
         vmav::tp::svtav1
         vmav::tp::vmaf
+        vmav::tp::cjson
     PUBLIC
         vmav::foundations
         vmav::util
