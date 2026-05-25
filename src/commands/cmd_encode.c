@@ -18,6 +18,7 @@
  *     muxing in the encoder output path.
  *   * Companion-HD downscale output. */
 
+#include "vmavificient/vmav_analysis.h"
 #include "vmavificient/vmav_audio.h"
 #include "vmavificient/vmav_crf_search.h"
 #include "vmavificient/vmav_crop.h"
@@ -239,6 +240,31 @@ int cmd_encode_run(int argc, char **argv) {
                   state.crop.width,
                   state.crop.height,
                   state.crop.is_meaningful ? "trim black bars" : "no-op / passthrough");
+
+    /* ---- Step: grain analysis ---- */
+    if (state.grain.status != VMAV_STEP_COMPLETE) {
+        VMAV_LOG_INFO("encode: analyzing grain via lavfi signalstats");
+        vmav_grain_score_t grain;
+        const vmav_status_t gst = vmav_grain_analyze(args.input, &grain);
+        if (!vmav_status_ok(gst)) {
+            fprintf(stderr, "vmavificient encode: grain_analyze: %s\n", gst.msg);
+            state.grain.status = VMAV_STEP_FAILED;
+            (void)vmav_encode_state_save(cache_dir, &state);
+            vmav_encode_state_free(&state);
+            return 1;
+        }
+        state.grain.status = VMAV_STEP_COMPLETE;
+        state.grain.score = grain.score;
+        state.grain.variance = grain.variance;
+        const vmav_status_t sst = vmav_encode_state_save(cache_dir, &state);
+        if (!vmav_status_ok(sst)) {
+            fprintf(stderr, "vmavificient encode: state_save (grain): %s\n", sst.msg);
+            vmav_encode_state_free(&state);
+            return 1;
+        }
+    }
+    VMAV_LOG_INFO(
+        "encode: grain score = %.3f (variance=%.3f)", state.grain.score, state.grain.variance);
 
     /* Choose CRF: either user-provided or via CRF search. */
     int chosen_crf = args.crf;

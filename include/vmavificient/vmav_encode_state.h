@@ -53,9 +53,9 @@ typedef struct {
 typedef struct {
     vmav_step_status_t status;
     /* Grain score in [0..1]; mapped to SVT-AV1's film_grain knob by
-     * vmav_svtav1_film_grain_from_score. Negative means "uninitialized
-     * by the JSON load path"; callers should treat as PENDING. */
+     * vmav_svtav1_film_grain_from_score. Mirrors vmav_grain_score_t. */
     double score;
+    double variance; /* per-window spread; 0 in the m5 baseline impl */
 } vmav_state_grain_t;
 
 typedef struct {

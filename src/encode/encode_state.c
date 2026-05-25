@@ -219,6 +219,7 @@ static cJSON *grain_to_json(const vmav_state_grain_t *g) {
     }
     cJSON_AddItemToObject(o, "status", step_to_json(g->status));
     cJSON_AddNumberToObject(o, "score", g->score);
+    cJSON_AddNumberToObject(o, "variance", g->variance);
     return o;
 }
 
@@ -229,6 +230,7 @@ static void grain_from_json(const cJSON *root, vmav_state_grain_t *out) {
     }
     out->status = json_to_step(o, "status");
     out->score = vmav_json_get_number(o, "score", 0.0);
+    out->variance = vmav_json_get_number(o, "variance", 0.0);
 }
 
 static cJSON *crf_to_json(const vmav_state_crf_t *c) {
