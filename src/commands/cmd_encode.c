@@ -68,6 +68,8 @@ typedef struct {
     int tmdb_id;      /* > 0 → look up TMDB; 0 with `blind` flag → skip */
     bool blind;       /* explicit "no TMDB lookup" */
     bool config_mode; /* --config → interactive setup, then exit */
+    bool dry_run;     /* --dry-run → run through CRF + naming, print plan, exit */
+    bool grain_only;  /* --grain-only → like --dry-run + dump preset knobs */
     bool show_help;
     /* Naming overrides — applied only when scene-style naming is in
      * effect (i.e. with --tmdb). Defaults of UNKNOWN/0 mean "use
@@ -150,6 +152,12 @@ static void print_help(FILE *out) {
           "                            <input-stem>.av1.mkv.\n"
           "  --config                  Interactive setup of TMDB API key\n"
           "                            and release group, then exit.\n"
+          "  --dry-run                 Run analysis (crop, grain, CRF\n"
+          "                            search) + naming, print the plan,\n"
+          "                            then exit. No files written.\n"
+          "  --grain-only              Like --dry-run, plus dump the\n"
+          "                            resolved preset metadata (grain\n"
+          "                            mode, VMAF target, bitrate tiers).\n"
           "  -h, --help                Show this help\n"
           "\n"
           "Quality preset shortcuts (each equivalent to --preset <name>):\n"
@@ -175,6 +183,119 @@ static void print_help(FILE *out) {
  * --animation / --super35_* / --imax_* shorthand flags. */
 static vmav_status_t set_preset_shortcut(encode_args_t *out, const char *name) {
     return vmav_preset_from_string(name, &out->preset);
+}
+
+/* Render the resolved encode plan to stdout — used by --dry-run and
+ * --grain-only. Caller has run probe/tracks/hdr + crop/grain/CRF and
+ * built mkv_path; we just turn the assembled state into something
+ * humans can sanity-check before committing to a multi-hour encode. */
+static void print_plan(const encode_args_t *args,
+                       const vmav_encode_state_t *state,
+                       const vmav_media_info_t *info,
+                       const vmav_hdr_info_t *hdr,
+                       const vmav_media_tracks_t *tracks,
+                       const char *mkv_path) {
+    fputs("\n=== Encode plan ===\n", stdout);
+    fprintf(stdout, "input         %s\n", args->input);
+    fprintf(stdout, "output        %s\n", mkv_path);
+    fprintf(stdout, "preset        %s\n", vmav_preset_name(args->preset));
+    fprintf(stdout,
+            "video         %dx%d @ %.3f fps, %s, bit_rate=%lld\n",
+            info->width,
+            info->height,
+            info->framerate,
+            info->codec_name,
+            (long long)info->bit_rate);
+    if (hdr->has_hdr10 || hdr->has_dolby_vision) {
+        fprintf(stdout,
+                "HDR           %s%s\n",
+                hdr->has_hdr10 ? "HDR10 " : "",
+                hdr->has_dolby_vision ? "DolbyVision " : "");
+    } else {
+        fputs("HDR           SDR\n", stdout);
+    }
+    fprintf(stdout,
+            "crop          (%d,%d) %dx%d%s\n",
+            state->crop.x,
+            state->crop.y,
+            state->crop.width,
+            state->crop.height,
+            state->crop.is_meaningful ? " (will trim)" : " (no-op)");
+    fprintf(stdout,
+            "grain         score=%.3f variance=%.3f\n",
+            state->grain.score,
+            state->grain.variance);
+    fprintf(stdout,
+            "CRF           %d (VMAF=%.2f%s)\n",
+            state->crf.crf,
+            state->crf.vmaf,
+            state->crf.escalated ? ", escalated" : "");
+    if (state->tmdb.tmdb_id > 0) {
+        fprintf(stdout,
+                "TMDB          %s (%d) [id=%d, lang=%s]\n",
+                state->tmdb.title,
+                state->tmdb.year,
+                state->tmdb.tmdb_id,
+                state->tmdb.original_lang);
+    } else {
+        fputs("TMDB          (skipped, blind naming)\n", stdout);
+    }
+    fprintf(stdout, "audio tracks  %zu\n", tracks->audio_count);
+    for (size_t i = 0; i < tracks->audio_count; i++) {
+        const vmav_track_t *t = &tracks->audio[i];
+        fprintf(stdout,
+                "  [%zu] %s %s %dch  %s\n",
+                i,
+                t->language,
+                t->codec_name,
+                t->channels,
+                t->name[0] != '\0' ? t->name : "");
+    }
+    fprintf(stdout, "sub tracks    %zu\n", tracks->subtitle_count);
+    for (size_t i = 0; i < tracks->subtitle_count; i++) {
+        const vmav_track_t *t = &tracks->subtitle[i];
+        fprintf(stdout,
+                "  [%zu] %s %s%s%s\n",
+                i,
+                t->language,
+                t->codec_name,
+                t->is_forced ? " forced" : "",
+                t->is_sdh ? " SDH" : "");
+    }
+    fputs("===================\n", stdout);
+}
+
+/* --grain-only adds a preset-knobs dump to the --dry-run plan. We
+ * print the user-visible metadata (grain mode, VMAF target, bitrate
+ * tiers) from vmav_preset_info — full SVT-AV1-HDR knob dump (50+
+ * fields) is intentionally not exposed publicly yet. */
+static void print_preset_dump(vmav_preset_t preset, int video_height, double grain_score) {
+    const vmav_preset_info_t *p = vmav_preset_info(preset);
+    if (p == NULL) {
+        return;
+    }
+    fputs("\n=== Resolved preset knobs ===\n", stdout);
+    fprintf(stdout, "name              %s (%s)\n", p->cli_name, p->display_name);
+    fprintf(stdout,
+            "grain mode        %s\n",
+            p->grain_mode == VMAV_GRAIN_FILM ? "FILM (analyze + denoise + re-synth)"
+                                             : "SYNTHETIC (content-agnostic overlay)");
+    fprintf(stdout, "VMAF target       4K=%d, HD=%d\n", p->vmaf_target_4k, p->vmaf_target_hd);
+    fprintf(stdout,
+            "bitrate 4K kbps   grainy=%d clean=%d animation=%d\n",
+            p->bitrate_4k_grainy,
+            p->bitrate_4k_clean,
+            p->bitrate_4k_animation);
+    fprintf(stdout,
+            "bitrate HD kbps   grainy=%d clean=%d animation=%d\n",
+            p->bitrate_hd_grainy,
+            p->bitrate_hd_clean,
+            p->bitrate_hd_animation);
+    fprintf(stdout,
+            "resolved          target_vmaf=%d, target_bitrate=%d kbps\n",
+            vmav_preset_target_vmaf(preset, video_height),
+            vmav_preset_target_bitrate(preset, video_height, grain_score));
+    fputs("=============================\n", stdout);
 }
 
 /* `--config` interactive setup. Loads the current config (if any) so
@@ -321,6 +442,14 @@ static vmav_status_t parse_args(int argc, char **argv, encode_args_t *out) {
         }
         if (strcmp(arg, "--config") == 0) {
             out->config_mode = true;
+            continue;
+        }
+        if (strcmp(arg, "--dry-run") == 0) {
+            out->dry_run = true;
+            continue;
+        }
+        if (strcmp(arg, "--grain-only") == 0) {
+            out->grain_only = true;
             continue;
         }
         /* Source overrides (12 flags). */
@@ -670,6 +799,61 @@ int cmd_encode_run(int argc, char **argv) {
     const int chosen_crf = state.crf.crf;
     const double chosen_vmaf = state.crf.vmaf;
 
+    /* Finalize mkv_path early so --dry-run / --grain-only print the
+     * actual path that a real encode would target. If args.output was
+     * given, mkv_path is already set; if --tmdb completed, build a
+     * scene-style name; else use the <input-stem>.av1.mkv fallback. */
+    if (mkv_path[0] == '\0') {
+        if (state.tmdb.tmdb_id > 0) {
+            const vmav_naming_lang_tag_t lang_tag =
+                args.lang_override_set
+                    ? args.lang_override
+                    : vmav_naming_lang_tag(&tracks, state.tmdb.original_lang, fv);
+            const vmav_naming_source_t source = args.source_override_set
+                                                    ? args.source_override
+                                                    : vmav_naming_detect_source(args.input);
+            vmav_config_t cfg;
+            vmav_config_init(&cfg);
+            (void)vmav_config_load(&cfg);
+            const char *release_group = cfg.release_group[0] != '\0' ? cfg.release_group : "GROUP";
+            const vmav_status_t nst = vmav_naming_build(mkv_path,
+                                                        sizeof(mkv_path),
+                                                        state.tmdb.title,
+                                                        state.tmdb.year,
+                                                        lang_tag,
+                                                        info.height,
+                                                        &hdr,
+                                                        source,
+                                                        release_group);
+            if (!vmav_status_ok(nst)) {
+                fprintf(stderr, "vmavificient encode: naming_build: %s\n", nst.msg);
+                exit_code = 1;
+                goto cleanup;
+            }
+        } else {
+            if (replace_extension(mkv_path, sizeof(mkv_path), args.input, ".av1.mkv") == 0) {
+                fprintf(stderr, "vmavificient encode: input path too long\n");
+                exit_code = 1;
+                goto cleanup;
+            }
+        }
+        VMAV_LOG_INFO("encode: output path = %s", mkv_path);
+    }
+
+    /* ---- Dry-run / grain-only early exit ----
+     * At this point we know everything the user cares about for the
+     * "what would this encode do?" question. Print the plan, optional
+     * preset dump, and skip every step that touches disk. */
+    if (args.dry_run || args.grain_only) {
+        print_plan(&args, &state, &info, &hdr, &tracks, mkv_path);
+        if (args.grain_only) {
+            print_preset_dump(args.preset, info.height, state.grain.score);
+        }
+        fputs("\n(dry-run, no files written)\n", stdout);
+        exit_code = 0;
+        goto cleanup;
+    }
+
     /* ---- Step: audio (per-track) ----
      * For each track we look up its state entry by stream_index. If
      * COMPLETE, we trust the cached output_path; otherwise we encode
@@ -922,52 +1106,6 @@ int cmd_encode_run(int argc, char **argv) {
         VMAV_LOG_INFO("encode: video_encode (cached) → %s [%lld frames]",
                       state.video.output_path,
                       (long long)state.video.frame_count);
-    }
-
-    /* Finalize mkv_path. If the user provided -o we already populated
-     * it before the steps. Otherwise we decide here:
-     *   * tmdb_id > 0: scene-style name via vmav_naming_build, using
-     *     TMDB title + year, the language tag computed from the audio
-     *     tracks + TMDB original_language + the detected French
-     *     variant, the input's source markers from the filename, and
-     *     the release_group from config.ini.
-     *   * else: <input-stem>.av1.mkv as the blind fallback. */
-    if (mkv_path[0] == '\0') {
-        if (state.tmdb.tmdb_id > 0) {
-            /* Per-flag overrides win when set; otherwise auto-detect. */
-            const vmav_naming_lang_tag_t lang_tag =
-                args.lang_override_set
-                    ? args.lang_override
-                    : vmav_naming_lang_tag(&tracks, state.tmdb.original_lang, fv);
-            const vmav_naming_source_t source = args.source_override_set
-                                                    ? args.source_override
-                                                    : vmav_naming_detect_source(args.input);
-            vmav_config_t cfg;
-            vmav_config_init(&cfg);
-            (void)vmav_config_load(&cfg);
-            const char *release_group = cfg.release_group[0] != '\0' ? cfg.release_group : "GROUP";
-            const vmav_status_t nst = vmav_naming_build(mkv_path,
-                                                        sizeof(mkv_path),
-                                                        state.tmdb.title,
-                                                        state.tmdb.year,
-                                                        lang_tag,
-                                                        info.height,
-                                                        &hdr,
-                                                        source,
-                                                        release_group);
-            if (!vmav_status_ok(nst)) {
-                fprintf(stderr, "vmavificient encode: naming_build: %s\n", nst.msg);
-                exit_code = 1;
-                goto cleanup;
-            }
-        } else {
-            if (replace_extension(mkv_path, sizeof(mkv_path), args.input, ".av1.mkv") == 0) {
-                fprintf(stderr, "vmavificient encode: input path too long\n");
-                exit_code = 1;
-                goto cleanup;
-            }
-        }
-        VMAV_LOG_INFO("encode: output path = %s", mkv_path);
     }
 
     /* ---- Step: final mux ----
