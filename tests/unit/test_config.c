@@ -61,8 +61,13 @@ void setUp(void) {
     }
     /* vmav_path_config_dir on POSIX consults XDG_CONFIG_HOME first;
      * on macOS it falls back to $HOME/Library/Application Support.
-     * We isolate by setting XDG_CONFIG_HOME on Linux, HOME on macOS. */
-#ifdef __APPLE__
+     * On Windows we use VMAV_CONFIG_DIR (added so test_config can
+     * sandbox — FOLDERID_RoamingAppData on Wine CI runners isn't
+     * always writable, and there's no env-var-based redirection of
+     * SHGetKnownFolderPath). */
+#ifdef _WIN32
+    VMAV_SETENV("VMAV_CONFIG_DIR", g_workdir, 1);
+#elif defined(__APPLE__)
     VMAV_SETENV("HOME", g_workdir, 1);
 #else
     VMAV_SETENV("XDG_CONFIG_HOME", g_workdir, 1);

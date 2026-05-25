@@ -250,11 +250,25 @@ known_folder_path(const KNOWNFOLDERID *id, const char *subdir, char *out, size_t
     return vmav_path_join(out, out_size, folder_utf8, subdir);
 }
 
+/* Honor VMAV_CONFIG_DIR / VMAV_CACHE_DIR overrides on Windows. This
+ * exists primarily so test_config (which can't redirect FOLDERID_*)
+ * can sandbox; it's also a reasonable user-facing escape hatch for
+ * environments where %APPDATA% is read-only (e.g. bare Wine prefixes
+ * on CI). POSIX side already has XDG_CONFIG_HOME / XDG_CACHE_HOME for
+ * the same purpose; this matches that contract. */
 vmav_status_t vmav_path_config_dir(char *out, size_t out_size) {
+    const char *override = getenv("VMAV_CONFIG_DIR");
+    if (override != NULL && override[0] != '\0') {
+        return vmav_path_join(out, out_size, override, "vmavificient");
+    }
     return known_folder_path(&FOLDERID_RoamingAppData, "vmavificient", out, out_size);
 }
 
 vmav_status_t vmav_path_cache_dir(char *out, size_t out_size) {
+    const char *override = getenv("VMAV_CACHE_DIR");
+    if (override != NULL && override[0] != '\0') {
+        return vmav_path_join(out, out_size, override, "vmavificient/Cache");
+    }
     return known_folder_path(&FOLDERID_LocalAppData, "vmavificient/Cache", out, out_size);
 }
 
