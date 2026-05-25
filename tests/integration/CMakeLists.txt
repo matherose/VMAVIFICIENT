@@ -13,6 +13,10 @@ vmav_add_integration_test(NAME it_encode_smoke
     SOURCES it_encode_smoke.c
     LINK_LIBS vmav::media vmav::foundations)
 
+vmav_add_integration_test(NAME it_encode_resume
+    SOURCES it_encode_resume.c
+    LINK_LIBS vmav::media vmav::foundations vmav::encode)
+
 # Phase 5 m3 (it_pgs_to_srt) intentionally deferred to post-v2.0.
 # Generating a real PGS bitstream programmatically needs either
 # ffmpeg's pgssub *encoder* (only the decoder ships in stock builds)
