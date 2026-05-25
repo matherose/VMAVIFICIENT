@@ -1,14 +1,27 @@
 /* `vmavificient encode <input>` — production encode orchestration.
  *
- * Pipeline:
- *   1. Probe input    via vmav_media_probe (resolution, codec).
- *   2. Enumerate      via vmav_media_tracks_probe + vmav_hdr_probe.
- *   3. CRF search     via vmav_crf_search (skipped if --crf is given).
- *   4. Video encode   via vmav_video_encode → IVF intermediate.
- *   5. Audio encode   via vmav_audio_encode_track per audio track → .opus.
- *   6. Subtitle OCR   via vmav_subtitle_convert_pgs per PGS track → .srt.
- *   7. DV RPU extract via vmav_rpu_extract if input is Dolby Vision.
- *   8. Final mux      via vmav_final_mux → output .mkv.
+ * Pipeline (resumable via <cache-dir>/state.json):
+ *   1. Probe input          via vmav_media_probe.
+ *   2. Enumerate tracks/HDR via vmav_media_tracks_probe + vmav_hdr_probe.
+ *   3. Crop detection       via vmav_crop_probe       → state.crop.
+ *   4. Grain analysis       via vmav_grain_analyze    → state.grain.
+ *   5. CRF search           via vmav_crf_search       → state.crf.
+ *      (or --crf bypass; either path persists the chosen CRF.)
+ *   6. Audio encode         per track, vmav_audio_encode_track → state.audio[].
+ *   7. Subtitle OCR         per PGS track, vmav_subtitle_convert_pgs
+ *                                                     → state.subs[].
+ *   8. DV RPU extract       best-effort sidecar if input is DV.
+ *   9. Video encode         vmav_video_encode → IVF intermediate
+ *                                                     → state.video.
+ *  10. Final mux            vmav_final_mux → .mkv      → state.mux.
+ *
+ * Order rationale: audio + subs come BEFORE video so cheap-to-fail
+ * steps (audio decode error, OCR crash, missing tessdata) surface in
+ * minutes rather than after a multi-hour video encode commits.
+ *
+ * Each step checks state.X.status == COMPLETE before running. A
+ * power-cut or Ctrl-C mid-encode is resumable: the next invocation
+ * picks up at the first non-complete step.
  *
  * Still deferred:
  *   * Text-subtitle passthrough (SRT/ASS/VTT) — needs an ffmpeg-extract
@@ -266,73 +279,14 @@ int cmd_encode_run(int argc, char **argv) {
     VMAV_LOG_INFO(
         "encode: grain score = %.3f (variance=%.3f)", state.grain.score, state.grain.variance);
 
-    /* Choose CRF: either user-provided or via CRF search. */
-    int chosen_crf = args.crf;
-    double chosen_vmaf = 0.0;
-    if (chosen_crf <= 0) {
-        const int vmaf_target = args.target_vmaf > 0
-                                    ? args.target_vmaf
-                                    : vmav_preset_target_vmaf(args.preset, info.height);
-        VMAV_LOG_INFO("encode: CRF search starting (preset=%s, target VMAF=%d, %dx%d)",
-                      vmav_preset_name(args.preset),
-                      vmaf_target,
-                      info.width,
-                      info.height);
-        vmav_crf_search_spec_t spec = {
-            .input_path = args.input,
-            .preset = args.preset,
-            .vmaf_target = vmaf_target,
-            .crf_min = args.crf_min,
-            .crf_max = args.crf_max,
-        };
-        vmav_crf_search_result_t r;
-        st = vmav_crf_search(&spec, &r);
-        if (!vmav_status_ok(st)) {
-            fprintf(stderr, "vmavificient encode: crf_search: %s\n", st.msg);
-            return 1;
-        }
-        chosen_crf = r.crf;
-        chosen_vmaf = r.vmaf;
-        VMAV_LOG_INFO("encode: crf_search result CRF=%d VMAF=%.2f (escalated=%s)",
-                      chosen_crf,
-                      chosen_vmaf,
-                      r.escalated ? "yes" : "no");
-    } else {
-        VMAV_LOG_INFO("encode: using user-provided CRF=%d (skipping search)", chosen_crf);
-    }
-
-    /* Video encode. */
-    vmav_video_encode_spec_t ve_spec = {
-        .input_path = args.input,
-        .output_path = ivf_path,
-        .preset = args.preset,
-        .crf = chosen_crf,
-    };
-    vmav_video_encode_result_t ve_result;
-    st = vmav_video_encode(&ve_spec, &ve_result);
-    if (!vmav_status_ok(st)) {
-        fprintf(stderr, "vmavificient encode: video_encode: %s\n", st.msg);
-        return 1;
-    }
-    VMAV_LOG_INFO("encode: video_encode wrote %lld bytes (%lld frames) to %s",
-                  (long long)ve_result.bytes_written,
-                  (long long)ve_result.frames_encoded,
-                  ivf_path);
-
-    /* === Audio + subtitle + DV RPU side passes ============================
-     * These all run side-by-side off the same source file. Each produces
-     * a sidecar file that final_mux pulls into the output MKV. */
-
+    /* === Up-front: tracks + naming + HDR + base path =====================
+     * Hoisted ahead of the per-step blocks so subsequent steps (audio,
+     * subs, RPU, mux) can reference them uniformly. */
     int exit_code = 0;
 
-    /* Declare every cleanup-touched local up-front so the `goto cleanup`
-     * paths below never reach the free() block with garbage pointers
-     * (Clang's -Wsometimes-uninitialized catches that otherwise).
-     *
-     * `path_buf_t` typedef avoids the awkward `char (*x)[N]`
-     * pointer-to-array declarator, which clang-format 18 and 22
-     * disagree on (CI runs 18). With the typedef both versions see
-     * a plain `path_buf_t *x` and produce identical output. */
+    /* path_buf_t typedef sidesteps a clang-format 18/22 disagreement on
+     * the `char (*x)[N]` pointer-to-array declarator; both versions
+     * format `path_buf_t *x` identically. */
     typedef char path_buf_t[1024];
     vmav_mux_audio_t *mux_audio = NULL;
     path_buf_t *audio_paths = NULL;
@@ -341,7 +295,6 @@ int cmd_encode_run(int argc, char **argv) {
     size_t audio_mux_count = 0;
     size_t sub_mux_count = 0;
 
-    /* Track enumeration + naming context (French variant from filename). */
     vmav_media_tracks_t tracks = {0};
     st = vmav_media_tracks_probe(args.input, &tracks);
     if (!vmav_status_ok(st)) {
@@ -351,11 +304,10 @@ int cmd_encode_run(int argc, char **argv) {
     }
     const vmav_naming_french_variant_t fv = vmav_naming_detect_french_variant(args.input);
 
-    /* HDR probe — drives whether we need a DV RPU sidecar. */
     vmav_hdr_info_t hdr = {0};
     (void)vmav_hdr_probe(args.input, &hdr); /* best-effort; not fatal */
 
-    /* Strip the .ivf to get a shared base for per-track outputs:
+    /* Strip the .ivf from ivf_path to share a base with sidecar files:
      *   <base>.<lang>.opus
      *   <base>.<lang>.<full|forced|sdh>.srt
      *   <base>.rpu.bin */
@@ -368,25 +320,100 @@ int cmd_encode_run(int argc, char **argv) {
         }
     }
 
-    /* --- Audio: one opus per audio track. --- */
+    /* ---- Step: CRF search ----
+     * Three paths:
+     *   * state.crf already COMPLETE → reuse from cache
+     *   * args.crf > 0 → user override, persist as the chosen value
+     *   * else → run vmav_crf_search, persist result */
+    if (state.crf.status != VMAV_STEP_COMPLETE) {
+        if (args.crf > 0) {
+            VMAV_LOG_INFO("encode: using user-provided CRF=%d (skipping search)", args.crf);
+            state.crf.status = VMAV_STEP_COMPLETE;
+            state.crf.crf = args.crf;
+            state.crf.vmaf = 0.0;
+            state.crf.escalated = false;
+        } else {
+            const int vmaf_target = args.target_vmaf > 0
+                                        ? args.target_vmaf
+                                        : vmav_preset_target_vmaf(args.preset, info.height);
+            VMAV_LOG_INFO("encode: CRF search starting (preset=%s, target VMAF=%d, %dx%d)",
+                          vmav_preset_name(args.preset),
+                          vmaf_target,
+                          info.width,
+                          info.height);
+            vmav_crf_search_spec_t spec = {
+                .input_path = args.input,
+                .preset = args.preset,
+                .vmaf_target = vmaf_target,
+                .crf_min = args.crf_min,
+                .crf_max = args.crf_max,
+            };
+            vmav_crf_search_result_t r;
+            const vmav_status_t cst = vmav_crf_search(&spec, &r);
+            if (!vmav_status_ok(cst)) {
+                fprintf(stderr, "vmavificient encode: crf_search: %s\n", cst.msg);
+                state.crf.status = VMAV_STEP_FAILED;
+                (void)vmav_encode_state_save(cache_dir, &state);
+                exit_code = 1;
+                goto cleanup;
+            }
+            state.crf.status = VMAV_STEP_COMPLETE;
+            state.crf.crf = r.crf;
+            state.crf.vmaf = r.vmaf;
+            state.crf.escalated = r.escalated;
+            VMAV_LOG_INFO("encode: crf_search result CRF=%d VMAF=%.2f (escalated=%s)",
+                          r.crf,
+                          r.vmaf,
+                          r.escalated ? "yes" : "no");
+        }
+        const vmav_status_t sst = vmav_encode_state_save(cache_dir, &state);
+        if (!vmav_status_ok(sst)) {
+            fprintf(stderr, "vmavificient encode: state_save (crf): %s\n", sst.msg);
+            exit_code = 1;
+            goto cleanup;
+        }
+    } else {
+        VMAV_LOG_INFO("encode: CRF=%d (from cache, VMAF=%.2f)", state.crf.crf, state.crf.vmaf);
+    }
+    const int chosen_crf = state.crf.crf;
+    const double chosen_vmaf = state.crf.vmaf;
+
+    /* ---- Step: audio (per-track) ----
+     * For each track we look up its state entry by stream_index. If
+     * COMPLETE, we trust the cached output_path; otherwise we encode
+     * and append/update the state entry, then save. Failures abort
+     * the whole encode — losing one audio track is not recoverable
+     * in the current mux model. */
     if (tracks.audio_count > 0) {
-        mux_audio = calloc(tracks.audio_count, sizeof(*mux_audio));
         audio_paths = calloc(tracks.audio_count, sizeof(*audio_paths));
-        if (mux_audio == NULL || audio_paths == NULL) {
-            fprintf(stderr, "vmavificient encode: out of memory (audio)\n");
+        if (audio_paths == NULL) {
+            fprintf(stderr, "vmavificient encode: out of memory (audio_paths)\n");
             exit_code = 1;
             goto cleanup;
         }
         for (size_t i = 0; i < tracks.audio_count; i++) {
             const vmav_track_t *t = &tracks.audio[i];
+
+            /* Look up existing state entry for this stream. */
+            vmav_state_audio_t *st_audio = NULL;
+            for (size_t j = 0; j < state.audio_count; j++) {
+                if (state.audio[j].stream_index == t->stream_index) {
+                    st_audio = &state.audio[j];
+                    break;
+                }
+            }
+            if (st_audio != NULL && st_audio->status == VMAV_STEP_COMPLETE) {
+                snprintf(audio_paths[i], sizeof(audio_paths[i]), "%s", st_audio->output_path);
+                VMAV_LOG_INFO(
+                    "encode: audio[%zu] '%s' (cached) → %s", i, t->language, audio_paths[i]);
+                continue;
+            }
+
             vmav_audio_build_filename(
                 audio_paths[i], sizeof(audio_paths[i]), base, t->language, fv);
-            /* Disambiguate when multiple tracks share the same
-             * language + French-variant (the canonical schema produces
-             * one filename per <lang,fv> pair; a Blu-ray with two
-             * English audio dubs would otherwise have the second one
-             * overwrite the first). Inject `.<stream_index>` before
-             * the .opus extension only when we'd collide. */
+            /* Disambiguate multi-track-same-language collisions
+             * (Blu-rays often ship two English dubs; vmav_naming gives
+             * one filename per <lang,fv> pair). */
             for (size_t j = 0; j < i; j++) {
                 if (strcmp(audio_paths[j], audio_paths[i]) == 0) {
                     char *dot = strrchr(audio_paths[i], '.');
@@ -412,24 +439,53 @@ int cmd_encode_run(int argc, char **argv) {
             st = vmav_audio_encode_track(args.input, t, audio_paths[i], &aer);
             if (!vmav_status_ok(st)) {
                 fprintf(stderr, "vmavificient encode: audio[%zu]: %s\n", i, st.msg);
+                if (st_audio != NULL) {
+                    st_audio->status = VMAV_STEP_FAILED;
+                } else {
+                    vmav_state_audio_t fail = {0};
+                    fail.status = VMAV_STEP_FAILED;
+                    fail.stream_index = t->stream_index;
+                    (void)vmav_encode_state_add_audio(&state, &fail);
+                }
+                (void)vmav_encode_state_save(cache_dir, &state);
                 exit_code = 1;
                 goto cleanup;
             }
-            mux_audio[audio_mux_count].path = audio_paths[i];
-            mux_audio[audio_mux_count].language = t->language;
-            mux_audio[audio_mux_count].track_name = t->name[0] != '\0' ? t->name : NULL;
-            mux_audio[audio_mux_count].is_default = (audio_mux_count == 0);
-            audio_mux_count++;
+
+            vmav_state_audio_t entry = {0};
+            entry.status = VMAV_STEP_COMPLETE;
+            entry.stream_index = t->stream_index;
+            snprintf(entry.language, sizeof(entry.language), "%s", t->language);
+            snprintf(entry.title, sizeof(entry.title), "%s", t->name);
+            entry.is_default = (i == 0); /* first track of source is default */
+            snprintf(entry.output_path, sizeof(entry.output_path), "%s", audio_paths[i]);
+            if (st_audio != NULL) {
+                *st_audio = entry;
+            } else {
+                const vmav_status_t ast = vmav_encode_state_add_audio(&state, &entry);
+                if (!vmav_status_ok(ast)) {
+                    fprintf(stderr, "vmavificient encode: state_add_audio: %s\n", ast.msg);
+                    exit_code = 1;
+                    goto cleanup;
+                }
+            }
+            const vmav_status_t sst = vmav_encode_state_save(cache_dir, &state);
+            if (!vmav_status_ok(sst)) {
+                fprintf(stderr, "vmavificient encode: state_save (audio): %s\n", sst.msg);
+                exit_code = 1;
+                goto cleanup;
+            }
         }
     }
 
-    /* --- Subtitles: PGS → SRT via OCR; text subs deferred (need ffmpeg
-     *     stream-copy extraction, not in tree yet). --- */
+    /* ---- Step: subtitles (per-track PGS → SRT) ----
+     * Text subs are skipped (passthrough not yet wired). PGS that OCRs
+     * to zero events stays in state with subtitle_count=0 so resume
+     * doesn't re-OCR; the mux loop below skips zero-count entries. */
     if (tracks.subtitle_count > 0) {
-        mux_subs = calloc(tracks.subtitle_count, sizeof(*mux_subs));
         sub_paths = calloc(tracks.subtitle_count, sizeof(*sub_paths));
-        if (mux_subs == NULL || sub_paths == NULL) {
-            fprintf(stderr, "vmavificient encode: out of memory (subs)\n");
+        if (sub_paths == NULL) {
+            fprintf(stderr, "vmavificient encode: out of memory (sub_paths)\n");
             exit_code = 1;
             goto cleanup;
         }
@@ -443,60 +499,86 @@ int cmd_encode_run(int argc, char **argv) {
                               t->codec_name);
                 continue;
             }
-            vmav_subtitle_build_srt_filename(sub_paths[sub_mux_count],
-                                             sizeof(sub_paths[sub_mux_count]),
-                                             base,
-                                             t->language,
-                                             fv,
-                                             t->is_forced,
-                                             t->is_sdh);
-            VMAV_LOG_INFO(
-                "encode: subtitle[%zu] PGS '%s' → %s", i, t->language, sub_paths[sub_mux_count]);
+
+            vmav_state_sub_t *st_sub = NULL;
+            for (size_t j = 0; j < state.sub_count; j++) {
+                if (state.subs[j].stream_index == t->stream_index) {
+                    st_sub = &state.subs[j];
+                    break;
+                }
+            }
+            if (st_sub != NULL && st_sub->status == VMAV_STEP_COMPLETE) {
+                snprintf(sub_paths[i], sizeof(sub_paths[i]), "%s", st_sub->output_path);
+                VMAV_LOG_INFO("encode: subtitle[%zu] PGS '%s' (cached, %d events) → %s",
+                              i,
+                              t->language,
+                              st_sub->subtitle_count,
+                              sub_paths[i]);
+                continue;
+            }
+
+            vmav_subtitle_build_srt_filename(
+                sub_paths[i], sizeof(sub_paths[i]), base, t->language, fv, t->is_forced, t->is_sdh);
+            VMAV_LOG_INFO("encode: subtitle[%zu] PGS '%s' → %s", i, t->language, sub_paths[i]);
             vmav_subtitle_convert_t scr;
-            st = vmav_subtitle_convert_pgs(args.input,
-                                           t,
-                                           sub_paths[sub_mux_count],
-                                           /*tess_lang=*/NULL,
-                                           &scr);
+            st = vmav_subtitle_convert_pgs(args.input, t, sub_paths[i], NULL, &scr);
             if (!vmav_status_ok(st)) {
                 fprintf(stderr, "vmavificient encode: subtitle[%zu]: %s\n", i, st.msg);
+                if (st_sub != NULL) {
+                    st_sub->status = VMAV_STEP_FAILED;
+                } else {
+                    vmav_state_sub_t fail = {0};
+                    fail.status = VMAV_STEP_FAILED;
+                    fail.stream_index = t->stream_index;
+                    (void)vmav_encode_state_add_sub(&state, &fail);
+                }
+                (void)vmav_encode_state_save(cache_dir, &state);
                 exit_code = 1;
                 goto cleanup;
             }
-            /* A forced-subtitle track on a short clip can legitimately
-             * OCR to zero events (no forced caption appeared in this
-             * sample window). libavformat's srt demuxer then rejects
-             * the empty file as "invalid data", which would kill the
-             * mux. Drop the empty sidecar and skip adding it to the
-             * mux spec.
-             *
-             * `scr.subtitle_count` is left untouched when the convert
-             * skipped (output_path existed with non-zero size from a
-             * previous run), so we also need to honor `scr.skipped` —
-             * otherwise a re-mux that reuses cached SRTs would drop
-             * every subtitle track. */
+
+            /* 0 OCR events: file may be empty (libav's srt demuxer
+             * would reject it later) — remove it but persist the
+             * status so resume doesn't redo the work. */
             if (scr.subtitle_count == 0 && !scr.skipped) {
-                VMAV_LOG_INFO(
-                    "encode: subtitle[%zu] PGS '%s' produced 0 events — skipping (file removed)",
-                    i,
-                    t->language);
-                remove(sub_paths[sub_mux_count]);
-                continue;
+                VMAV_LOG_INFO("encode: subtitle[%zu] PGS '%s' produced 0 events — file removed",
+                              i,
+                              t->language);
+                remove(sub_paths[i]);
+                sub_paths[i][0] = '\0'; /* mux loop ignores empty output_path */
             }
-            mux_subs[sub_mux_count].path = sub_paths[sub_mux_count];
-            mux_subs[sub_mux_count].language = t->language;
-            mux_subs[sub_mux_count].track_name = t->name[0] != '\0' ? t->name : NULL;
-            mux_subs[sub_mux_count].is_forced = t->is_forced;
-            mux_subs[sub_mux_count].is_sdh = t->is_sdh;
-            sub_mux_count++;
+
+            vmav_state_sub_t entry = {0};
+            entry.status = VMAV_STEP_COMPLETE;
+            entry.stream_index = t->stream_index;
+            snprintf(entry.language, sizeof(entry.language), "%s", t->language);
+            entry.is_forced = t->is_forced;
+            entry.is_sdh = t->is_sdh;
+            snprintf(entry.output_path, sizeof(entry.output_path), "%s", sub_paths[i]);
+            entry.subtitle_count = scr.subtitle_count;
+            if (st_sub != NULL) {
+                *st_sub = entry;
+            } else {
+                const vmav_status_t ast = vmav_encode_state_add_sub(&state, &entry);
+                if (!vmav_status_ok(ast)) {
+                    fprintf(stderr, "vmavificient encode: state_add_sub: %s\n", ast.msg);
+                    exit_code = 1;
+                    goto cleanup;
+                }
+            }
+            const vmav_status_t sst = vmav_encode_state_save(cache_dir, &state);
+            if (!vmav_status_ok(sst)) {
+                fprintf(stderr, "vmavificient encode: state_save (sub): %s\n", sst.msg);
+                exit_code = 1;
+                goto cleanup;
+            }
         }
     }
 
-    /* --- Dolby Vision RPU sidecar (if input is DV). The current
-     *     final_mux pipeline doesn't yet attach RPU to AV1 packets —
-     *     that needs `dovi_tool inject-rpu`-style OBU injection.
-     *     For now we just extract it so it's available beside the
-     *     output for later attachment. --- */
+    /* ---- Step: DV RPU sidecar (no state — extract is cheap, rerunning
+     *      on resume is harmless). final_mux doesn't yet inject the
+     *      RPU into AV1 packets; we just stash the .rpu.bin next to
+     *      the IVF so a future packaging step can attach it. ---- */
     if (hdr.has_dolby_vision) {
         char rpu_path[1024];
         vmav_rpu_build_filename(rpu_path, sizeof(rpu_path), base);
@@ -508,27 +590,120 @@ int cmd_encode_run(int argc, char **argv) {
                     "vmavificient encode: rpu_extract: %s "
                     "(continuing without RPU sidecar)\n",
                     rst.msg);
-            /* Non-fatal: we keep going so the user still gets a video
-             * MKV — they can attach the RPU later if extraction works. */
         }
     }
 
-    /* Final mux. */
-    vmav_final_mux_spec_t mux_spec = {
-        .video_path = ivf_path,
-        .output_path = mkv_path,
-        .chapters_source = args.input,
-        .audio = mux_audio,
-        .audio_count = audio_mux_count,
-        .subs = mux_subs,
-        .sub_count = sub_mux_count,
-    };
-    vmav_final_mux_result_t mux_result;
-    st = vmav_final_mux(&mux_spec, &mux_result);
-    if (!vmav_status_ok(st)) {
-        fprintf(stderr, "vmavificient encode: final_mux: %s\n", st.msg);
-        exit_code = 1;
-        goto cleanup;
+    /* ---- Step: video encode ----
+     * The most expensive computation. Order here is intentional:
+     * audio + subs ran first so a failure there aborts before the
+     * multi-hour video encode commits. */
+    if (state.video.status != VMAV_STEP_COMPLETE) {
+        vmav_video_encode_spec_t ve_spec = {
+            .input_path = args.input,
+            .output_path = ivf_path,
+            .preset = args.preset,
+            .crf = chosen_crf,
+        };
+        vmav_video_encode_result_t ve_result;
+        st = vmav_video_encode(&ve_spec, &ve_result);
+        if (!vmav_status_ok(st)) {
+            fprintf(stderr, "vmavificient encode: video_encode: %s\n", st.msg);
+            state.video.status = VMAV_STEP_FAILED;
+            (void)vmav_encode_state_save(cache_dir, &state);
+            exit_code = 1;
+            goto cleanup;
+        }
+        VMAV_LOG_INFO("encode: video_encode wrote %lld bytes (%lld frames) to %s",
+                      (long long)ve_result.bytes_written,
+                      (long long)ve_result.frames_encoded,
+                      ivf_path);
+        state.video.status = VMAV_STEP_COMPLETE;
+        snprintf(state.video.output_path, sizeof(state.video.output_path), "%s", ivf_path);
+        state.video.frame_count = ve_result.frames_encoded;
+        const vmav_status_t sst = vmav_encode_state_save(cache_dir, &state);
+        if (!vmav_status_ok(sst)) {
+            fprintf(stderr, "vmavificient encode: state_save (video): %s\n", sst.msg);
+            exit_code = 1;
+            goto cleanup;
+        }
+    } else {
+        VMAV_LOG_INFO("encode: video_encode (cached) → %s [%lld frames]",
+                      state.video.output_path,
+                      (long long)state.video.frame_count);
+    }
+
+    /* ---- Step: final mux ----
+     * Build the mux spec from state (the heap-allocated state entries
+     * outlive this scope until vmav_encode_state_free in cleanup, so
+     * pointing mux_audio[].path etc. at state.audio[].output_path is
+     * safe). Skip subs whose output_path is empty (0-event PGS). */
+    if (state.audio_count > 0) {
+        mux_audio = calloc(state.audio_count, sizeof(*mux_audio));
+        if (mux_audio == NULL) {
+            fprintf(stderr, "vmavificient encode: out of memory (mux_audio)\n");
+            exit_code = 1;
+            goto cleanup;
+        }
+        for (size_t j = 0; j < state.audio_count; j++) {
+            const vmav_state_audio_t *sa = &state.audio[j];
+            if (sa->status != VMAV_STEP_COMPLETE) {
+                continue;
+            }
+            mux_audio[audio_mux_count].path = sa->output_path;
+            mux_audio[audio_mux_count].language = sa->language;
+            mux_audio[audio_mux_count].track_name = sa->title[0] != '\0' ? sa->title : NULL;
+            mux_audio[audio_mux_count].is_default = sa->is_default;
+            audio_mux_count++;
+        }
+    }
+    if (state.sub_count > 0) {
+        mux_subs = calloc(state.sub_count, sizeof(*mux_subs));
+        if (mux_subs == NULL) {
+            fprintf(stderr, "vmavificient encode: out of memory (mux_subs)\n");
+            exit_code = 1;
+            goto cleanup;
+        }
+        for (size_t j = 0; j < state.sub_count; j++) {
+            const vmav_state_sub_t *ss = &state.subs[j];
+            if (ss->status != VMAV_STEP_COMPLETE) {
+                continue;
+            }
+            if (ss->output_path[0] == '\0' || ss->subtitle_count == 0) {
+                continue; /* 0-event SRT — skip from mux */
+            }
+            mux_subs[sub_mux_count].path = ss->output_path;
+            mux_subs[sub_mux_count].language = ss->language;
+            mux_subs[sub_mux_count].track_name = NULL;
+            mux_subs[sub_mux_count].is_forced = ss->is_forced;
+            mux_subs[sub_mux_count].is_sdh = ss->is_sdh;
+            sub_mux_count++;
+        }
+    }
+
+    if (state.mux.status != VMAV_STEP_COMPLETE) {
+        vmav_final_mux_spec_t mux_spec = {
+            .video_path = ivf_path,
+            .output_path = mkv_path,
+            .chapters_source = args.input,
+            .audio = mux_audio,
+            .audio_count = audio_mux_count,
+            .subs = mux_subs,
+            .sub_count = sub_mux_count,
+        };
+        vmav_final_mux_result_t mux_result;
+        st = vmav_final_mux(&mux_spec, &mux_result);
+        if (!vmav_status_ok(st)) {
+            fprintf(stderr, "vmavificient encode: final_mux: %s\n", st.msg);
+            state.mux.status = VMAV_STEP_FAILED;
+            (void)vmav_encode_state_save(cache_dir, &state);
+            exit_code = 1;
+            goto cleanup;
+        }
+        state.mux.status = VMAV_STEP_COMPLETE;
+        snprintf(state.mux.output_path, sizeof(state.mux.output_path), "%s", mkv_path);
+        (void)vmav_encode_state_save(cache_dir, &state);
+    } else {
+        VMAV_LOG_INFO("encode: final_mux (cached) → %s", state.mux.output_path);
     }
 
     fprintf(stdout, "Encoded %s → %s (CRF %d", args.input, mkv_path, chosen_crf);
