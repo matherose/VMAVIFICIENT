@@ -69,7 +69,61 @@ typedef struct {
     bool blind;       /* explicit "no TMDB lookup" */
     bool config_mode; /* --config → interactive setup, then exit */
     bool show_help;
+    /* Naming overrides — applied only when scene-style naming is in
+     * effect (i.e. with --tmdb). Defaults of UNKNOWN/0 mean "use
+     * vmav_naming_detect_* / vmav_naming_lang_tag". */
+    vmav_naming_source_t source_override;
+    bool source_override_set;
+    vmav_naming_lang_tag_t lang_override;
+    bool lang_override_set;
 } encode_args_t;
+
+/* Lookup tables for the 12 source + 16 language CLI override flags.
+ * Each row is a (flag, enum value) pair; the parser walks the table
+ * linearly. Mirrors v1's CLI exactly for muscle-memory parity. */
+typedef struct {
+    const char *flag;
+    vmav_naming_source_t value;
+} source_flag_t;
+
+static const source_flag_t k_source_flags[] = {
+    {"--bdrip", VMAV_SOURCE_BDRIP},
+    {"--bluray", VMAV_SOURCE_BLURAY},
+    {"--remux", VMAV_SOURCE_REMUX},
+    {"--dvdrip", VMAV_SOURCE_DVDRIP},
+    {"--dvdremux", VMAV_SOURCE_DVDREMUX},
+    {"--webrip", VMAV_SOURCE_WEBRIP},
+    {"--webdl", VMAV_SOURCE_WEBDL},
+    {"--web", VMAV_SOURCE_WEB},
+    {"--hdtv", VMAV_SOURCE_HDTV},
+    {"--hdrip", VMAV_SOURCE_HDRIP},
+    {"--tvrip", VMAV_SOURCE_TVRIP},
+    {"--vhsrip", VMAV_SOURCE_VHSRIP},
+};
+
+typedef struct {
+    const char *flag;
+    vmav_naming_lang_tag_t value;
+} lang_flag_t;
+
+static const lang_flag_t k_lang_flags[] = {
+    {"--multi", VMAV_LT_MULTI},
+    {"--multivfi", VMAV_LT_MULTI_VFI},
+    {"--multivff", VMAV_LT_MULTI_VFF},
+    {"--multivfq", VMAV_LT_MULTI_VFQ},
+    {"--multivf2", VMAV_LT_MULTI_VF2},
+    {"--multivof", VMAV_LT_MULTI_VOF},
+    {"--dual_vfi", VMAV_LT_DUAL_VFI},
+    {"--dual_vff", VMAV_LT_DUAL_VFF},
+    {"--dual_vfq", VMAV_LT_DUAL_VFQ},
+    {"--french", VMAV_LT_FRENCH},
+    {"--vff", VMAV_LT_VFF},
+    {"--vof", VMAV_LT_VOF},
+    {"--truefrench", VMAV_LT_TRUEFRENCH},
+    {"--vo", VMAV_LT_VO},
+    {"--vost", VMAV_LT_VOST},
+    {"--fansub", VMAV_LT_FANSUB},
+};
 
 static void print_help(FILE *out) {
     fputs("Usage: vmavificient encode <input> [options]\n"
@@ -103,7 +157,17 @@ static void print_help(FILE *out) {
           "  --super35_analog          Super 35mm analog film\n"
           "  --super35_digital         Super 35mm digital\n"
           "  --imax_analog             IMAX analog film\n"
-          "  --imax_digital            IMAX digital\n",
+          "  --imax_digital            IMAX digital\n"
+          "\n"
+          "Source overrides (override filename-based auto-detection;\n"
+          "only affects the output name when --tmdb is used):\n"
+          "  --bdrip --bluray --remux --dvdrip --dvdremux\n"
+          "  --webrip --webdl --web --hdtv --hdrip --tvrip --vhsrip\n"
+          "\n"
+          "Language tag overrides (same conditions as source overrides):\n"
+          "  --multi --multivfi --multivff --multivfq --multivf2 --multivof\n"
+          "  --dual_vfi --dual_vff --dual_vfq\n"
+          "  --french --vff --vof --truefrench --vo --vost --fansub\n",
           out);
 }
 
@@ -258,6 +322,36 @@ static vmav_status_t parse_args(int argc, char **argv, encode_args_t *out) {
         if (strcmp(arg, "--config") == 0) {
             out->config_mode = true;
             continue;
+        }
+        /* Source overrides (12 flags). */
+        {
+            bool matched = false;
+            for (size_t k = 0; k < sizeof(k_source_flags) / sizeof(k_source_flags[0]); k++) {
+                if (strcmp(arg, k_source_flags[k].flag) == 0) {
+                    out->source_override = k_source_flags[k].value;
+                    out->source_override_set = true;
+                    matched = true;
+                    break;
+                }
+            }
+            if (matched) {
+                continue;
+            }
+        }
+        /* Language-tag overrides (16 flags). */
+        {
+            bool matched = false;
+            for (size_t k = 0; k < sizeof(k_lang_flags) / sizeof(k_lang_flags[0]); k++) {
+                if (strcmp(arg, k_lang_flags[k].flag) == 0) {
+                    out->lang_override = k_lang_flags[k].value;
+                    out->lang_override_set = true;
+                    matched = true;
+                    break;
+                }
+            }
+            if (matched) {
+                continue;
+            }
         }
         if (arg[0] == '-') {
             return VMAV_ERR(VMAV_ERR_BAD_ARG, "unknown flag: %s", arg);
@@ -840,9 +934,14 @@ int cmd_encode_run(int argc, char **argv) {
      *   * else: <input-stem>.av1.mkv as the blind fallback. */
     if (mkv_path[0] == '\0') {
         if (state.tmdb.tmdb_id > 0) {
+            /* Per-flag overrides win when set; otherwise auto-detect. */
             const vmav_naming_lang_tag_t lang_tag =
-                vmav_naming_lang_tag(&tracks, state.tmdb.original_lang, fv);
-            const vmav_naming_source_t source = vmav_naming_detect_source(args.input);
+                args.lang_override_set
+                    ? args.lang_override
+                    : vmav_naming_lang_tag(&tracks, state.tmdb.original_lang, fv);
+            const vmav_naming_source_t source = args.source_override_set
+                                                    ? args.source_override
+                                                    : vmav_naming_detect_source(args.input);
             vmav_config_t cfg;
             vmav_config_init(&cfg);
             (void)vmav_config_load(&cfg);
