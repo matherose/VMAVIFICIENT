@@ -38,6 +38,7 @@ option(VMAV_SANITIZE       "Build with ASan + UBSan"                    OFF)
 option(VMAV_LTO            "Enable link-time optimization"              ON)
 option(VMAV_USE_THIRD_PARTY "Build vendored third_party deps"           ON)
 option(VMAV_REPRODUCIBLE   "Enable reproducible-build flags"            ON)
+option(VMAV_FETCH_REAL_CONTENT "Fetch BBB/ToS real-content fixtures"    OFF)
 
 if(NOT CMAKE_C_COMPILER_ID STREQUAL "Clang"
    AND NOT CMAKE_C_COMPILER_ID STREQUAL "AppleClang")

@@ -33,3 +33,36 @@ add_custom_target(vmav_fixtures DEPENDS "${_tiny_y4m}")
 # definition without re-deriving the path.
 set_target_properties(vmav_fixtures PROPERTIES
     VMAV_FIXTURE_DIR "${_fixture_dir}")
+
+# ============================================================
+# Phase 8: real-content fixtures (BBB + optionally ToS HDR).
+#
+# Opt-in via -DVMAV_FETCH_REAL_CONTENT=ON. The fetch script
+# downloads to a deterministic cache dir + sha256-validates;
+# CI keys actions/cache by the script's content + URL list so
+# any change invalidates the cache. Local dev builds default
+# to OFF so a clean clone without network access still works.
+# Integration tests gated on this look for files under
+# ${_real_content_dir} and skip cleanly when absent.
+# ============================================================
+set(_real_content_dir "${CMAKE_SOURCE_DIR}/tests/fixtures/.real-content-cache")
+if(VMAV_FETCH_REAL_CONTENT)
+    set(_bbb_clip "${_real_content_dir}/bbb_clip.mkv")
+    add_custom_command(
+        OUTPUT "${_bbb_clip}"
+        COMMAND "${CMAKE_SOURCE_DIR}/scripts/fetch_real_content.sh"
+                --cache-dir "${_real_content_dir}"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Fetching real-content fixtures (BBB) to ${_real_content_dir}"
+        VERBATIM)
+    add_custom_target(vmav_real_content DEPENDS "${_bbb_clip}")
+    set_target_properties(vmav_real_content PROPERTIES
+        VMAV_REAL_CONTENT_DIR "${_real_content_dir}")
+    # Promote the BBB clip into the standard fixture set so integration
+    # tests that consume it can DEPENDS on vmav_fixtures uniformly.
+    add_dependencies(vmav_fixtures vmav_real_content)
+endif()
+
+set_target_properties(vmav_fixtures PROPERTIES
+    VMAV_REAL_CONTENT_DIR "${_real_content_dir}"
+    VMAV_REAL_CONTENT_ENABLED "${VMAV_FETCH_REAL_CONTENT}")

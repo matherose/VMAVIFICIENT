@@ -84,9 +84,16 @@ function(vmav_add_integration_test)
         PRIVATE
             ${CMAKE_SOURCE_DIR}/include
             ${CMAKE_BINARY_DIR}/include)
+    get_target_property(_real_content_dir vmav_fixtures VMAV_REAL_CONTENT_DIR)
+    get_target_property(_real_content_enabled vmav_fixtures VMAV_REAL_CONTENT_ENABLED)
+    if(NOT _real_content_dir)
+        set(_real_content_dir "")
+    endif()
     target_compile_definitions(${VMAV_IT_NAME}
         PRIVATE
             "VMAV_FIXTURE_DIR=\"${_fixture_dir}\""
+            "VMAV_REAL_CONTENT_DIR=\"${_real_content_dir}\""
+            "VMAV_REAL_CONTENT_ENABLED=$<IF:$<BOOL:${_real_content_enabled}>,1,0>"
             "VMAV_BIN=\"$<TARGET_FILE:vmavificient>\"")
     add_dependencies(${VMAV_IT_NAME} vmav_fixtures vmavificient)
 

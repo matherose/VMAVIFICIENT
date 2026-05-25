@@ -118,3 +118,8 @@ compile_commands.json
 # any explicit --cache-dir landing inside the worktree).
 .vmavificient-cache/
 **/.vmavificient-cache/
+
+# Phase 8 real-content fixtures (Big Buck Bunny, Tears of Steel HDR).
+# Sources are fetched on demand by scripts/fetch_real_content.sh —
+# never committed because they're large and trivially re-downloaded.
+/tests/fixtures/.real-content-cache/
