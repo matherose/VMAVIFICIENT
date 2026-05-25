@@ -135,6 +135,14 @@ typedef struct {
 
     vmav_state_video_t video;
     vmav_state_mux_t mux;
+
+    /* --companion-hd: HD downscale pass. Both stay PENDING when the
+     * flag isn't set; serialized either way so older state.json files
+     * resume without churn (missing fields → PENDING via cJSON null
+     * lookup). HD reuses the UHD CRF (state.crf) — no separate
+     * crf_hd in the schema. */
+    vmav_state_video_t video_hd;
+    vmav_state_mux_t mux_hd;
 } vmav_encode_state_t;
 
 /* Lifecycle. */

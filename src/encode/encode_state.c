@@ -355,8 +355,8 @@ static cJSON *video_to_json(const vmav_state_video_t *v) {
     return o;
 }
 
-static void video_from_json(const cJSON *root, vmav_state_video_t *out) {
-    const cJSON *o = cJSON_GetObjectItemCaseSensitive(root, "video");
+static void video_from_json(const cJSON *root, const char *key, vmav_state_video_t *out) {
+    const cJSON *o = cJSON_GetObjectItemCaseSensitive(root, key);
     if (o == NULL) {
         return;
     }
@@ -378,8 +378,8 @@ static cJSON *mux_to_json(const vmav_state_mux_t *m) {
     return o;
 }
 
-static void mux_from_json(const cJSON *root, vmav_state_mux_t *out) {
-    const cJSON *o = cJSON_GetObjectItemCaseSensitive(root, "mux");
+static void mux_from_json(const cJSON *root, const char *key, vmav_state_mux_t *out) {
+    const cJSON *o = cJSON_GetObjectItemCaseSensitive(root, key);
     if (o == NULL) {
         return;
     }
@@ -462,8 +462,10 @@ vmav_status_t vmav_encode_state_load(const char *cache_dir,
     crop_from_json(root, &out->crop);
     grain_from_json(root, &out->grain);
     crf_from_json(root, &out->crf);
-    video_from_json(root, &out->video);
-    mux_from_json(root, &out->mux);
+    video_from_json(root, "video", &out->video);
+    mux_from_json(root, "mux", &out->mux);
+    video_from_json(root, "video_hd", &out->video_hd);
+    mux_from_json(root, "mux_hd", &out->mux_hd);
 
     const cJSON *audio_arr = cJSON_GetObjectItemCaseSensitive(root, "audio");
     if (audio_arr != NULL && cJSON_IsArray(audio_arr)) {
@@ -541,6 +543,8 @@ vmav_status_t vmav_encode_state_save(const char *cache_dir, const vmav_encode_st
 
     cJSON_AddItemToObject(root, "video", video_to_json(&state->video));
     cJSON_AddItemToObject(root, "mux", mux_to_json(&state->mux));
+    cJSON_AddItemToObject(root, "video_hd", video_to_json(&state->video_hd));
+    cJSON_AddItemToObject(root, "mux_hd", mux_to_json(&state->mux_hd));
 
     char state_path[1280];
     const vmav_status_t pst = vmav_encode_state_path(cache_dir, state_path, sizeof(state_path));

@@ -64,6 +64,7 @@ typedef struct {
     int crf;          /* > 0 → use directly, skip CRF search */
     int bitrate;      /* > 0 → VBR mode at this kbps, skip CRF entirely */
     bool scale_to_hd; /* true → downscale source to 1920×H before encode */
+    bool companion_hd; /* true → run both UHD encode AND HD downscale */
     int target_vmaf;  /* 0 → derive from preset + resolution */
     int crf_min;      /* 0 → use VMAV_CRF_MIN */
     int crf_max;      /* 0 → use VMAV_CRF_MAX */
@@ -160,6 +161,13 @@ static void print_help(FILE *out) {
           "                            encoding. Requires a UHD source\n"
           "                            (height >= 2160). The output is\n"
           "                            named with the scaled dimensions.\n"
+          "  --companion-hd            Encode both the UHD source AND a\n"
+          "                            1920p downscaled companion in one\n"
+          "                            invocation. Audio/sub sidecars\n"
+          "                            (and DV RPU when present) are\n"
+          "                            shared between both outputs.\n"
+          "                            Requires a UHD source.\n"
+          "                            Mutually exclusive with --scale-to-hd.\n"
           "  --cache-dir <path>        Where to keep intermediates +\n"
           "                            resume state (default:\n"
           "                            <input-dir>/.vmavificient-cache)\n"
@@ -219,11 +227,15 @@ static void print_plan(const encode_args_t *args,
                        const vmav_hdr_info_t *hdr,
                        const vmav_media_tracks_t *tracks,
                        const char *mkv_path,
+                       const char *hd_mkv_path,
                        int scale_w,
                        int scale_h) {
     fputs("\n=== Encode plan ===\n", stdout);
     fprintf(stdout, "input         %s\n", args->input);
     fprintf(stdout, "output        %s\n", mkv_path);
+    if (args->companion_hd && hd_mkv_path != NULL && hd_mkv_path[0] != '\0') {
+        fprintf(stdout, "companion HD  %s\n", hd_mkv_path);
+    }
     fprintf(stdout, "preset        %s\n", vmav_preset_name(args->preset));
     fprintf(stdout,
             "video         %dx%d @ %.3f fps, %s, bit_rate=%lld\n",
@@ -232,13 +244,14 @@ static void print_plan(const encode_args_t *args,
             info->framerate,
             info->codec_name,
             (long long)info->bit_rate);
-    if (args->scale_to_hd && scale_w > 0 && scale_h > 0) {
+    if ((args->scale_to_hd || args->companion_hd) && scale_w > 0 && scale_h > 0) {
         fprintf(stdout,
-                "scale         %dx%d → %dx%d (lanczos)\n",
+                "scale         %dx%d → %dx%d (lanczos%s)\n",
                 info->width,
                 info->height,
                 scale_w,
-                scale_h);
+                scale_h,
+                args->companion_hd ? ", HD pass" : "");
     }
     if (hdr->has_hdr10 || hdr->has_dolby_vision) {
         fprintf(stdout,
@@ -466,6 +479,10 @@ static vmav_status_t parse_args(int argc, char **argv, encode_args_t *out) {
             out->scale_to_hd = true;
             continue;
         }
+        if (strcmp(arg, "--companion-hd") == 0) {
+            out->companion_hd = true;
+            continue;
+        }
         if (strcmp(arg, "--crf-min") == 0 && i + 1 < argc) {
             out->crf_min = atoi(argv[++i]);
             continue;
@@ -564,6 +581,10 @@ static vmav_status_t parse_args(int argc, char **argv, encode_args_t *out) {
     if (out->crf > 0 && out->bitrate > 0) {
         return VMAV_ERR(VMAV_ERR_BAD_ARG, "--crf and --bitrate are mutually exclusive");
     }
+    if (out->scale_to_hd && out->companion_hd) {
+        return VMAV_ERR(VMAV_ERR_BAD_ARG,
+                        "--scale-to-hd and --companion-hd are mutually exclusive");
+    }
     return VMAV_OK_STATUS;
 }
 
@@ -623,14 +644,15 @@ int cmd_encode_run(int argc, char **argv) {
         return 1;
     }
 
-    /* --scale-to-hd guard: refuse anything that isn't UHD. v1 used
-     * height >= 2160; we match that. The actual scaled dims are
-     * computed after crop probe so the HD aspect respects letterboxing
-     * removal. */
-    if (args.scale_to_hd && info.height < 2160) {
+    /* --scale-to-hd / --companion-hd guard: refuse anything that isn't
+     * UHD. v1 used height >= 2160; we match that. The actual scaled
+     * dims are computed after crop probe so the HD aspect respects
+     * letterboxing removal. */
+    if ((args.scale_to_hd || args.companion_hd) && info.height < 2160) {
         fprintf(stderr,
-                "vmavificient encode: --scale-to-hd requires a UHD source "
+                "vmavificient encode: --%s requires a UHD source "
                 "(got %dx%d, need height >= 2160)\n",
+                args.scale_to_hd ? "scale-to-hd" : "companion-hd",
                 info.width,
                 info.height);
         return 1;
@@ -911,13 +933,14 @@ int cmd_encode_run(int argc, char **argv) {
     const int chosen_bitrate = state.crf.bitrate_kbps;
     const double chosen_vmaf = state.crf.vmaf;
 
-    /* --scale-to-hd: compute target dims now (crop is known at this
-     * point). HD width is fixed at 1920; height derives from cropped
-     * aspect ratio (rounded down to even for YUV420). Falls back to
-     * full source aspect when crop has no meaningful trim. */
+    /* --scale-to-hd / --companion-hd: compute target dims now (crop is
+     * known at this point). HD width is fixed at 1920; height derives
+     * from cropped aspect ratio (rounded down to even for YUV420).
+     * Falls back to full source aspect when crop has no meaningful
+     * trim. */
     int scale_w = 0;
     int scale_h = 0;
-    if (args.scale_to_hd) {
+    if (args.scale_to_hd || args.companion_hd) {
         const int src_w =
             (state.crop.is_meaningful && state.crop.width > 0) ? state.crop.width : info.width;
         const int src_h =
@@ -928,6 +951,10 @@ int cmd_encode_run(int argc, char **argv) {
             scale_h = 2;
         }
     }
+    /* UHD-mkv naming uses info.height (or scale_h when --scale-to-hd
+     * because the only output IS the HD one). --companion-hd keeps the
+     * UHD output at source dims; the companion mkv path is built
+     * separately further below. */
     const int output_height = args.scale_to_hd ? scale_h : info.height;
 
     /* Finalize mkv_path early so --dry-run / --grain-only print the
@@ -971,12 +998,60 @@ int cmd_encode_run(int argc, char **argv) {
         VMAV_LOG_INFO("encode: output path = %s", mkv_path);
     }
 
+    /* Companion-HD output paths (finalized early so --dry-run shows
+     * them). IVF gets `.av1.hd.ivf` to avoid colliding with the UHD
+     * `.av1.ivf`. MKV uses TMDB-aware naming with scale_h, falling
+     * back to <input-stem>-HDLight.av1.mkv in blind mode. */
+    char hd_mkv_path[1024] = "";
+    char hd_ivf_path[1024] = "";
+    if (args.companion_hd) {
+        if (replace_extension(hd_ivf_path, sizeof(hd_ivf_path), args.input, ".av1.hd.ivf") == 0) {
+            fprintf(stderr, "vmavificient encode: input path too long (hd ivf)\n");
+            exit_code = 1;
+            goto cleanup;
+        }
+        if (state.tmdb.tmdb_id > 0) {
+            const vmav_naming_lang_tag_t lang_tag =
+                args.lang_override_set
+                    ? args.lang_override
+                    : vmav_naming_lang_tag(&tracks, state.tmdb.original_lang, fv);
+            const vmav_naming_source_t source = args.source_override_set
+                                                    ? args.source_override
+                                                    : vmav_naming_detect_source(args.input);
+            vmav_config_t cfg;
+            vmav_config_init(&cfg);
+            (void)vmav_config_load(&cfg);
+            const char *release_group = cfg.release_group[0] != '\0' ? cfg.release_group : "GROUP";
+            const vmav_status_t nst = vmav_naming_build(hd_mkv_path,
+                                                        sizeof(hd_mkv_path),
+                                                        state.tmdb.title,
+                                                        state.tmdb.year,
+                                                        lang_tag,
+                                                        scale_h,
+                                                        &hdr,
+                                                        source,
+                                                        release_group);
+            if (!vmav_status_ok(nst)) {
+                fprintf(stderr, "vmavificient encode: naming_build (hd): %s\n", nst.msg);
+                exit_code = 1;
+                goto cleanup;
+            }
+        } else if (replace_extension(
+                       hd_mkv_path, sizeof(hd_mkv_path), args.input, "-HDLight.av1.mkv") == 0) {
+            fprintf(stderr, "vmavificient encode: input path too long (hd mkv)\n");
+            exit_code = 1;
+            goto cleanup;
+        }
+        VMAV_LOG_INFO("encode: HD output path = %s", hd_mkv_path);
+    }
+
     /* ---- Dry-run / grain-only early exit ----
      * At this point we know everything the user cares about for the
      * "what would this encode do?" question. Print the plan, optional
      * preset dump, and skip every step that touches disk. */
     if (args.dry_run || args.grain_only) {
-        print_plan(&args, &state, &info, &hdr, &tracks, mkv_path, scale_w, scale_h);
+        print_plan(
+            &args, &state, &info, &hdr, &tracks, mkv_path, hd_mkv_path, scale_w, scale_h);
         if (args.grain_only) {
             print_preset_dump(args.preset, info.height, state.grain.score);
         }
@@ -1211,8 +1286,11 @@ int cmd_encode_run(int argc, char **argv) {
             .preset = args.preset,
             .crf = chosen_crf,
             .target_bitrate_kbps = chosen_bitrate,
-            .scale_width = scale_w,
-            .scale_height = scale_h,
+            /* UHD pass: only inject scaling when --scale-to-hd is set.
+             * --companion-hd keeps the UHD encode at source dims; the
+             * HD encode runs as a separate pass after the UHD mux. */
+            .scale_width = args.scale_to_hd ? scale_w : 0,
+            .scale_height = args.scale_to_hd ? scale_h : 0,
         };
         vmav_video_encode_result_t ve_result;
         st = vmav_video_encode(&ve_spec, &ve_result);
@@ -1332,6 +1410,83 @@ int cmd_encode_run(int argc, char **argv) {
         VMAV_LOG_INFO("encode: final_mux (cached) → %s", state.mux.output_path);
     }
 
+    /* ---- Phase 2 (companion-hd only): HD video encode + HD mux ----
+     * Reuses the same audio/sub mux arrays as UHD — the sidecars on
+     * disk are independent of resolution and we just point matroska at
+     * the same files. CRF/bitrate is reused too (state.crf); a future
+     * milestone may add an HD-aware crf_search that scales samples
+     * before VMAF. (HD paths hd_ivf_path / hd_mkv_path were finalized
+     * up by the dry-run gate so --dry-run prints them.) */
+    if (args.companion_hd) {
+        /* HD video encode. */
+        if (state.video_hd.status != VMAV_STEP_COMPLETE) {
+            vmav_video_encode_spec_t hd_ve_spec = {
+                .input_path = args.input,
+                .output_path = hd_ivf_path,
+                .preset = args.preset,
+                .crf = chosen_crf,
+                .target_bitrate_kbps = chosen_bitrate,
+                .scale_width = scale_w,
+                .scale_height = scale_h,
+            };
+            vmav_video_encode_result_t hd_ve_result;
+            st = vmav_video_encode(&hd_ve_spec, &hd_ve_result);
+            if (!vmav_status_ok(st)) {
+                fprintf(stderr, "vmavificient encode: video_encode (hd): %s\n", st.msg);
+                state.video_hd.status = VMAV_STEP_FAILED;
+                (void)vmav_encode_state_save(cache_dir, &state);
+                exit_code = 1;
+                goto cleanup;
+            }
+            state.video_hd.status = VMAV_STEP_COMPLETE;
+            snprintf(state.video_hd.output_path,
+                     sizeof(state.video_hd.output_path),
+                     "%s",
+                     hd_ivf_path);
+            state.video_hd.frame_count = hd_ve_result.frames_encoded;
+            VMAV_LOG_INFO("encode: video_encode (hd) wrote %lld bytes (%lld frames) to %s",
+                          (long long)hd_ve_result.bytes_written,
+                          (long long)hd_ve_result.frames_encoded,
+                          hd_ivf_path);
+            (void)vmav_encode_state_save(cache_dir, &state);
+        } else {
+            VMAV_LOG_INFO("encode: video_encode (hd, cached) → %s [%lld frames]",
+                          state.video_hd.output_path,
+                          (long long)state.video_hd.frame_count);
+        }
+
+        /* HD mux: same audio/sub mux arrays as UHD (sidecars are
+         * resolution-independent on disk; matroska re-opens them). */
+        if (state.mux_hd.status != VMAV_STEP_COMPLETE) {
+            vmav_final_mux_spec_t hd_mux_spec = {
+                .video_path = hd_ivf_path,
+                .output_path = hd_mkv_path,
+                .chapters_source = args.input,
+                .audio = mux_audio,
+                .audio_count = audio_mux_count,
+                .subs = mux_subs,
+                .sub_count = sub_mux_count,
+            };
+            vmav_final_mux_result_t hd_mux_result;
+            st = vmav_final_mux(&hd_mux_spec, &hd_mux_result);
+            if (!vmav_status_ok(st)) {
+                fprintf(stderr, "vmavificient encode: final_mux (hd): %s\n", st.msg);
+                state.mux_hd.status = VMAV_STEP_FAILED;
+                (void)vmav_encode_state_save(cache_dir, &state);
+                exit_code = 1;
+                goto cleanup;
+            }
+            state.mux_hd.status = VMAV_STEP_COMPLETE;
+            snprintf(state.mux_hd.output_path,
+                     sizeof(state.mux_hd.output_path),
+                     "%s",
+                     hd_mkv_path);
+            (void)vmav_encode_state_save(cache_dir, &state);
+        } else {
+            VMAV_LOG_INFO("encode: final_mux (hd, cached) → %s", state.mux_hd.output_path);
+        }
+    }
+
     fprintf(stdout, "Encoded %s → %s (", args.input, mkv_path);
     if (chosen_bitrate > 0) {
         fprintf(stdout, "VBR %d kbps", chosen_bitrate);
@@ -1346,6 +1501,9 @@ int cmd_encode_run(int argc, char **argv) {
         fputs(", DV-RPU", stdout);
     }
     fputs(")\n", stdout);
+    if (args.companion_hd) {
+        fprintf(stdout, "Companion HD → %s (%dx%d)\n", hd_mkv_path, scale_w, scale_h);
+    }
 
 cleanup:
     free(mux_audio);
