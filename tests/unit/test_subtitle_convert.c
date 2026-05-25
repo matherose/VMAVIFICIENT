@@ -69,16 +69,16 @@ static void test_srt_filename_french_variants(void) {
     char buf[128];
     /* VFF/UNKNOWN → fre.fr */
     vmav_subtitle_build_srt_filename(buf, sizeof(buf), "/x/M", "fre", VMAV_FR_VFF, false, false);
-    TEST_ASSERT_EQUAL_STRING("/x/M.fre.fr..full.srt", buf);
+    TEST_ASSERT_EQUAL_STRING("/x/M.fre.fr.full.srt", buf);
     vmav_subtitle_build_srt_filename(
         buf, sizeof(buf), "/x/M", "fra", VMAV_FR_UNKNOWN, false, false);
-    TEST_ASSERT_EQUAL_STRING("/x/M.fre.fr..full.srt", buf);
+    TEST_ASSERT_EQUAL_STRING("/x/M.fre.fr.full.srt", buf);
     /* VFQ → fre.ca */
     vmav_subtitle_build_srt_filename(buf, sizeof(buf), "/x/M", "fre", VMAV_FR_VFQ, false, true);
-    TEST_ASSERT_EQUAL_STRING("/x/M.fre.ca..sdh.srt", buf);
+    TEST_ASSERT_EQUAL_STRING("/x/M.fre.ca.sdh.srt", buf);
     /* VFI → fre.vfi */
     vmav_subtitle_build_srt_filename(buf, sizeof(buf), "/x/M", "fre", VMAV_FR_VFI, true, false);
-    TEST_ASSERT_EQUAL_STRING("/x/M.fre.vfi..forced.srt", buf);
+    TEST_ASSERT_EQUAL_STRING("/x/M.fre.vfi.forced.srt", buf);
 }
 
 static void test_srt_filename_unknown_lang(void) {

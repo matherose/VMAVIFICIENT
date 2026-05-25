@@ -61,20 +61,20 @@ typedef struct {
     const char *output;    /* explicit -o/--output; NULL → derived */
     const char *cache_dir; /* explicit --cache-dir; NULL → default */
     vmav_preset_t preset;
-    int crf;          /* > 0 → use directly, skip CRF search */
-    int bitrate;      /* > 0 → VBR mode at this kbps, skip CRF entirely */
-    bool scale_to_hd; /* true → downscale source to 1920×H before encode */
+    int crf;           /* > 0 → use directly, skip CRF search */
+    int bitrate;       /* > 0 → VBR mode at this kbps, skip CRF entirely */
+    bool scale_to_hd;  /* true → downscale source to 1920×H before encode */
     bool companion_hd; /* true → run both UHD encode AND HD downscale */
-    int target_vmaf;  /* 0 → derive from preset + resolution */
-    int crf_min;      /* 0 → use VMAV_CRF_MIN */
-    int crf_max;      /* 0 → use VMAV_CRF_MAX */
-    int tmdb_id;      /* > 0 → look up TMDB; 0 with `blind` flag → skip */
-    bool blind;       /* explicit "no TMDB lookup" */
-    bool config_mode; /* --config → interactive setup, then exit */
-    bool dry_run;     /* --dry-run → run through CRF + naming, print plan, exit */
-    bool grain_only;  /* --grain-only → like --dry-run + dump preset knobs */
-    bool quiet;       /* --quiet → vmav_log level WARN+ only */
-    bool verbose;     /* --verbose → vmav_log level DEBUG; SVT stderr stays on */
+    int target_vmaf;   /* 0 → derive from preset + resolution */
+    int crf_min;       /* 0 → use VMAV_CRF_MIN */
+    int crf_max;       /* 0 → use VMAV_CRF_MAX */
+    int tmdb_id;       /* > 0 → look up TMDB; 0 with `blind` flag → skip */
+    bool blind;        /* explicit "no TMDB lookup" */
+    bool config_mode;  /* --config → interactive setup, then exit */
+    bool dry_run;      /* --dry-run → run through CRF + naming, print plan, exit */
+    bool grain_only;   /* --grain-only → like --dry-run + dump preset knobs */
+    bool quiet;        /* --quiet → vmav_log level WARN+ only */
+    bool verbose;      /* --verbose → vmav_log level DEBUG; SVT stderr stays on */
     bool show_help;
     /* Naming overrides — applied only when scene-style naming is in
      * effect (i.e. with --tmdb). Defaults of UNKNOWN/0 mean "use
@@ -921,12 +921,9 @@ int cmd_encode_run(int argc, char **argv) {
         }
     } else {
         if (state.crf.bitrate_kbps > 0) {
-            VMAV_LOG_INFO("encode: bitrate=%d kbps (from cache, VBR mode)",
-                          state.crf.bitrate_kbps);
+            VMAV_LOG_INFO("encode: bitrate=%d kbps (from cache, VBR mode)", state.crf.bitrate_kbps);
         } else {
-            VMAV_LOG_INFO("encode: CRF=%d (from cache, VMAF=%.2f)",
-                          state.crf.crf,
-                          state.crf.vmaf);
+            VMAV_LOG_INFO("encode: CRF=%d (from cache, VMAF=%.2f)", state.crf.crf, state.crf.vmaf);
         }
     }
     const int chosen_crf = state.crf.crf;
@@ -1050,8 +1047,7 @@ int cmd_encode_run(int argc, char **argv) {
      * "what would this encode do?" question. Print the plan, optional
      * preset dump, and skip every step that touches disk. */
     if (args.dry_run || args.grain_only) {
-        print_plan(
-            &args, &state, &info, &hdr, &tracks, mkv_path, hd_mkv_path, scale_w, scale_h);
+        print_plan(&args, &state, &info, &hdr, &tracks, mkv_path, hd_mkv_path, scale_w, scale_h);
         if (args.grain_only) {
             print_preset_dump(args.preset, info.height, state.grain.score);
         }
@@ -1439,10 +1435,8 @@ int cmd_encode_run(int argc, char **argv) {
                 goto cleanup;
             }
             state.video_hd.status = VMAV_STEP_COMPLETE;
-            snprintf(state.video_hd.output_path,
-                     sizeof(state.video_hd.output_path),
-                     "%s",
-                     hd_ivf_path);
+            snprintf(
+                state.video_hd.output_path, sizeof(state.video_hd.output_path), "%s", hd_ivf_path);
             state.video_hd.frame_count = hd_ve_result.frames_encoded;
             VMAV_LOG_INFO("encode: video_encode (hd) wrote %lld bytes (%lld frames) to %s",
                           (long long)hd_ve_result.bytes_written,
@@ -1477,10 +1471,7 @@ int cmd_encode_run(int argc, char **argv) {
                 goto cleanup;
             }
             state.mux_hd.status = VMAV_STEP_COMPLETE;
-            snprintf(state.mux_hd.output_path,
-                     sizeof(state.mux_hd.output_path),
-                     "%s",
-                     hd_mkv_path);
+            snprintf(state.mux_hd.output_path, sizeof(state.mux_hd.output_path), "%s", hd_mkv_path);
             (void)vmav_encode_state_save(cache_dir, &state);
         } else {
             VMAV_LOG_INFO("encode: final_mux (hd, cached) → %s", state.mux_hd.output_path);

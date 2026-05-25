@@ -71,23 +71,19 @@ void vmav_subtitle_build_srt_filename(char *buf,
     const char *lang = (language != NULL && language[0] != '\0') ? language : "und";
     const char *lang_suffix = lang;
     const char *type_suffix = ".full";
-    const char *variant_sep = "";
 
     if (strcmp(lang, "fre") == 0 || strcmp(lang, "fra") == 0) {
         switch (fv) {
         case VMAV_FR_VFQ:
             lang_suffix = "fre.ca";
-            variant_sep = ".";
             break;
         case VMAV_FR_VFI:
             lang_suffix = "fre.vfi";
-            variant_sep = ".";
             break;
         case VMAV_FR_VFF:
         case VMAV_FR_UNKNOWN:
         default:
             lang_suffix = "fre.fr";
-            variant_sep = ".";
             break;
         }
     }
@@ -96,7 +92,11 @@ void vmav_subtitle_build_srt_filename(char *buf,
     } else if (is_sdh) {
         type_suffix = ".sdh";
     }
-    snprintf(buf, bufsize, "%s.%s%s%s.srt", base_name, lang_suffix, variant_sep, type_suffix);
+    /* type_suffix already carries its leading dot, so don't add a
+     * separator between lang_suffix and type_suffix. Previously the
+     * code injected an extra "." for French variants and produced
+     * "base.fre.fr..full.srt" (note the double dot). */
+    snprintf(buf, bufsize, "%s.%s%s.srt", base_name, lang_suffix, type_suffix);
 }
 
 /* ====================================================================== */
