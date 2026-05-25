@@ -63,6 +63,7 @@ typedef struct {
     vmav_preset_t preset;
     int crf;          /* > 0 → use directly, skip CRF search */
     int bitrate;      /* > 0 → VBR mode at this kbps, skip CRF entirely */
+    bool scale_to_hd; /* true → downscale source to 1920×H before encode */
     int target_vmaf;  /* 0 → derive from preset + resolution */
     int crf_min;      /* 0 → use VMAV_CRF_MIN */
     int crf_max;      /* 0 → use VMAV_CRF_MAX */
@@ -154,6 +155,11 @@ static void print_help(FILE *out) {
           "  --bitrate <kbps>          VBR mode at given bitrate;\n"
           "                            skips CRF search entirely.\n"
           "                            Mutually exclusive with --crf.\n"
+          "  --scale-to-hd             Downscale source to 1920p (1080p\n"
+          "                            for 16:9) using lanczos before\n"
+          "                            encoding. Requires a UHD source\n"
+          "                            (height >= 2160). The output is\n"
+          "                            named with the scaled dimensions.\n"
           "  --cache-dir <path>        Where to keep intermediates +\n"
           "                            resume state (default:\n"
           "                            <input-dir>/.vmavificient-cache)\n"
@@ -212,7 +218,9 @@ static void print_plan(const encode_args_t *args,
                        const vmav_media_info_t *info,
                        const vmav_hdr_info_t *hdr,
                        const vmav_media_tracks_t *tracks,
-                       const char *mkv_path) {
+                       const char *mkv_path,
+                       int scale_w,
+                       int scale_h) {
     fputs("\n=== Encode plan ===\n", stdout);
     fprintf(stdout, "input         %s\n", args->input);
     fprintf(stdout, "output        %s\n", mkv_path);
@@ -224,6 +232,14 @@ static void print_plan(const encode_args_t *args,
             info->framerate,
             info->codec_name,
             (long long)info->bit_rate);
+    if (args->scale_to_hd && scale_w > 0 && scale_h > 0) {
+        fprintf(stdout,
+                "scale         %dx%d → %dx%d (lanczos)\n",
+                info->width,
+                info->height,
+                scale_w,
+                scale_h);
+    }
     if (hdr->has_hdr10 || hdr->has_dolby_vision) {
         fprintf(stdout,
                 "HDR           %s%s\n",
@@ -446,6 +462,10 @@ static vmav_status_t parse_args(int argc, char **argv, encode_args_t *out) {
             out->bitrate = atoi(argv[++i]);
             continue;
         }
+        if (strcmp(arg, "--scale-to-hd") == 0) {
+            out->scale_to_hd = true;
+            continue;
+        }
         if (strcmp(arg, "--crf-min") == 0 && i + 1 < argc) {
             out->crf_min = atoi(argv[++i]);
             continue;
@@ -600,6 +620,19 @@ int cmd_encode_run(int argc, char **argv) {
     st = vmav_media_probe(args.input, &info);
     if (!vmav_status_ok(st)) {
         fprintf(stderr, "vmavificient encode: probe '%s': %s\n", args.input, st.msg);
+        return 1;
+    }
+
+    /* --scale-to-hd guard: refuse anything that isn't UHD. v1 used
+     * height >= 2160; we match that. The actual scaled dims are
+     * computed after crop probe so the HD aspect respects letterboxing
+     * removal. */
+    if (args.scale_to_hd && info.height < 2160) {
+        fprintf(stderr,
+                "vmavificient encode: --scale-to-hd requires a UHD source "
+                "(got %dx%d, need height >= 2160)\n",
+                info.width,
+                info.height);
         return 1;
     }
 
@@ -878,6 +911,25 @@ int cmd_encode_run(int argc, char **argv) {
     const int chosen_bitrate = state.crf.bitrate_kbps;
     const double chosen_vmaf = state.crf.vmaf;
 
+    /* --scale-to-hd: compute target dims now (crop is known at this
+     * point). HD width is fixed at 1920; height derives from cropped
+     * aspect ratio (rounded down to even for YUV420). Falls back to
+     * full source aspect when crop has no meaningful trim. */
+    int scale_w = 0;
+    int scale_h = 0;
+    if (args.scale_to_hd) {
+        const int src_w =
+            (state.crop.is_meaningful && state.crop.width > 0) ? state.crop.width : info.width;
+        const int src_h =
+            (state.crop.is_meaningful && state.crop.height > 0) ? state.crop.height : info.height;
+        scale_w = 1920;
+        scale_h = (int)(((int64_t)src_h * 1920) / src_w) & ~1;
+        if (scale_h < 2) {
+            scale_h = 2;
+        }
+    }
+    const int output_height = args.scale_to_hd ? scale_h : info.height;
+
     /* Finalize mkv_path early so --dry-run / --grain-only print the
      * actual path that a real encode would target. If args.output was
      * given, mkv_path is already set; if --tmdb completed, build a
@@ -900,7 +952,7 @@ int cmd_encode_run(int argc, char **argv) {
                                                         state.tmdb.title,
                                                         state.tmdb.year,
                                                         lang_tag,
-                                                        info.height,
+                                                        output_height,
                                                         &hdr,
                                                         source,
                                                         release_group);
@@ -924,7 +976,7 @@ int cmd_encode_run(int argc, char **argv) {
      * "what would this encode do?" question. Print the plan, optional
      * preset dump, and skip every step that touches disk. */
     if (args.dry_run || args.grain_only) {
-        print_plan(&args, &state, &info, &hdr, &tracks, mkv_path);
+        print_plan(&args, &state, &info, &hdr, &tracks, mkv_path, scale_w, scale_h);
         if (args.grain_only) {
             print_preset_dump(args.preset, info.height, state.grain.score);
         }
@@ -1159,6 +1211,8 @@ int cmd_encode_run(int argc, char **argv) {
             .preset = args.preset,
             .crf = chosen_crf,
             .target_bitrate_kbps = chosen_bitrate,
+            .scale_width = scale_w,
+            .scale_height = scale_h,
         };
         vmav_video_encode_result_t ve_result;
         st = vmav_video_encode(&ve_spec, &ve_result);

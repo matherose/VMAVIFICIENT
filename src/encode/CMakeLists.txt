@@ -17,6 +17,7 @@ target_link_libraries(vmav_encode
         vmav::tp::avformat
         vmav::tp::avcodec
         vmav::tp::swresample
+        vmav::tp::swscale
         vmav::tp::avutil
         vmav::tp::tesseract
         vmav::tp::leptonica

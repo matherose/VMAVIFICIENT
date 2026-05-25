@@ -21,9 +21,11 @@
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/error.h>
+#include <libavutil/imgutils.h>
 #include <libavutil/mastering_display_metadata.h>
 #include <libavutil/mathematics.h>
 #include <libavutil/pixfmt.h>
+#include <libswscale/swscale.h>
 #include <sys/stat.h>
 
 /* ====================================================================== */
@@ -165,6 +167,8 @@ vmav_status_t vmav_video_encode(const vmav_video_encode_spec_t *spec,
     AVCodecContext *dec = NULL;
     AVPacket *pkt = NULL;
     AVFrame *frame = NULL;
+    AVFrame *scaled = NULL; /* libswscale scratch frame, only when scaling */
+    struct SwsContext *sws = NULL;
     FILE *fp = NULL;
     vmav_svtav1_encoder_t *enc = NULL;
     vmav_ui_progress_t *prog = NULL;
@@ -210,11 +214,60 @@ vmav_status_t vmav_video_encode(const vmav_video_encode_spec_t *spec,
         fps = (AVRational){24000, 1001};
     }
 
+    /* If scaling requested, allocate a SwsContext + scratch AVFrame at
+     * the target dims. SVT sees the scaled dims; the decode loop pumps
+     * each source frame through sws_scale into `scaled` before send.
+     * Lanczos matches v1's `scale=…:flags=lanczos` filter; we keep the
+     * source pix_fmt (YUV420P10LE survives the scale untouched for HDR
+     * passthrough). */
+    const bool do_scale = (spec->scale_width > 0 && spec->scale_height > 0);
+    const int enc_width = do_scale ? spec->scale_width : dec->width;
+    const int enc_height = do_scale ? spec->scale_height : dec->height;
+    if (do_scale) {
+        sws = sws_getContext(dec->width,
+                             dec->height,
+                             dec->pix_fmt,
+                             enc_width,
+                             enc_height,
+                             dec->pix_fmt,
+                             SWS_LANCZOS,
+                             NULL,
+                             NULL,
+                             NULL);
+        if (sws == NULL) {
+            status = VMAV_ERR(VMAV_ERR_FFMPEG,
+                              "sws_getContext failed (%dx%d → %dx%d, fmt=%d)",
+                              dec->width,
+                              dec->height,
+                              enc_width,
+                              enc_height,
+                              dec->pix_fmt);
+            goto cleanup;
+        }
+        scaled = av_frame_alloc();
+        if (scaled == NULL) {
+            status = VMAV_ERR(VMAV_ERR_NO_MEM, "av_frame_alloc (scaled)");
+            goto cleanup;
+        }
+        scaled->format = dec->pix_fmt;
+        scaled->width = enc_width;
+        scaled->height = enc_height;
+        if (av_frame_get_buffer(scaled, 0) < 0) {
+            status = VMAV_ERR(VMAV_ERR_NO_MEM, "av_frame_get_buffer (scaled)");
+            goto cleanup;
+        }
+        VMAV_LOG_INFO("video_encode: scaling %dx%d → %dx%d (lanczos)",
+                      dec->width,
+                      dec->height,
+                      enc_width,
+                      enc_height);
+    }
+
     /* Configure the SVT-AV1 encoder spec. */
     vmav_svtav1_spec_t svt = {
         .preset = spec->preset,
-        .width = dec->width,
-        .height = dec->height,
+        .width = enc_width,
+        .height = enc_height,
         .bit_depth =
             (dec->pix_fmt == AV_PIX_FMT_YUV420P10LE || dec->pix_fmt == AV_PIX_FMT_YUV420P10BE) ? 10
                                                                                                : 8,
@@ -275,8 +328,24 @@ vmav_status_t vmav_video_encode(const vmav_video_encode_spec_t *spec,
             goto cleanup;
         }
         while (avcodec_receive_frame(dec, frame) == 0) {
-            const uint8_t *planes[3] = {frame->data[0], frame->data[1], frame->data[2]};
-            const int strides[3] = {frame->linesize[0], frame->linesize[1], frame->linesize[2]};
+            const AVFrame *src = frame;
+            if (do_scale) {
+                rc = sws_scale(sws,
+                               (const uint8_t *const *)frame->data,
+                               frame->linesize,
+                               0,
+                               dec->height,
+                               scaled->data,
+                               scaled->linesize);
+                if (rc <= 0) {
+                    av_frame_unref(frame);
+                    status = VMAV_ERR(VMAV_ERR_FFMPEG, "sws_scale returned %d", rc);
+                    goto cleanup;
+                }
+                src = scaled;
+            }
+            const uint8_t *planes[3] = {src->data[0], src->data[1], src->data[2]};
+            const int strides[3] = {src->linesize[0], src->linesize[1], src->linesize[2]};
             status = vmav_svtav1_encoder_send(enc, planes, strides, enc_pts, /*eos=*/false);
             av_frame_unref(frame);
             if (!vmav_status_ok(status)) {
@@ -363,6 +432,10 @@ cleanup:
         vmav_ui_progress_free(prog);
     }
     av_frame_free(&frame);
+    av_frame_free(&scaled);
+    if (sws != NULL) {
+        sws_freeContext(sws);
+    }
     av_packet_free(&pkt);
     if (fp != NULL) {
         fclose(fp);

@@ -28,6 +28,12 @@ typedef struct {
     int film_grain;          /* 0..50; from vmav_svtav1_film_grain_from_score */
     int crf;                 /* CRF mode; > 0 to enable */
     int target_bitrate_kbps; /* VBR fallback; used when crf <= 0 */
+    /* Optional libswscale downscale step. Both > 0 → scale source frames
+     * to scale_width×scale_height with SWS_LANCZOS before sending to
+     * SVT-AV1. Used by --scale-to-hd (and later --companion-hd's HD
+     * pass). Both 0 → no scaling, encode at source dims. */
+    int scale_width;
+    int scale_height;
 } vmav_video_encode_spec_t;
 
 typedef struct {
