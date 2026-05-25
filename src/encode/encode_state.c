@@ -185,6 +185,34 @@ static vmav_step_status_t json_to_step(const cJSON *node, const char *key) {
     return vmav_step_status_from_str(v->valuestring);
 }
 
+static cJSON *tmdb_to_json(const vmav_state_tmdb_t *t) {
+    cJSON *o = cJSON_CreateObject();
+    if (o == NULL) {
+        return NULL;
+    }
+    cJSON_AddItemToObject(o, "status", step_to_json(t->status));
+    cJSON_AddNumberToObject(o, "tmdb_id", t->tmdb_id);
+    cJSON_AddStringToObject(o, "title", t->title);
+    cJSON_AddNumberToObject(o, "year", t->year);
+    cJSON_AddStringToObject(o, "original_lang", t->original_lang);
+    return o;
+}
+
+static void tmdb_from_json(const cJSON *root, vmav_state_tmdb_t *out) {
+    const cJSON *o = cJSON_GetObjectItemCaseSensitive(root, "tmdb");
+    if (o == NULL) {
+        return;
+    }
+    out->status = json_to_step(o, "status");
+    out->tmdb_id = vmav_json_get_int(o, "tmdb_id", 0);
+    snprintf(out->title, sizeof(out->title), "%s", vmav_json_get_string(o, "title", ""));
+    out->year = vmav_json_get_int(o, "year", 0);
+    snprintf(out->original_lang,
+             sizeof(out->original_lang),
+             "%s",
+             vmav_json_get_string(o, "original_lang", ""));
+}
+
 static cJSON *crop_to_json(const vmav_state_crop_t *c) {
     cJSON *o = cJSON_CreateObject();
     if (o == NULL) {
@@ -428,6 +456,7 @@ vmav_status_t vmav_encode_state_load(const char *cache_dir,
         return VMAV_OK_STATUS;
     }
 
+    tmdb_from_json(root, &out->tmdb);
     crop_from_json(root, &out->crop);
     grain_from_json(root, &out->grain);
     crf_from_json(root, &out->crf);
@@ -491,6 +520,7 @@ vmav_status_t vmav_encode_state_save(const char *cache_dir, const vmav_encode_st
     cJSON_AddNumberToObject(input, "mtime", (double)state->input_mtime);
     cJSON_AddItemToObject(root, "input", input);
 
+    cJSON_AddItemToObject(root, "tmdb", tmdb_to_json(&state->tmdb));
     cJSON_AddItemToObject(root, "crop", crop_to_json(&state->crop));
     cJSON_AddItemToObject(root, "grain", grain_to_json(&state->grain));
     cJSON_AddItemToObject(root, "crf", crf_to_json(&state->crf));

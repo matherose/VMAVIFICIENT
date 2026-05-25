@@ -33,6 +33,7 @@
 
 #include "vmavificient/vmav_analysis.h"
 #include "vmavificient/vmav_audio.h"
+#include "vmavificient/vmav_config.h"
 #include "vmavificient/vmav_crf_search.h"
 #include "vmavificient/vmav_crop.h"
 #include "vmavificient/vmav_encode_state.h"
@@ -41,9 +42,11 @@
 #include "vmavificient/vmav_log.h"
 #include "vmavificient/vmav_media.h"
 #include "vmavificient/vmav_naming.h"
+#include "vmavificient/vmav_os.h"
 #include "vmavificient/vmav_preset.h"
 #include "vmavificient/vmav_rpu.h"
 #include "vmavificient/vmav_subtitle.h"
+#include "vmavificient/vmav_tmdb.h"
 #include "vmavificient/vmav_tracks.h"
 #include "vmavificient/vmav_video_encode.h"
 
@@ -58,10 +61,13 @@ typedef struct {
     const char *output;    /* explicit -o/--output; NULL → derived */
     const char *cache_dir; /* explicit --cache-dir; NULL → default */
     vmav_preset_t preset;
-    int crf;         /* > 0 → use directly, skip CRF search */
-    int target_vmaf; /* 0 → derive from preset + resolution */
-    int crf_min;     /* 0 → use VMAV_CRF_MIN */
-    int crf_max;     /* 0 → use VMAV_CRF_MAX */
+    int crf;          /* > 0 → use directly, skip CRF search */
+    int target_vmaf;  /* 0 → derive from preset + resolution */
+    int crf_min;      /* 0 → use VMAV_CRF_MIN */
+    int crf_max;      /* 0 → use VMAV_CRF_MAX */
+    int tmdb_id;      /* > 0 → look up TMDB; 0 with `blind` flag → skip */
+    bool blind;       /* explicit "no TMDB lookup" */
+    bool config_mode; /* --config → interactive setup, then exit */
     bool show_help;
 } encode_args_t;
 
@@ -83,6 +89,13 @@ static void print_help(FILE *out) {
           "  --cache-dir <path>        Where to keep intermediates +\n"
           "                            resume state (default:\n"
           "                            <input-dir>/.vmavificient-cache)\n"
+          "  --tmdb <id>               TMDB movie id; output uses\n"
+          "                            scene-style name. Requires API\n"
+          "                            key via $TMDB_API_KEY or config.\n"
+          "  --blind                   Skip TMDB lookup; output as\n"
+          "                            <input-stem>.av1.mkv.\n"
+          "  --config                  Interactive setup of TMDB API key\n"
+          "                            and release group, then exit.\n"
           "  -h, --help                Show this help\n"
           "\n"
           "Quality preset shortcuts (each equivalent to --preset <name>):\n"
@@ -98,6 +111,62 @@ static void print_help(FILE *out) {
  * --animation / --super35_* / --imax_* shorthand flags. */
 static vmav_status_t set_preset_shortcut(encode_args_t *out, const char *name) {
     return vmav_preset_from_string(name, &out->preset);
+}
+
+/* `--config` interactive setup. Loads the current config (if any) so
+ * the user sees a preview, then prompts for new values. Empty input
+ * keeps the existing value. Writes config.ini and returns. */
+static int run_interactive_config(void) {
+    vmav_config_t cfg;
+    vmav_config_init(&cfg);
+    /* Silently start from any existing file so we don't blow it away
+     * if the user just wants to change one field. */
+    (void)vmav_config_load(&cfg);
+
+    char path[VMAV_PATH_MAX];
+    if (vmav_status_ok(vmav_config_path(path, sizeof(path)))) {
+        fprintf(stdout, "vmavificient config — writing to %s\n\n", path);
+    }
+    fprintf(stdout, "TMDB API key");
+    if (cfg.tmdb_api_key[0] != '\0') {
+        fprintf(stdout, " [%.4s…%s]", cfg.tmdb_api_key, strlen(cfg.tmdb_api_key) > 4 ? "" : "");
+    }
+    fputs(": ", stdout);
+    fflush(stdout);
+    char buf[256];
+    if (fgets(buf, sizeof(buf), stdin) != NULL) {
+        size_t n = strlen(buf);
+        while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) {
+            buf[--n] = '\0';
+        }
+        if (n > 0) {
+            snprintf(cfg.tmdb_api_key, sizeof(cfg.tmdb_api_key), "%s", buf);
+        }
+    }
+
+    fprintf(stdout, "Release group");
+    if (cfg.release_group[0] != '\0') {
+        fprintf(stdout, " [%s]", cfg.release_group);
+    }
+    fputs(": ", stdout);
+    fflush(stdout);
+    if (fgets(buf, sizeof(buf), stdin) != NULL) {
+        size_t n = strlen(buf);
+        while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) {
+            buf[--n] = '\0';
+        }
+        if (n > 0) {
+            snprintf(cfg.release_group, sizeof(cfg.release_group), "%s", buf);
+        }
+    }
+
+    const vmav_status_t st = vmav_config_save(&cfg);
+    if (!vmav_status_ok(st)) {
+        fprintf(stderr, "vmavificient config: %s\n", st.msg);
+        return 1;
+    }
+    fputs("\nSaved.\n", stdout);
+    return 0;
 }
 
 static vmav_status_t parse_args(int argc, char **argv, encode_args_t *out) {
@@ -178,6 +247,18 @@ static vmav_status_t parse_args(int argc, char **argv, encode_args_t *out) {
             out->cache_dir = argv[++i];
             continue;
         }
+        if (strcmp(arg, "--tmdb") == 0 && i + 1 < argc) {
+            out->tmdb_id = atoi(argv[++i]);
+            continue;
+        }
+        if (strcmp(arg, "--blind") == 0) {
+            out->blind = true;
+            continue;
+        }
+        if (strcmp(arg, "--config") == 0) {
+            out->config_mode = true;
+            continue;
+        }
         if (arg[0] == '-') {
             return VMAV_ERR(VMAV_ERR_BAD_ARG, "unknown flag: %s", arg);
         }
@@ -213,6 +294,12 @@ int cmd_encode_run(int argc, char **argv) {
     encode_args_t args;
     vmav_status_t st = parse_args(argc, argv, &args);
     if (!vmav_status_ok(st)) {
+        /* `--config` doesn't take a positional input — parse_args
+         * still errors on missing input even though we don't need it
+         * for config mode. Detect it before printing help. */
+        if (args.config_mode) {
+            return run_interactive_config();
+        }
         fprintf(stderr, "vmavificient encode: %s\n", st.msg);
         print_help(stderr);
         return 2;
@@ -220,6 +307,9 @@ int cmd_encode_run(int argc, char **argv) {
     if (args.show_help) {
         print_help(stdout);
         return 0;
+    }
+    if (args.config_mode) {
+        return run_interactive_config();
     }
 
     /* Probe the input. */
@@ -230,20 +320,19 @@ int cmd_encode_run(int argc, char **argv) {
         return 1;
     }
 
-    /* Build derived output paths. */
+    /* IVF intermediate path is stable (derived from input). The MKV
+     * output path is finalized AFTER the TMDB step — if TMDB returns
+     * a title/year we build a scene-style filename; otherwise we
+     * fall back to <input-stem>.av1.mkv. */
     char ivf_path[1024];
     if (replace_extension(ivf_path, sizeof(ivf_path), args.input, ".av1.ivf") == 0) {
         fprintf(stderr, "vmavificient encode: input path too long\n");
         return 1;
     }
     char mkv_path[1024];
+    mkv_path[0] = '\0';
     if (args.output != NULL) {
         snprintf(mkv_path, sizeof(mkv_path), "%s", args.output);
-    } else {
-        if (replace_extension(mkv_path, sizeof(mkv_path), args.input, ".av1.mkv") == 0) {
-            fprintf(stderr, "vmavificient encode: input path too long\n");
-            return 1;
-        }
     }
 
     /* Resolve cache_dir: explicit --cache-dir or
@@ -271,6 +360,64 @@ int cmd_encode_run(int argc, char **argv) {
         VMAV_LOG_INFO("encode: resuming from cache_dir=%s", cache_dir);
     } else {
         VMAV_LOG_INFO("encode: fresh state in cache_dir=%s", cache_dir);
+    }
+
+    /* ---- Step: TMDB lookup ----
+     * Three paths:
+     *   * state.tmdb already COMPLETE → reuse (resume case)
+     *   * args.blind OR no tmdb_id → record blind (tmdb_id=0)
+     *   * tmdb_id > 0 → resolve API key + fetch movie, persist title/year
+     * Failure to fetch when --tmdb was requested is fatal; failure to
+     * resolve the API key is also fatal (can't lookup without it). */
+    if (state.tmdb.status != VMAV_STEP_COMPLETE) {
+        if (args.tmdb_id > 0 && !args.blind) {
+            char api_key[128];
+            const vmav_status_t kst = vmav_config_resolve_api_key(api_key, sizeof(api_key));
+            if (!vmav_status_ok(kst)) {
+                fprintf(stderr, "vmavificient encode: %s\n", kst.msg);
+                vmav_encode_state_free(&state);
+                return 1;
+            }
+            VMAV_LOG_INFO("encode: TMDB lookup id=%d", args.tmdb_id);
+            vmav_tmdb_movie_t movie = {0};
+            const vmav_status_t tst =
+                vmav_tmdb_fetch_movie(args.tmdb_id, api_key, /*timeout_ms=*/0, &movie);
+            if (!vmav_status_ok(tst)) {
+                fprintf(stderr, "vmavificient encode: tmdb_fetch: %s\n", tst.msg);
+                state.tmdb.status = VMAV_STEP_FAILED;
+                (void)vmav_encode_state_save(cache_dir, &state);
+                vmav_encode_state_free(&state);
+                return 1;
+            }
+            state.tmdb.status = VMAV_STEP_COMPLETE;
+            state.tmdb.tmdb_id = movie.tmdb_id;
+            snprintf(state.tmdb.title, sizeof(state.tmdb.title), "%s", movie.original_title);
+            state.tmdb.year = movie.release_year;
+            snprintf(state.tmdb.original_lang,
+                     sizeof(state.tmdb.original_lang),
+                     "%s",
+                     movie.original_language);
+        } else {
+            /* Blind: explicit or default. Persist tmdb_id=0 so resume
+             * doesn't re-evaluate the flag combinations. */
+            state.tmdb.status = VMAV_STEP_COMPLETE;
+            state.tmdb.tmdb_id = 0;
+        }
+        const vmav_status_t sst = vmav_encode_state_save(cache_dir, &state);
+        if (!vmav_status_ok(sst)) {
+            fprintf(stderr, "vmavificient encode: state_save (tmdb): %s\n", sst.msg);
+            vmav_encode_state_free(&state);
+            return 1;
+        }
+    }
+    if (state.tmdb.tmdb_id > 0) {
+        VMAV_LOG_INFO("encode: TMDB = %s (%d, %s) [id=%d]",
+                      state.tmdb.title,
+                      state.tmdb.year,
+                      state.tmdb.original_lang,
+                      state.tmdb.tmdb_id);
+    } else {
+        VMAV_LOG_INFO("encode: TMDB skipped (blind naming)");
     }
 
     /* ---- Step: crop detection ---- */
@@ -681,6 +828,47 @@ int cmd_encode_run(int argc, char **argv) {
         VMAV_LOG_INFO("encode: video_encode (cached) → %s [%lld frames]",
                       state.video.output_path,
                       (long long)state.video.frame_count);
+    }
+
+    /* Finalize mkv_path. If the user provided -o we already populated
+     * it before the steps. Otherwise we decide here:
+     *   * tmdb_id > 0: scene-style name via vmav_naming_build, using
+     *     TMDB title + year, the language tag computed from the audio
+     *     tracks + TMDB original_language + the detected French
+     *     variant, the input's source markers from the filename, and
+     *     the release_group from config.ini.
+     *   * else: <input-stem>.av1.mkv as the blind fallback. */
+    if (mkv_path[0] == '\0') {
+        if (state.tmdb.tmdb_id > 0) {
+            const vmav_naming_lang_tag_t lang_tag =
+                vmav_naming_lang_tag(&tracks, state.tmdb.original_lang, fv);
+            const vmav_naming_source_t source = vmav_naming_detect_source(args.input);
+            vmav_config_t cfg;
+            vmav_config_init(&cfg);
+            (void)vmav_config_load(&cfg);
+            const char *release_group = cfg.release_group[0] != '\0' ? cfg.release_group : "GROUP";
+            const vmav_status_t nst = vmav_naming_build(mkv_path,
+                                                        sizeof(mkv_path),
+                                                        state.tmdb.title,
+                                                        state.tmdb.year,
+                                                        lang_tag,
+                                                        info.height,
+                                                        &hdr,
+                                                        source,
+                                                        release_group);
+            if (!vmav_status_ok(nst)) {
+                fprintf(stderr, "vmavificient encode: naming_build: %s\n", nst.msg);
+                exit_code = 1;
+                goto cleanup;
+            }
+        } else {
+            if (replace_extension(mkv_path, sizeof(mkv_path), args.input, ".av1.mkv") == 0) {
+                fprintf(stderr, "vmavificient encode: input path too long\n");
+                exit_code = 1;
+                goto cleanup;
+            }
+        }
+        VMAV_LOG_INFO("encode: output path = %s", mkv_path);
     }
 
     /* ---- Step: final mux ----

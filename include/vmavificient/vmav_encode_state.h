@@ -42,6 +42,17 @@ vmav_step_status_t vmav_step_status_from_str(const char *s);
 
 typedef struct {
     vmav_step_status_t status;
+    /* tmdb_id == 0 means "blind" (--blind or no --tmdb): use stem-based
+     * output name. Non-zero means the TMDB lookup completed and the
+     * title/year/original_lang fields are populated. */
+    int tmdb_id;
+    char title[512];       /* TMDB original_title, UTF-8 */
+    int year;              /* TMDB release_year */
+    char original_lang[8]; /* TMDB original_language (ISO 639-1) */
+} vmav_state_tmdb_t;
+
+typedef struct {
+    vmav_step_status_t status;
     /* Crop rectangle in source pixels, mirrors vmav_crop_rect_t. */
     int x;
     int y;
@@ -101,6 +112,7 @@ typedef struct {
     int64_t input_size;  /* bytes, from stat */
     int64_t input_mtime; /* unix epoch seconds, from stat */
 
+    vmav_state_tmdb_t tmdb;
     vmav_state_crop_t crop;
     vmav_state_grain_t grain;
     vmav_state_crf_t crf;
