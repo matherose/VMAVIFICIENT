@@ -83,7 +83,7 @@ require pkgbuild
 log() { printf '[build_pkg] %s\n' "$*"; }
 
 stage="$(mktemp -d)"
-trap "rm -rf '$stage'" EXIT
+trap 'rm -rf "$stage"' EXIT
 
 log "installing $BUILD_DIR -> $stage (prefix=/usr/local, SOURCE_DATE_EPOCH=$SDE)"
 # pkgbuild lays the staging dir under --install-location, so we want

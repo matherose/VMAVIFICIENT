@@ -46,6 +46,9 @@ fi
 # as we discover more case-mismatch references.
 for arch_dir in "${INSTALL_DIR}"/*-w64-mingw32/lib; do
     [ -d "${arch_dir}" ] || continue
+    # shellcheck disable=SC2043
+    # Single-element loop kept as scaffolding; list grows on demand as
+    # we discover more case-mismatch references from upstream projects.
     for cased in Ws2_32; do
         lower="$(echo "${cased}" | tr '[:upper:]' '[:lower:]')"
         if [ -f "${arch_dir}/lib${lower}.a" ] && [ ! -e "${arch_dir}/lib${cased}.a" ]; then

@@ -84,7 +84,7 @@ require wix
 log() { printf '[build_msi] %s\n' "$*"; }
 
 stage="$(mktemp -d)"
-trap "rm -rf '$stage'" EXIT
+trap 'rm -rf "$stage"' EXIT
 
 log "installing $BUILD_DIR -> $stage (no prefix; tree mirrors target layout)"
 # We install with --prefix=stage so the staging layout is bin/...,

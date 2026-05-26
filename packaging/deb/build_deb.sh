@@ -72,7 +72,7 @@ require dpkg-deb
 log() { printf '[build_deb] %s\n' "$*"; }
 
 stage="$(mktemp -d)"
-trap "rm -rf '$stage'" EXIT
+trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/DEBIAN"
 
 log "installing $BUILD_DIR -> $stage (prefix=/usr, SOURCE_DATE_EPOCH=$SDE)"

@@ -1,0 +1,524 @@
+name: Pipeline
+
+# vmavificient unified CI/CD pipeline.
+# ─────────────────────────────────────────────────────────────────────
+# Five stages, gated by event type and ref:
+#
+#   1. lint     — clang-format + shellcheck + actionlint
+#   2. build    — 4 target matrix (linux-x86_64, linux-aarch64,
+#                 macos-arm64, windows-x86_64) with strong-mode
+#                 reproducibility check (double-build sha256 compare)
+#                 on main + tag refs, single cached build elsewhere.
+#   3. test     — same matrix; unit + integration. Real-content
+#                 fixtures (BBB + HDR) only on main + PR + tag refs.
+#   4. package  — same matrix; .tar.zst + per-platform format
+#                 (.deb / .pkg / .msi). PR + main + tag only.
+#   5. publish  — collect every artifact, create draft GH Release.
+#                 Tag refs only.
+#
+# Trigger / stage map:
+#                                lint  build  test  package  publish
+#   push to feature branch        Y     Y     Y       N        N
+#   pull_request to main          Y     Y     Y       Y        N
+#   push to main                  Y     Y     Y       Y        N
+#   push tag refs/tags/v*         Y     Y     Y       Y        Y
+#
+# Reproducibility is baked into the build flags everywhere
+# (SOURCE_DATE_EPOCH, prefix-maps, --build-id=none, --sort-section=name).
+# Main + tags additionally PROVE it by running scripts/repro_check.sh
+# which builds twice from clean and sha256-compares. Feature branches
+# trust the flags without proving.
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A new push on the same ref cancels the previous run, except on
+# main + tags where each push is a distinct gate that must complete.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: write   # publish stage creates the Release
+  pull-requests: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CLANG_FORMAT_VERSION: "18.1.8"
+
+jobs:
+  # ====================================================================
+  #  STAGE 1 - Lint
+  #
+  #  Three independent linters in parallel; each fails the whole
+  #  pipeline early so the slower build/test stages don't waste CI
+  #  minutes on a malformed branch.
+  # ====================================================================
+
+  lint-clang-format:
+    name: Lint • clang-format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install clang-format ${{ env.CLANG_FORMAT_VERSION }}
+        run: python3 -m pip install --user --quiet "clang-format==${CLANG_FORMAT_VERSION}"
+      - name: Show version
+        run: clang-format --version
+      - name: Check formatting
+        run: |
+          mapfile -t files < <(git ls-files '*.c' '*.h')
+          if [ ${#files[@]} -eq 0 ]; then
+              echo "No C sources to check."
+              exit 0
+          fi
+          clang-format --dry-run --Werror "${files[@]}"
+
+  lint-shellcheck:
+    name: Lint • shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get install -y --no-install-recommends shellcheck
+      - name: Lint shell scripts under scripts/ + packaging/
+        run: |
+          mapfile -t scripts < <(git ls-files 'scripts/*.sh' 'packaging/**/*.sh')
+          if [ ${#scripts[@]} -eq 0 ]; then
+              echo "No shell scripts to check."
+              exit 0
+          fi
+          shellcheck --severity=warning --shell=bash "${scripts[@]}"
+
+  lint-actionlint:
+    name: Lint • actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        run: |
+          bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          echo "$PWD" >> "$GITHUB_PATH"
+      - name: Lint workflow files
+        run: actionlint -color
+
+  # ====================================================================
+  #  STAGE 2 - Build
+  #
+  #  Matrix over the four supported targets. Each job:
+  #    1. installs the target's toolchain
+  #    2. restores third-party deps from cache (keyed by submodule
+  #       SHAs + toolchain file + ThirdParty.cmake)
+  #    3. configures with -DVMAV_BUNDLE_TESSDATA=ON when this build
+  #       will feed the package stage; OFF for feature branches
+  #    4. strong-mode reproducibility check on main + tags; single
+  #       cached build otherwise
+  #    5. uploads the binary + test executables as a stage artifact
+  #       for the test stage to consume
+  # ====================================================================
+
+  build:
+    name: Build • ${{ matrix.target.name }}
+    needs: [lint-clang-format, lint-shellcheck, lint-actionlint]
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - name: linux-x86_64
+            runs_on: ubuntu-latest
+            preset: linux-x86_64
+            host: linux
+          - name: linux-aarch64
+            runs_on: ubuntu-24.04-arm
+            preset: linux-aarch64
+            host: linux
+          - name: macos-arm64
+            runs_on: macos-14
+            preset: macos-arm64
+            host: macos
+          - name: windows-x86_64
+            runs_on: ubuntu-latest
+            preset: windows-x86_64-mingw
+            host: linux
+    runs-on: ${{ matrix.target.runs_on }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: lukka/get-cmake@latest
+
+      # Toolchain install (per-host).
+      - name: Setup Linux toolchain (clang-20 + ninja + ffmpeg)
+        if: matrix.target.host == 'linux' && matrix.target.name != 'windows-x86_64'
+        run: |
+          wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 20
+          sudo apt-get install -y --no-install-recommends \
+              clang-20 lld-20 llvm-20 nasm pkg-config meson ninja-build \
+              ffmpeg zstd dpkg-dev shellcheck
+
+      - name: Setup macOS toolchain (brew)
+        if: matrix.target.host == 'macos'
+        run: brew install meson nasm ffmpeg zstd gnu-tar
+
+      - name: Setup Windows cross toolchain (llvm-mingw + wine + dotnet/WiX)
+        if: matrix.target.name == 'windows-x86_64'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+              wine nasm pkg-config meson ninja-build \
+              ffmpeg zstd dotnet-sdk-8.0
+          dir="$(bash scripts/fetch_llvm_mingw.sh | tail -n 1)"
+          echo "${dir}/bin" >> "$GITHUB_PATH"
+          dotnet tool install --global wix
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      # Rust setup (vendored deps with Rust components: dovi, hdr10plus).
+      - name: Add Rust target
+        run: |
+          case "${{ matrix.target.name }}" in
+              linux-x86_64)   rustup target add x86_64-unknown-linux-gnu ;;
+              linux-aarch64)  rustup target add aarch64-unknown-linux-gnu ;;
+              macos-arm64)    rustup target add aarch64-apple-darwin ;;
+              windows-x86_64) rustup target add x86_64-pc-windows-gnu ;;
+          esac
+      - uses: taiki-e/install-action@v2
+        with: { tool: cargo-c }
+      - name: Point cargo at llvm-mingw linker (Windows only)
+        if: matrix.target.name == 'windows-x86_64'
+        run: |
+          echo "CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc" >> "$GITHUB_ENV"
+          echo "CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc" >> "$GITHUB_ENV"
+
+      # Caching.
+      - name: Capture submodule SHAs for cache key
+        run: git submodule status --recursive | awk '{print $1}' > .vmav-tp-shas
+      - name: Cache vendored third-party install + ExternalProject stamps
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/${{ matrix.target.preset }}/third_party_install
+            build/${{ matrix.target.preset }}/*-prefix
+          # Same key shape as before. No restore-keys (a partial cache
+          # leaves stale ExternalProject stamps that lie about deps
+          # being built).
+          key: vmav-tp-${{ matrix.target.name }}-${{ hashFiles('.vmav-tp-shas', 'cmake/modules/VmavThirdParty.cmake', format('cmake/toolchains/{0}.cmake', matrix.target.preset)) }}
+
+      - name: Cache real-content fixtures (BBB + HDR)
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'pull_request'
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/.real-content-cache
+          key: vmav-real-content-${{ hashFiles('scripts/fetch_real_content.sh') }}
+
+      - name: Cache tessdata (eng.traineddata)
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'pull_request'
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/.tessdata-cache
+          key: vmav-tessdata-${{ hashFiles('scripts/fetch_tessdata.sh') }}
+
+      # Configure: real-content + tessdata are ON for refs that go
+      # through the full chain (main / PR / tag). Feature branches
+      # skip both -- the integration tests auto-IGNORE the real-content
+      # paths via VMAV_REAL_CONTENT_ENABLED=0, keeping pushes fast.
+      # Two configure steps with mutually exclusive `if:` so the
+      # branch policy is expressed in GH Actions syntax rather than
+      # bash conditionals (lint-friendly).
+      - name: Configure (full chain - main / PR / tag)
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'pull_request'
+        run: |
+          cmake --preset ${{ matrix.target.preset }} \
+              -DVMAV_FETCH_REAL_CONTENT=ON \
+              -DVMAV_BUNDLE_TESSDATA=ON
+      - name: Configure (feature branch - lean)
+        if: github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') && github.event_name != 'pull_request'
+        run: |
+          cmake --preset ${{ matrix.target.preset }} \
+              -DVMAV_FETCH_REAL_CONTENT=OFF \
+              -DVMAV_BUNDLE_TESSDATA=OFF
+
+      # Build: strong-mode reproducibility check on main + tags;
+      # single cached pass elsewhere.
+      - name: Build (strong-mode reproducibility check)
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        run: scripts/repro_check.sh --preset ${{ matrix.target.preset }}
+      - name: Build (single cached pass)
+        if: github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/')
+        run: cmake --build --preset ${{ matrix.target.preset }}
+      - name: Build test binaries on top (strong-mode incremental)
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        run: cmake --build --preset ${{ matrix.target.preset }}
+
+      # Sanity + upload.
+      - name: Sanity check (binary file type + version)
+        run: |
+          case "${{ matrix.target.name }}" in
+              windows-x86_64) ext=".exe" ;;
+              *)              ext="" ;;
+          esac
+          binary="build/${{ matrix.target.preset }}/src/vmavificient${ext}"
+          file "$binary"
+          # Run the binary only on native hosts; cross-compiled Windows
+          # binaries get invoked under wine in the test stage.
+          if [[ "${{ matrix.target.name }}" != "windows-x86_64" ]]; then
+              "$binary" version
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.target.name }}
+          path: |
+            build/${{ matrix.target.preset }}/CTestTestfile.cmake
+            build/${{ matrix.target.preset }}/tests/**
+            build/${{ matrix.target.preset }}/src/vmavificient*
+            !build/${{ matrix.target.preset }}/**/CMakeFiles/**
+          retention-days: 7
+          if-no-files-found: error
+
+  # ====================================================================
+  #  STAGE 3 - Test
+  #
+  #  Downloads the build artifact + restores fixture caches + runs
+  #  ctest. Same matrix as build; Windows runs under wine on a Linux
+  #  host. Feature branches skip the real-content integration tests
+  #  automatically (VMAV_REAL_CONTENT_ENABLED=0 -> TEST_IGNORE).
+  # ====================================================================
+
+  test:
+    name: Test • ${{ matrix.target.name }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { name: linux-x86_64,   runs_on: ubuntu-latest,    preset: linux-x86_64,         host: linux }
+          - { name: linux-aarch64,  runs_on: ubuntu-24.04-arm, preset: linux-aarch64,        host: linux }
+          - { name: macos-arm64,    runs_on: macos-14,         preset: macos-arm64,          host: macos }
+          - { name: windows-x86_64, runs_on: ubuntu-latest,    preset: windows-x86_64-mingw, host: linux }
+    runs-on: ${{ matrix.target.runs_on }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: lukka/get-cmake@latest
+      - name: Install wine (Windows tests run on Linux under wine)
+        if: matrix.target.name == 'windows-x86_64'
+        run: sudo apt-get install -y --no-install-recommends wine
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-${{ matrix.target.name }}
+          path: build/${{ matrix.target.preset }}
+      - name: Restore exec bits stripped by upload-artifact zip
+        run: |
+          find build/${{ matrix.target.preset }} -maxdepth 3 -type f \
+              \( -name 'test_*' -o -name 'it_*' -o -name 'vmavificient' \
+                 -o -name 'test_*.exe' -o -name 'it_*.exe' -o -name 'vmavificient.exe' \) \
+              -exec chmod +x {} +
+      - name: Restore real-content fixtures
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'pull_request'
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/.real-content-cache
+          key: vmav-real-content-${{ hashFiles('scripts/fetch_real_content.sh') }}
+      - name: Run ctest
+        env:
+          WINEDEBUG: ${{ matrix.target.name == 'windows-x86_64' && '-all' || '' }}
+        run: ctest --test-dir build/${{ matrix.target.preset }} --output-on-failure
+      - name: Upload CTest log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-log-${{ matrix.target.name }}
+          path: build/${{ matrix.target.preset }}/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ====================================================================
+  #  STAGE 4 - Package
+  #
+  #  PR + main + tag only. Feature branches don't waste CI on packaging;
+  #  users running locally use `cmake --install` or the packaging
+  #  scripts directly.
+  #
+  #  Each arch produces:
+  #    linux-x86_64   -> .tar.zst + .deb (amd64)
+  #    linux-aarch64  -> .tar.zst + .deb (arm64)
+  #    macos-arm64    -> .tar.zst + .pkg
+  #    windows-x86_64 -> .tar.zst + .msi
+  # ====================================================================
+
+  package:
+    name: Package • ${{ matrix.target.name }}
+    needs: test
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - name: linux-x86_64
+            runs_on: ubuntu-latest
+            preset: linux-x86_64
+            host: linux
+            format: deb
+          - name: linux-aarch64
+            runs_on: ubuntu-24.04-arm
+            preset: linux-aarch64
+            host: linux
+            format: deb
+          - name: macos-arm64
+            runs_on: macos-14
+            preset: macos-arm64
+            host: macos
+            format: pkg
+          - name: windows-x86_64
+            runs_on: ubuntu-latest
+            preset: windows-x86_64-mingw
+            host: linux
+            format: msi
+    runs-on: ${{ matrix.target.runs_on }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: lukka/get-cmake@latest
+
+      # Same toolchain setup as build. Disabled-tests + bundled-tessdata
+      # configure here is the only delta from the test build.
+      - name: Setup Linux toolchain
+        if: matrix.target.host == 'linux' && matrix.target.name != 'windows-x86_64'
+        run: |
+          wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 20
+          sudo apt-get install -y --no-install-recommends \
+              clang-20 lld-20 llvm-20 nasm pkg-config meson ninja-build \
+              ffmpeg zstd dpkg-dev
+      - name: Setup macOS toolchain
+        if: matrix.target.host == 'macos'
+        run: brew install meson nasm ffmpeg zstd gnu-tar
+      - name: Setup Windows cross toolchain (+ WiX)
+        if: matrix.target.name == 'windows-x86_64'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+              wine nasm pkg-config meson ninja-build ffmpeg zstd dotnet-sdk-8.0
+          dir="$(bash scripts/fetch_llvm_mingw.sh | tail -n 1)"
+          echo "${dir}/bin" >> "$GITHUB_PATH"
+          dotnet tool install --global wix
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Add Rust target
+        run: |
+          case "${{ matrix.target.name }}" in
+              linux-x86_64)   rustup target add x86_64-unknown-linux-gnu ;;
+              linux-aarch64)  rustup target add aarch64-unknown-linux-gnu ;;
+              macos-arm64)    rustup target add aarch64-apple-darwin ;;
+              windows-x86_64) rustup target add x86_64-pc-windows-gnu ;;
+          esac
+      - uses: taiki-e/install-action@v2
+        with: { tool: cargo-c }
+      - name: Point cargo at llvm-mingw linker (Windows only)
+        if: matrix.target.name == 'windows-x86_64'
+        run: |
+          echo "CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc" >> "$GITHUB_ENV"
+          echo "CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc" >> "$GITHUB_ENV"
+
+      - name: Capture submodule SHAs
+        run: git submodule status --recursive | awk '{print $1}' > .vmav-tp-shas
+      - name: Cache vendored third-party (same key as build)
+        uses: actions/cache@v4
+        with:
+          path: |
+            build/${{ matrix.target.preset }}/third_party_install
+            build/${{ matrix.target.preset }}/*-prefix
+          key: vmav-tp-${{ matrix.target.name }}-${{ hashFiles('.vmav-tp-shas', 'cmake/modules/VmavThirdParty.cmake', format('cmake/toolchains/{0}.cmake', matrix.target.preset)) }}
+      - name: Cache tessdata
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/.tessdata-cache
+          key: vmav-tessdata-${{ hashFiles('scripts/fetch_tessdata.sh') }}
+
+      - name: Configure (packaging — tests off, tessdata bundled)
+        run: |
+          cmake --preset ${{ matrix.target.preset }} \
+              -DVMAV_BUNDLE_TESSDATA=ON \
+              -DVMAV_BUILD_TESTS=OFF \
+              -DVMAV_FETCH_REAL_CONTENT=OFF
+      - name: Build
+        run: cmake --build --preset ${{ matrix.target.preset }}
+
+      - name: Build .tar.zst
+        run: |
+          packaging/tarball/build_tarball.sh \
+              --build-dir build/${{ matrix.target.preset }} \
+              --triple    ${{ matrix.target.preset }} \
+              --out-dir   dist/
+
+      - name: Build .deb
+        if: matrix.target.format == 'deb'
+        run: |
+          packaging/deb/build_deb.sh \
+              --build-dir build/${{ matrix.target.preset }} \
+              --triple    ${{ matrix.target.preset }} \
+              --out-dir   dist/
+      - name: Build .pkg
+        if: matrix.target.format == 'pkg'
+        run: |
+          packaging/pkg/build_pkg.sh \
+              --build-dir build/${{ matrix.target.preset }} \
+              --triple    ${{ matrix.target.preset }} \
+              --out-dir   dist/
+      - name: Build .msi
+        if: matrix.target.format == 'msi'
+        run: |
+          packaging/msi/build_msi.sh \
+              --build-dir build/${{ matrix.target.preset }} \
+              --triple    ${{ matrix.target.preset }} \
+              --out-dir   dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.target.name }}
+          path: dist/*
+          retention-days: 14
+          if-no-files-found: error
+
+  # ====================================================================
+  #  STAGE 5 - Publish
+  #
+  #  Tag refs only. Collects every package-* artifact, lists the
+  #  combined set for inspection, and creates a DRAFT GitHub Release
+  #  with autogenerated notes. A human reviews + promotes the draft
+  #  to public visibility.
+  # ====================================================================
+
+  publish:
+    name: Publish • GitHub Release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          pattern: package-*
+          merge-multiple: true
+      - name: List collected release artifacts
+        run: ls -la dist/
+      - name: Create GitHub Release (draft)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+              --title "vmavificient $TAG" \
+              --generate-notes \
+              --draft \
+              dist/*

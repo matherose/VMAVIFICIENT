@@ -68,7 +68,7 @@ require zstd
 log() { printf '[build_tarball] %s\n' "$*"; }
 
 stage="$(mktemp -d)"
-trap "rm -rf '$stage'" EXIT
+trap 'rm -rf "$stage"' EXIT
 
 log "installing $BUILD_DIR -> $stage (SOURCE_DATE_EPOCH=$SDE)"
 SOURCE_DATE_EPOCH="$SDE" cmake --install "$BUILD_DIR" --prefix "$stage" --strip
