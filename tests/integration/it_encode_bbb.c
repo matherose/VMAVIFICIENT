@@ -6,15 +6,26 @@
  * full pipeline on actual H.264 + AAC content — a realistic stand-in
  * for a typical SDR Blu-ray rip minus the HDR signaling.
  *
- * What this gates today (m2 scope):
+ * What this gates today (m3 scope):
  *   * Pipeline runs end-to-end on real content without crashing.
  *   * state.json reports every step as COMPLETE on a fresh cache_dir.
- *   * Output MKV exists, is non-empty, and ffprobe sees an AV1 video
- *     stream + at least one opus audio stream.
+ *   * Per-step field assertions:
+ *     - crop  : full-frame 1920x1080, is_meaningful=false (BBB
+ *               trailer is fullframe, no letterbox).
+ *     - grain : score within (0.0, 0.5) — animation has some
+ *               compression noise but nowhere near film grain.
+ *     - crf   : the user-supplied --crf 50 was respected; no
+ *               bitrate_kbps set (VBR fallback inactive).
+ *     - audio : exactly one track, stream_index=1, lang=eng,
+ *               is_default=true; .opus sidecar exists on disk.
+ *     - subs  : sub_count=0 (BBB clip has no subtitle streams).
+ *     - video : frame_count in [120, 130] — 5 sec at 24 fps but
+ *               ffmpeg's -t 5 boundary can land 119-125 frames.
+ *     - mux   : final MKV ffprobes as exactly 2 streams: AV1
+ *               1920x1080 video, opus 6-channel audio with
+ *               lang=eng tag.
  *
  * Deferred to later milestones in Phase 8:
- *   * m3 — per-step field assertions (crop rect, grain score range,
- *     CRF search converged, audio language tags, mux stream layout).
  *   * m4 — HDR-passthrough assertion using a Tears of Steel HDR fixture.
  *   * m5 — option matrix (--preset, --crf, --bitrate, --scale-to-hd,
  *     --companion-hd, --dry-run, --grain-only).
@@ -28,6 +39,7 @@
 #include "vmavificient/vmav_media.h"
 #include "vmavificient/vmav_result.h"
 #include "vmavificient/vmav_subproc.h"
+#include "vmavificient/vmav_tracks.h"
 
 #include "unity.h"
 
@@ -253,13 +265,57 @@ static void test_encode_bbb_completes_full_pipeline(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(VMAV_STEP_COMPLETE, state.video.status, "video");
     TEST_ASSERT_EQUAL_INT_MESSAGE(VMAV_STEP_COMPLETE, state.mux.status, "mux");
 
-    /* BBB has exactly one audio track (AAC 5.1 in the trailer source).
-     * Per-step audio assertions are m3's job; m2 just confirms the
-     * step ran and recorded the track. */
-    TEST_ASSERT_MESSAGE(state.audio_count > 0, "no audio tracks recorded");
+    /* === per-step field assertions === */
+
+    /* Crop: BBB trailer is full-frame 1080p, no letterbox. The crop
+     * step should record the full frame with is_meaningful=false. */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, state.crop.x, "crop.x");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, state.crop.y, "crop.y");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1920, state.crop.width, "crop.width");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1080, state.crop.height, "crop.height");
+    TEST_ASSERT_FALSE_MESSAGE(state.crop.is_meaningful, "crop.is_meaningful");
+
+    /* Grain: animation has light compression noise from the source
+     * encode (this is a re-encoded H.264 trailer, not first-gen
+     * footage), but stays well below typical film-grain levels. */
+    TEST_ASSERT_MESSAGE(state.grain.score > 0.0 && state.grain.score < 0.5,
+                        "grain.score out of expected range for animation content");
+
+    /* CRF: --crf 50 was passed, so the search step must have
+     * short-circuited and persisted exactly that value. VBR mode
+     * (bitrate_kbps) stays at 0. */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(50, state.crf.crf, "crf.crf");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, state.crf.bitrate_kbps, "crf.bitrate_kbps");
+    TEST_ASSERT_EQUAL_DOUBLE_MESSAGE(0.0, state.crf.vmaf, "crf.vmaf (no search ran)");
+    TEST_ASSERT_FALSE_MESSAGE(state.crf.escalated, "crf.escalated (no search ran)");
+
+    /* Audio: one track (BBB clip has a single AAC 5.1 stream).
+     * Source stream is index 1 (after video at index 0). Default flag
+     * is propagated from the source. .opus sidecar must exist on disk
+     * — the mux step references it by path. */
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1, state.audio_count, "audio_count");
     TEST_ASSERT_EQUAL_INT_MESSAGE(VMAV_STEP_COMPLETE, state.audio[0].status, "audio[0]");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(1, state.audio[0].stream_index, "audio[0].stream_index");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("eng", state.audio[0].language, "audio[0].language");
+    TEST_ASSERT_TRUE_MESSAGE(state.audio[0].is_default, "audio[0].is_default");
+    {
+        struct stat ab;
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            0, stat(state.audio[0].output_path, &ab), state.audio[0].output_path);
+        TEST_ASSERT_GREATER_THAN_INT64(0, (int64_t)ab.st_size);
+    }
+
+    /* Subs: BBB clip has no subtitle streams. */
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, state.sub_count, "sub_count");
+
+    /* Video: 5 sec × 24 fps ≈ 120 frames, but ffmpeg's -t boundary
+     * lands somewhere in [119, 125] depending on packet alignment. */
+    TEST_ASSERT_MESSAGE(state.video.frame_count >= 119 && state.video.frame_count <= 130,
+                        "video.frame_count outside expected range for 5s @ 24 fps");
 
     vmav_encode_state_free(&state);
+
+    /* === mux output assertions === */
 
     /* Probe the output MKV: codec + dims. */
     vmav_media_info_t info;
@@ -269,6 +325,19 @@ static void test_encode_bbb_completes_full_pipeline(void) {
     TEST_ASSERT_EQUAL_INT(1920, info.width);
     TEST_ASSERT_EQUAL_INT(1080, info.height);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(info.container_name, "matroska"), info.container_name);
+
+    /* Track layout: we want exactly 2 streams — video + audio, no subs,
+     * no extras. media_tracks_probe walks all non-video streams; the
+     * count must match what cmd_encode recorded in state.json. */
+    vmav_media_tracks_t tracks;
+    const vmav_status_t tst = vmav_media_tracks_probe(g_output, &tracks);
+    TEST_ASSERT_TRUE_MESSAGE(vmav_status_ok(tst), tst.msg);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1, tracks.audio_count, "output audio_count");
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, tracks.subtitle_count, "output sub_count");
+    /* opus 5.1 channel layout survived the re-encode. */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(6, tracks.audio[0].channels, "audio[0].channels");
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("eng", tracks.audio[0].language, "audio[0].language tag");
+    vmav_media_tracks_free(&tracks);
 #endif
 }
 
