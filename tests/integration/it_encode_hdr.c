@@ -28,6 +28,7 @@
  * CONTENT_LIGHT_LEVEL. Mirroring the implementation pattern means a
  * test failure points at the same code path the encoder uses. */
 
+#include "vmavificient/vmav_encode_state.h"
 #include "vmavificient/vmav_media.h"
 #include "vmavificient/vmav_result.h"
 #include "vmavificient/vmav_subproc.h"
@@ -317,8 +318,97 @@ static void test_hdr10_metadata_round_trips(void) {
 #endif
 }
 
+/* m5: --companion-hd on the UHD HDR fixture. One test covers both
+ * --scale-to-hd (the libswscale path runs inside the HD pass) and
+ * --companion-hd (the dual UHD+HD orchestration), since a successful
+ * companion-hd run depends on the same scaler the standalone scale-
+ * to-hd would use. */
+static void test_encode_hdr_companion_hd(void) {
+#if VMAV_REAL_CONTENT_ENABLED == 0
+    TEST_IGNORE_MESSAGE("VMAV_FETCH_REAL_CONTENT=OFF");
+#else
+    char hd_output[1024];
+    snprintf(hd_output, sizeof(hd_output), "%s/hdr_clip-HDLight.av1.mkv", g_workdir);
+
+    const char *argv[] = {
+        VMAV_BIN,
+        "encode",
+        g_input,
+        "--blind",
+        "--crf",
+        "55", /* one tick lower than the m4 test → still fast on 4K */
+        "--companion-hd",
+        "--cache-dir",
+        g_cache_dir,
+        "-o",
+        g_output,
+        NULL,
+    };
+    vmav_subproc_spec_t spec = {
+        .exe = VMAV_BIN,
+        .argv = argv,
+        .capture_stderr = true,
+        .capture_stdout = true,
+    };
+    vmav_subproc_result_t res = {0};
+    const vmav_status_t st = vmav_subproc_run(&spec, &res);
+    TEST_ASSERT_TRUE_MESSAGE(vmav_status_ok(st), st.msg);
+    if (res.exit_code != 0) {
+        const char *err = res.stderr_buf.data != NULL ? (const char *)res.stderr_buf.data : "";
+        fprintf(stderr, "\n--- vmavificient stderr ---\n%s\n--- end ---\n", err);
+    }
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, res.exit_code, "companion-hd exit code");
+    vmav_subproc_result_free(&res);
+
+    /* Both outputs exist. */
+    struct stat sb;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, stat(g_output, &sb), g_output);
+    TEST_ASSERT_GREATER_THAN_INT64(0, (int64_t)sb.st_size);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, stat(hd_output, &sb), hd_output);
+    TEST_ASSERT_GREATER_THAN_INT64(0, (int64_t)sb.st_size);
+
+    /* UHD output is 3840x2160 AV1. */
+    vmav_media_info_t uhd_info;
+    TEST_ASSERT_TRUE(vmav_status_ok(vmav_media_probe(g_output, &uhd_info)));
+    TEST_ASSERT_EQUAL_STRING("av1", uhd_info.codec_name);
+    TEST_ASSERT_EQUAL_INT(3840, uhd_info.width);
+    TEST_ASSERT_EQUAL_INT(2160, uhd_info.height);
+
+    /* HD companion is 1920x1080 AV1 — derived from the source's
+     * cropped aspect ratio (testsrc2 is 16:9, so 1920x1080 exact). */
+    vmav_media_info_t hd_info;
+    TEST_ASSERT_TRUE(vmav_status_ok(vmav_media_probe(hd_output, &hd_info)));
+    TEST_ASSERT_EQUAL_STRING("av1", hd_info.codec_name);
+    TEST_ASSERT_EQUAL_INT(1920, hd_info.width);
+    TEST_ASSERT_EQUAL_INT(1080, hd_info.height);
+
+    /* HDR metadata survives on BOTH outputs — the m4 fix flows into
+     * the HD pass since it uses the same encoder_svtav1 wrapper. */
+    hdr_probe_t uhd_hdr, hd_hdr;
+    TEST_ASSERT_TRUE_MESSAGE(probe_hdr(g_output, &uhd_hdr), "probe_hdr on UHD output");
+    TEST_ASSERT_TRUE_MESSAGE(probe_hdr(hd_output, &hd_hdr), "probe_hdr on HD output");
+    TEST_ASSERT_TRUE_MESSAGE(uhd_hdr.has_mastering, "UHD dropped mastering");
+    TEST_ASSERT_TRUE_MESSAGE(hd_hdr.has_mastering, "HD dropped mastering");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(1000, uhd_hdr.max_cll, "UHD max_cll");
+    TEST_ASSERT_EQUAL_UINT16_MESSAGE(1000, hd_hdr.max_cll, "HD max_cll");
+
+    /* state.json must report both video_hd + mux_hd as COMPLETE. */
+    vmav_encode_state_t state;
+    vmav_encode_state_init(&state);
+    bool fp_match = false;
+    TEST_ASSERT_TRUE(
+        vmav_status_ok(vmav_encode_state_load(g_cache_dir, g_input, &state, &fp_match)));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(VMAV_STEP_COMPLETE, state.video.status, "video");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(VMAV_STEP_COMPLETE, state.mux.status, "mux");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(VMAV_STEP_COMPLETE, state.video_hd.status, "video_hd");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(VMAV_STEP_COMPLETE, state.mux_hd.status, "mux_hd");
+    vmav_encode_state_free(&state);
+#endif
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_hdr10_metadata_round_trips);
+    RUN_TEST(test_encode_hdr_companion_hd);
     return UNITY_END();
 }

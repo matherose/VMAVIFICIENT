@@ -341,8 +341,153 @@ static void test_encode_bbb_completes_full_pipeline(void) {
 #endif
 }
 
+/* =================================================================
+ *  m5: option-matrix tests
+ *
+ * Each variant gets its own Unity test so a failure points directly
+ * at the misbehaving option. setUp re-creates the workdir between
+ * tests; no fixture leakage. */
+
+static void test_encode_bbb_dry_run(void) {
+#if VMAV_REAL_CONTENT_ENABLED == 0
+    TEST_IGNORE_MESSAGE("VMAV_FETCH_REAL_CONTENT=OFF");
+#else
+    /* --dry-run runs probe + tmdb + crop + grain + CRF + naming and
+     * exits without touching disk. We assert exit 0 + "(dry-run, no
+     * files written)" appears on stdout + the output MKV path was
+     * NOT created. */
+    const char *argv[] = {
+        VMAV_BIN,
+        "encode",
+        g_input,
+        "--blind",
+        "--crf",
+        "50",
+        "--dry-run",
+        "--cache-dir",
+        g_cache_dir,
+        "-o",
+        g_output,
+        NULL,
+    };
+    vmav_subproc_spec_t spec = {
+        .exe = VMAV_BIN,
+        .argv = argv,
+        .capture_stderr = true,
+        .capture_stdout = true,
+    };
+    vmav_subproc_result_t res = {0};
+    const vmav_status_t st = vmav_subproc_run(&spec, &res);
+    TEST_ASSERT_TRUE_MESSAGE(vmav_status_ok(st), st.msg);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, res.exit_code, "dry-run exit code");
+    const char *out = res.stdout_buf.data != NULL ? (const char *)res.stdout_buf.data : "";
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out, "Encode plan"), "stdout missing Encode plan");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out, "(dry-run"), "stdout missing dry-run marker");
+    vmav_subproc_result_free(&res);
+    /* Output MKV must NOT exist. */
+    struct stat sb;
+    TEST_ASSERT_NOT_EQUAL_INT_MESSAGE(0, stat(g_output, &sb), "output MKV created in dry-run");
+#endif
+}
+
+static void test_encode_bbb_grain_only(void) {
+#if VMAV_REAL_CONTENT_ENABLED == 0
+    TEST_IGNORE_MESSAGE("VMAV_FETCH_REAL_CONTENT=OFF");
+#else
+    /* --grain-only is --dry-run plus a preset-knobs dump in stdout.
+     * Same skip-encode guarantee. */
+    const char *argv[] = {
+        VMAV_BIN,
+        "encode",
+        g_input,
+        "--blind",
+        "--crf",
+        "50",
+        "--grain-only",
+        "--cache-dir",
+        g_cache_dir,
+        "-o",
+        g_output,
+        NULL,
+    };
+    vmav_subproc_spec_t spec = {
+        .exe = VMAV_BIN,
+        .argv = argv,
+        .capture_stderr = true,
+        .capture_stdout = true,
+    };
+    vmav_subproc_result_t res = {0};
+    const vmav_status_t st = vmav_subproc_run(&spec, &res);
+    TEST_ASSERT_TRUE_MESSAGE(vmav_status_ok(st), st.msg);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, res.exit_code, "grain-only exit code");
+    const char *out = res.stdout_buf.data != NULL ? (const char *)res.stdout_buf.data : "";
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out, "Resolved preset knobs"),
+                                 "stdout missing preset-knobs section");
+    vmav_subproc_result_free(&res);
+#endif
+}
+
+static void test_encode_bbb_with_bitrate_vbr(void) {
+#if VMAV_REAL_CONTENT_ENABLED == 0
+    TEST_IGNORE_MESSAGE("VMAV_FETCH_REAL_CONTENT=OFF");
+#else
+    /* --bitrate flips the rate-control mode to VBR and short-circuits
+     * the CRF search. state.crf.bitrate_kbps gets the value, crf
+     * stays 0. */
+    const char *argv[] = {
+        VMAV_BIN,
+        "encode",
+        g_input,
+        "--blind",
+        "--bitrate",
+        "2000",
+        "--cache-dir",
+        g_cache_dir,
+        "-o",
+        g_output,
+        NULL,
+    };
+    vmav_subproc_spec_t spec = {
+        .exe = VMAV_BIN,
+        .argv = argv,
+        .capture_stderr = true,
+        .capture_stdout = true,
+    };
+    vmav_subproc_result_t res = {0};
+    const vmav_status_t st = vmav_subproc_run(&spec, &res);
+    TEST_ASSERT_TRUE_MESSAGE(vmav_status_ok(st), st.msg);
+    if (res.exit_code != 0) {
+        const char *err = res.stderr_buf.data != NULL ? (const char *)res.stderr_buf.data : "";
+        fprintf(stderr, "\n--- vmavificient stderr ---\n%s\n--- end ---\n", err);
+    }
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, res.exit_code, "vbr encode exit code");
+    vmav_subproc_result_free(&res);
+
+    /* Output exists and is AV1. */
+    struct stat sb;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, stat(g_output, &sb), g_output);
+    vmav_media_info_t info;
+    TEST_ASSERT_TRUE(vmav_status_ok(vmav_media_probe(g_output, &info)));
+    TEST_ASSERT_EQUAL_STRING("av1", info.codec_name);
+
+    /* state.crf in VBR mode: crf=0, bitrate_kbps=2000. */
+    vmav_encode_state_t state;
+    vmav_encode_state_init(&state);
+    bool fp_match = false;
+    TEST_ASSERT_TRUE(
+        vmav_status_ok(vmav_encode_state_load(g_cache_dir, g_input, &state, &fp_match)));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(VMAV_STEP_COMPLETE, state.crf.status, "crf");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, state.crf.crf, "crf.crf (VBR mode)");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(2000, state.crf.bitrate_kbps, "crf.bitrate_kbps");
+    vmav_encode_state_free(&state);
+#endif
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_encode_bbb_completes_full_pipeline);
+    RUN_TEST(test_encode_bbb_dry_run);
+    RUN_TEST(test_encode_bbb_grain_only);
+    RUN_TEST(test_encode_bbb_with_bitrate_vbr);
     return UNITY_END();
 }
