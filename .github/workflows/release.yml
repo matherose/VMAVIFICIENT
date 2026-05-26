@@ -62,6 +62,7 @@ jobs:
         run: |
           cmake --preset linux-x86_64 \
               -DVMAV_BUNDLE_TESSDATA=ON \
+              -DVMAV_BUILD_TESTS=OFF \
               -DVMAV_FETCH_REAL_CONTENT=OFF
       - name: Build (strong-mode reproducibility check)
         run: scripts/repro_check.sh --preset linux-x86_64
@@ -114,6 +115,7 @@ jobs:
         run: |
           cmake --preset linux-aarch64 \
               -DVMAV_BUNDLE_TESSDATA=ON \
+              -DVMAV_BUILD_TESTS=OFF \
               -DVMAV_FETCH_REAL_CONTENT=OFF
       - name: Build (strong-mode reproducibility check)
         run: scripts/repro_check.sh --preset linux-aarch64
@@ -160,6 +162,7 @@ jobs:
         run: |
           cmake --preset macos-arm64 \
               -DVMAV_BUNDLE_TESSDATA=ON \
+              -DVMAV_BUILD_TESTS=OFF \
               -DVMAV_FETCH_REAL_CONTENT=OFF
       - name: Build (strong-mode reproducibility check)
         run: scripts/repro_check.sh --preset macos-arm64
@@ -223,6 +226,7 @@ jobs:
         run: |
           cmake --preset windows-x86_64-mingw \
               -DVMAV_BUNDLE_TESSDATA=ON \
+              -DVMAV_BUILD_TESTS=OFF \
               -DVMAV_FETCH_REAL_CONTENT=OFF
       - name: Build (strong-mode reproducibility check)
         run: scripts/repro_check.sh --preset windows-x86_64-mingw
