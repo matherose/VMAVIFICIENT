@@ -125,13 +125,14 @@ jobs:
         with:
           submodules: recursive
       - uses: lukka/get-cmake@latest
-      - name: Install clang-20 + lld-20 + nasm + pkg-config + meson + diffoscope
+      - name: Install clang-20 + lld-20 + nasm + pkg-config + meson + diffoscope + ffmpeg
         run: |
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh 20
           sudo apt-get install -y --no-install-recommends \
-              clang-20 lld-20 llvm-20 nasm pkg-config meson ninja-build diffoscope
+              clang-20 lld-20 llvm-20 nasm pkg-config meson ninja-build diffoscope \
+              ffmpeg
       - name: Add Rust gnu target
         run: rustup target add x86_64-unknown-linux-gnu
       - uses: taiki-e/install-action@v2
@@ -154,9 +155,18 @@ jobs:
           # match would leave stale ExternalProject stamps that claim
           # deps are built when they aren't, producing link errors.
           key: vmav-tp-linux-x86_64-${{ hashFiles('.vmav-tp-shas', 'cmake/modules/VmavThirdParty.cmake', 'cmake/toolchains/linux-x86_64.cmake') }}
+      # Phase 8: real-content fixtures (BBB trailer + synthetic HDR
+      # test pattern). Cached by fetch script content + URL list, so a
+      # script edit invalidates and re-fetches. Shared with the test
+      # job below — first job to populate primes both.
+      - name: Cache real-content fixtures (BBB + HDR)
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/.real-content-cache
+          key: vmav-real-content-${{ hashFiles('scripts/fetch_real_content.sh') }}
       - name: Configure (fast mode)
         if: needs.config.outputs.mode == 'fast'
-        run: cmake --preset linux-x86_64
+        run: cmake --preset linux-x86_64 -DVMAV_FETCH_REAL_CONTENT=ON
       - name: Build (fast mode)
         if: needs.config.outputs.mode == 'fast'
         run: cmake --build --preset linux-x86_64
@@ -168,7 +178,7 @@ jobs:
         run: scripts/repro_check.sh --preset linux-x86_64
       - name: Build test binaries on top (strong mode)
         if: needs.config.outputs.mode == 'strong'
-        run: cmake --build --preset linux-x86_64
+        run: cmake --build --preset linux-x86_64 -DVMAV_FETCH_REAL_CONTENT=ON
       - name: Sanity (ELF + version)
         run: |
           file build/linux-x86_64/src/vmavificient
@@ -193,13 +203,14 @@ jobs:
         with:
           submodules: recursive
       - uses: lukka/get-cmake@latest
-      - name: Install clang-20 + lld-20 + pkg-config + meson + diffoscope
+      - name: Install clang-20 + lld-20 + pkg-config + meson + diffoscope + ffmpeg
         run: |
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
           sudo /tmp/llvm.sh 20
           sudo apt-get install -y --no-install-recommends \
-              clang-20 lld-20 llvm-20 pkg-config meson ninja-build diffoscope
+              clang-20 lld-20 llvm-20 pkg-config meson ninja-build diffoscope \
+              ffmpeg
       - name: Add Rust gnu target
         run: rustup target add aarch64-unknown-linux-gnu
       - uses: taiki-e/install-action@v2
@@ -216,9 +227,14 @@ jobs:
             build/linux-aarch64/third_party_install
             build/linux-aarch64/*-prefix
           key: vmav-tp-linux-aarch64-${{ hashFiles('.vmav-tp-shas', 'cmake/modules/VmavThirdParty.cmake', 'cmake/toolchains/linux-aarch64.cmake') }}
+      - name: Cache real-content fixtures (BBB + HDR)
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/.real-content-cache
+          key: vmav-real-content-${{ hashFiles('scripts/fetch_real_content.sh') }}
       - name: Configure (fast mode)
         if: needs.config.outputs.mode == 'fast'
-        run: cmake --preset linux-aarch64
+        run: cmake --preset linux-aarch64 -DVMAV_FETCH_REAL_CONTENT=ON
       - name: Build (fast mode)
         if: needs.config.outputs.mode == 'fast'
         run: cmake --build --preset linux-aarch64
@@ -227,7 +243,7 @@ jobs:
         run: scripts/repro_check.sh --preset linux-aarch64
       - name: Build test binaries on top (strong mode)
         if: needs.config.outputs.mode == 'strong'
-        run: cmake --build --preset linux-aarch64
+        run: cmake --build --preset linux-aarch64 -DVMAV_FETCH_REAL_CONTENT=ON
       - name: Sanity (ELF + version)
         run: |
           file build/linux-aarch64/src/vmavificient
@@ -252,8 +268,8 @@ jobs:
         with:
           submodules: recursive
       - uses: lukka/get-cmake@latest
-      - name: Install meson + nasm + diffoscope via Homebrew
-        run: brew install meson nasm diffoscope
+      - name: Install meson + nasm + diffoscope + ffmpeg via Homebrew
+        run: brew install meson nasm diffoscope ffmpeg
       - name: Add Rust aarch64-apple-darwin target (host triple)
         run: rustup target add aarch64-apple-darwin
       - uses: taiki-e/install-action@v2
@@ -270,9 +286,14 @@ jobs:
             build/macos-arm64/third_party_install
             build/macos-arm64/*-prefix
           key: vmav-tp-macos-arm64-${{ hashFiles('.vmav-tp-shas', 'cmake/modules/VmavThirdParty.cmake', 'cmake/toolchains/macos-arm64.cmake') }}
+      - name: Cache real-content fixtures (BBB + HDR)
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/.real-content-cache
+          key: vmav-real-content-${{ hashFiles('scripts/fetch_real_content.sh') }}
       - name: Configure (fast mode)
         if: needs.config.outputs.mode == 'fast'
-        run: cmake --preset macos-arm64
+        run: cmake --preset macos-arm64 -DVMAV_FETCH_REAL_CONTENT=ON
       - name: Build (fast mode)
         if: needs.config.outputs.mode == 'fast'
         run: cmake --build --preset macos-arm64
@@ -281,7 +302,7 @@ jobs:
         run: scripts/repro_check.sh --preset macos-arm64
       - name: Build test binaries on top (strong mode)
         if: needs.config.outputs.mode == 'strong'
-        run: cmake --build --preset macos-arm64
+        run: cmake --build --preset macos-arm64 -DVMAV_FETCH_REAL_CONTENT=ON
       - name: Sanity (Mach-O + version)
         run: |
           file build/macos-arm64/src/vmavificient
@@ -306,11 +327,12 @@ jobs:
         with:
           submodules: recursive
       - uses: lukka/get-cmake@latest
-      - name: Install wine + nasm + pkg-config + meson + diffoscope
+      - name: Install wine + nasm + pkg-config + meson + diffoscope + ffmpeg
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-              wine nasm pkg-config meson ninja-build diffoscope
+              wine nasm pkg-config meson ninja-build diffoscope \
+              ffmpeg
           command -v wine
           wine --version
       - name: Fetch llvm-mingw
@@ -337,9 +359,14 @@ jobs:
             build/windows-x86_64-mingw/third_party_install
             build/windows-x86_64-mingw/*-prefix
           key: vmav-tp-windows-x86_64-mingw-${{ hashFiles('.vmav-tp-shas', 'cmake/modules/VmavThirdParty.cmake', 'cmake/toolchains/windows-x86_64-mingw.cmake') }}
+      - name: Cache real-content fixtures (BBB + HDR)
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/.real-content-cache
+          key: vmav-real-content-${{ hashFiles('scripts/fetch_real_content.sh') }}
       - name: Configure (fast mode)
         if: needs.config.outputs.mode == 'fast'
-        run: cmake --preset windows-x86_64-mingw
+        run: cmake --preset windows-x86_64-mingw -DVMAV_FETCH_REAL_CONTENT=ON
       - name: Build (fast mode)
         if: needs.config.outputs.mode == 'fast'
         run: cmake --build --preset windows-x86_64-mingw
@@ -348,7 +375,7 @@ jobs:
         run: scripts/repro_check.sh --preset windows-x86_64-mingw
       - name: Build test binaries on top (strong mode)
         if: needs.config.outputs.mode == 'strong'
-        run: cmake --build --preset windows-x86_64-mingw
+        run: cmake --build --preset windows-x86_64-mingw -DVMAV_FETCH_REAL_CONTENT=ON
       - name: Sanity (PE)
         run: |
           file build/windows-x86_64-mingw/src/vmavificient.exe
@@ -380,11 +407,24 @@ jobs:
         with:
           name: ci-build-linux-x86_64
           path: build/linux-x86_64
+      - name: Restore real-content fixtures (built by build job)
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/.real-content-cache
+          key: vmav-real-content-${{ hashFiles('scripts/fetch_real_content.sh') }}
       - name: Restore exec bits stripped by upload-artifact zip
         run: |
           find build/linux-x86_64 -maxdepth 3 -type f \( -name 'test_*' -o -name 'it_*' -o -name 'vmavificient' \) -exec chmod +x {} +
       - name: Test
         run: ctest --test-dir build/linux-x86_64 --output-on-failure
+      - name: Upload CTest LastTest.log on failure (helps triage real-content regressions)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-lasttest-linux-x86_64
+          path: build/linux-x86_64/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   test-linux-aarch64:
     name: test / linux-aarch64
@@ -399,11 +439,24 @@ jobs:
         with:
           name: ci-build-linux-aarch64
           path: build/linux-aarch64
+      - name: Restore real-content fixtures (built by build job)
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/.real-content-cache
+          key: vmav-real-content-${{ hashFiles('scripts/fetch_real_content.sh') }}
       - name: Restore exec bits stripped by upload-artifact zip
         run: |
           find build/linux-aarch64 -maxdepth 3 -type f \( -name 'test_*' -o -name 'it_*' -o -name 'vmavificient' \) -exec chmod +x {} +
       - name: Test
         run: ctest --test-dir build/linux-aarch64 --output-on-failure
+      - name: Upload CTest LastTest.log on failure (helps triage real-content regressions)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-lasttest-linux-aarch64
+          path: build/linux-aarch64/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   test-macos-arm64:
     name: test / macos-arm64
@@ -418,11 +471,24 @@ jobs:
         with:
           name: ci-build-macos-arm64
           path: build/macos-arm64
+      - name: Restore real-content fixtures (built by build job)
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/.real-content-cache
+          key: vmav-real-content-${{ hashFiles('scripts/fetch_real_content.sh') }}
       - name: Restore exec bits stripped by upload-artifact zip
         run: |
           find build/macos-arm64 -maxdepth 3 -type f \( -name 'test_*' -o -name 'it_*' -o -name 'vmavificient' \) -exec chmod +x {} +
       - name: Test
         run: ctest --test-dir build/macos-arm64 --output-on-failure
+      - name: Upload CTest LastTest.log on failure (helps triage real-content regressions)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-lasttest-macos-arm64
+          path: build/macos-arm64/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   test-windows-x86_64-mingw:
     name: test / windows-x86_64-mingw
@@ -441,6 +507,11 @@ jobs:
         with:
           name: ci-build-windows-x86_64-mingw
           path: build/windows-x86_64-mingw
+      - name: Restore real-content fixtures (built by build job)
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/.real-content-cache
+          key: vmav-real-content-${{ hashFiles('scripts/fetch_real_content.sh') }}
       - name: Restore exec bits (.exe doesn't need it on wine but the
           fixture and any wrapper scripts might)
         run: |
@@ -449,3 +520,11 @@ jobs:
         env:
           WINEDEBUG: -all
         run: ctest --test-dir build/windows-x86_64-mingw --output-on-failure
+      - name: Upload CTest LastTest.log on failure (helps triage real-content regressions)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-lasttest-windows-x86_64-mingw
+          path: build/windows-x86_64-mingw/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+          retention-days: 7
