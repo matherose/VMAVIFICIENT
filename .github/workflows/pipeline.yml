@@ -177,7 +177,7 @@ jobs:
               ffmpeg zstd dotnet-sdk-8.0
           dir="$(bash scripts/fetch_llvm_mingw.sh | tail -n 1)"
           echo "${dir}/bin" >> "$GITHUB_PATH"
-          dotnet tool install --global wix
+          dotnet tool install --global wix --version 4.0.5
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
       # Rust setup (vendored deps with Rust components: dovi, hdr10plus).
@@ -410,7 +410,7 @@ jobs:
               wine nasm pkg-config meson ninja-build ffmpeg zstd dotnet-sdk-8.0
           dir="$(bash scripts/fetch_llvm_mingw.sh | tail -n 1)"
           echo "${dir}/bin" >> "$GITHUB_PATH"
-          dotnet tool install --global wix
+          dotnet tool install --global wix --version 4.0.5
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
       - name: Add Rust target
