@@ -123,3 +123,8 @@ compile_commands.json
 # Sources are fetched on demand by scripts/fetch_real_content.sh —
 # never committed because they're large and trivially re-downloaded.
 /tests/fixtures/.real-content-cache/
+
+# Phase 9 tessdata cache (eng.traineddata ~22 MB) used by packaging.
+# Same not-in-repo policy: fetched by scripts/fetch_tessdata.sh on
+# demand, gitignored, cached in CI by sha-pin.
+/tests/fixtures/.tessdata-cache/

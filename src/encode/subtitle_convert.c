@@ -500,15 +500,25 @@ static bool ocr_and_emit_srt(
 }
 
 /* Locate the tessdata directory. TESSDATA_PREFIX env wins; otherwise
- * fall back to common system paths. Returns NULL only if absolutely
- * nothing usable was found — Tesseract will then default to its own
- * built-in search. */
+ * walk a fallback list that includes both system-installed paths AND
+ * the canonical bundled-install paths (Phase 9 .deb / .pkg layouts
+ * land tessdata under share/vmavificient/tessdata). Returns NULL if
+ * nothing matched — Tesseract then falls back to its own built-in
+ * search. */
 static const char *resolve_tessdata_path(void) {
     const char *env = getenv("TESSDATA_PREFIX");
     if (env != NULL && env[0] != '\0') {
         return env;
     }
     static const char *fallback[] = {
+        /* Bundled installs first (Phase 9 packaging puts tessdata
+         * here). Listed before system paths so a packaged vmavificient
+         * uses its own pinned eng.traineddata instead of whatever the
+         * host happens to ship. */
+        "/usr/share/vmavificient/tessdata",
+        "/usr/local/share/vmavificient/tessdata",
+        "/opt/homebrew/share/vmavificient/tessdata",
+        /* System fallbacks (matches v1 behavior for dev workflows). */
         "/usr/local/share/tessdata",
         "/opt/homebrew/share/tessdata",
         "/usr/share/tessdata",

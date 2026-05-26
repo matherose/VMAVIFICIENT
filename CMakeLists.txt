@@ -39,6 +39,7 @@ option(VMAV_LTO            "Enable link-time optimization"              ON)
 option(VMAV_USE_THIRD_PARTY "Build vendored third_party deps"           ON)
 option(VMAV_REPRODUCIBLE   "Enable reproducible-build flags"            ON)
 option(VMAV_FETCH_REAL_CONTENT "Fetch BBB/ToS real-content fixtures"    OFF)
+option(VMAV_BUNDLE_TESSDATA "Fetch + bundle eng.traineddata for packaging" OFF)
 
 if(NOT CMAKE_C_COMPILER_ID STREQUAL "Clang"
    AND NOT CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
@@ -87,6 +88,30 @@ include(GNUInstallDirs)
 install(TARGETS vmavificient RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES LICENSE LICENSE-BINARY README.md
         DESTINATION ${CMAKE_INSTALL_DOCDIR})
+
+# Phase 9: bundle eng.traineddata so PGS-subtitle OCR works on a clean
+# install without a system tesseract-ocr-eng package. Default OFF —
+# the dev workflow uses system tessdata. Packaging builds set this ON.
+# Fetched by scripts/fetch_tessdata.sh into a gitignored cache dir,
+# sha256-pinned to tesseract-ocr/tessdata@4.1.0. The custom_target
+# guarantees the file exists before the install rule fires.
+set(_vmav_tessdata_cache_dir "${CMAKE_SOURCE_DIR}/tests/fixtures/.tessdata-cache")
+set(_vmav_tessdata_file "${_vmav_tessdata_cache_dir}/eng.traineddata")
+if(VMAV_BUNDLE_TESSDATA)
+    add_custom_command(
+        OUTPUT "${_vmav_tessdata_file}"
+        COMMAND "${CMAKE_SOURCE_DIR}/scripts/fetch_tessdata.sh"
+                --cache-dir "${_vmav_tessdata_cache_dir}"
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        COMMENT "Fetching pinned eng.traineddata for packaging"
+        VERBATIM)
+    add_custom_target(vmav_tessdata ALL DEPENDS "${_vmav_tessdata_file}")
+    # Install into ${prefix}/share/vmavificient/tessdata/eng.traineddata.
+    # GNUInstallDirs gives us DATADIR == share on POSIX. The resolver in
+    # subtitle_convert.c knows to look here.
+    install(FILES "${_vmav_tessdata_file}"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/vmavificient/tessdata")
+endif()
 
 message(STATUS "")
 message(STATUS "vmavificient ${VMAV_VERSION_FULL} (${VMAV_GIT_SHA})")
