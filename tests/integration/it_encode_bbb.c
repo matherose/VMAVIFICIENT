@@ -68,10 +68,14 @@
 #error "VMAV_BIN must be set by vmav_add_integration_test()"
 #endif
 
+/* g_workdir is always set in setUp; g_input/g_output/g_cache_dir are
+ * only populated when VMAV_REAL_CONTENT_ENABLED — flagged unused so
+ * the lean feature-branch build (real content OFF) compiles under
+ * -Werror -Wunused-variable. */
 static char g_workdir[1024];
-static char g_input[1024];
-static char g_output[1024];
-static char g_cache_dir[1024];
+__attribute__((unused)) static char g_input[1024];
+__attribute__((unused)) static char g_output[1024];
+__attribute__((unused)) static char g_cache_dir[1024];
 
 /* Cross-platform replacement for POSIX `mkdtemp` — MinGW's CRT
  * (msvcrt) doesn't provide it. Mirrors the pattern from
@@ -104,7 +108,7 @@ static int make_workdir(char *buf, size_t cap) {
     return -1;
 }
 
-static void copy_file(const char *src, const char *dst) {
+__attribute__((unused)) static void copy_file(const char *src, const char *dst) {
     FILE *fs = fopen(src, "rb");
     TEST_ASSERT_NOT_NULL_MESSAGE(fs, src);
     FILE *fd = fopen(dst, "wb");
@@ -189,13 +193,17 @@ __attribute__((unused)) static void dump_state(const vmav_encode_state_t *s) {
 
 void setUp(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, make_workdir(g_workdir, sizeof(g_workdir)), "make_workdir");
+#if VMAV_REAL_CONTENT_ENABLED
     /* Copy the BBB clip into the workdir so cmd_encode's IVF sidecar
      * (written next to the input via replace_extension) lands somewhere
-     * writable. Same pattern as it_encode_smoke. */
+     * writable. Same pattern as it_encode_smoke. Guarded so feature-
+     * branch builds (which skip fetching real content) don't try to
+     * touch a missing fixture before each TEST_IGNORE'd test body. */
     snprintf(g_input, sizeof(g_input), "%s/bbb_clip.mkv", g_workdir);
     snprintf(g_output, sizeof(g_output), "%s/out.mkv", g_workdir);
     snprintf(g_cache_dir, sizeof(g_cache_dir), "%s/cache", g_workdir);
     copy_file(VMAV_REAL_CONTENT_DIR "/bbb_clip.mkv", g_input);
+#endif
 }
 
 void tearDown(void) {

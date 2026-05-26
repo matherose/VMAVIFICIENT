@@ -65,10 +65,12 @@
 #error "VMAV_BIN must be set by vmav_add_integration_test()"
 #endif
 
+/* Same skip-guard pattern as it_encode_bbb.c: g_input/g_output/
+ * g_cache_dir are only populated when VMAV_REAL_CONTENT_ENABLED. */
 static char g_workdir[1024];
-static char g_input[1024];
-static char g_output[1024];
-static char g_cache_dir[1024];
+__attribute__((unused)) static char g_input[1024];
+__attribute__((unused)) static char g_output[1024];
+__attribute__((unused)) static char g_cache_dir[1024];
 
 static int make_workdir(char *buf, size_t cap) {
     const char *base;
@@ -98,7 +100,7 @@ static int make_workdir(char *buf, size_t cap) {
     return -1;
 }
 
-static void copy_file(const char *src, const char *dst) {
+__attribute__((unused)) static void copy_file(const char *src, const char *dst) {
     FILE *fs = fopen(src, "rb");
     TEST_ASSERT_NOT_NULL_MESSAGE(fs, src);
     FILE *fd = fopen(dst, "wb");
@@ -223,10 +225,13 @@ out:
 
 void setUp(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, make_workdir(g_workdir, sizeof(g_workdir)), "make_workdir");
+#if VMAV_REAL_CONTENT_ENABLED
+    /* Same skip-guard as it_encode_bbb.c — see commentary there. */
     snprintf(g_input, sizeof(g_input), "%s/hdr_clip.mkv", g_workdir);
     snprintf(g_output, sizeof(g_output), "%s/out.mkv", g_workdir);
     snprintf(g_cache_dir, sizeof(g_cache_dir), "%s/cache", g_workdir);
     copy_file(VMAV_REAL_CONTENT_DIR "/hdr_clip.mkv", g_input);
+#endif
 }
 
 void tearDown(void) {
