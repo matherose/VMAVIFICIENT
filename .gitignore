@@ -46,6 +46,7 @@ compile_commands.json
 *.pkg
 *.msi
 *.tar.zst
+/dist/
 
 # Logs / scratch
 *.log
