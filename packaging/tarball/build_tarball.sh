@@ -52,7 +52,7 @@ if [[ -z "$VERSION" ]]; then
 fi
 if [[ -z "$SDE" ]]; then
     # Match the reproducibility script's default: VERSION file mtime.
-    SDE="$(stat -f %m "$repo_root/VERSION" 2>/dev/null || stat -c %Y "$repo_root/VERSION")"
+    SDE="$(date -r "$repo_root/VERSION" +%s)"
 fi
 
 require() {

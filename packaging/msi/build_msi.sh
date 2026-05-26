@@ -59,7 +59,7 @@ if [[ -z "$VERSION" ]]; then
     VERSION="$(cat "$repo_root/VERSION")"
 fi
 if [[ -z "$SDE" ]]; then
-    SDE="$(stat -f %m "$repo_root/VERSION" 2>/dev/null || stat -c %Y "$repo_root/VERSION")"
+    SDE="$(date -r "$repo_root/VERSION" +%s)"
 fi
 
 # WiX MSI versions must be N.N.N or N.N.N.N (numeric only). VERSION
