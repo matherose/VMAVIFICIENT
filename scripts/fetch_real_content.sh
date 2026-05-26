@@ -117,29 +117,49 @@ else
 fi
 
 # ============================================================
-# Tears of Steel HDR — Blender Foundation reference HDR10
-# encode. Used to gate the HDR-passthrough path (mastering
-# display + content light level OBU metadata).
+# HDR10 fixture — synthetic 3840x2160 HEVC test pattern with
+# real SMPTE ST 2086 + CTA-861.3 metadata in SEI. We can't pin
+# a small downloadable Creative Commons HDR clip (Blender's
+# Tears of Steel HDR distribution is multi-variant and the
+# 1080p mov is 583 MB SDR-only; xiph 4K HDR samples are >6 GB
+# Y4M). Synthesizing via libx265 lets us assert a true HDR10
+# round-trip on a fixture small enough for CI.
+#
+# Mastering display: Display P3 primaries (Apple/Pro Display
+# XDR family) — matches the dominant grading target for HDR
+# Blu-ray. min/max luminance: 0.005 / 4000 cd/m^2 (4000-nit
+# mastering monitor). MaxCLL 1000 / MaxFALL 400 — typical
+# values for HDR streaming content.
+#
+# Same scales the AV1 spec defines (x50000 for chromaticity,
+# x10000 for luminance), passed straight to x265's
+# --master-display + --max-cll. The vmav HDR-passthrough fix
+# in db58919 covers the conversion to SVT-AV1-HDR's non-spec
+# storage; this fixture only verifies the output AV1
+# bitstream replays the same values.
 # ============================================================
-# NOTE: the canonical HDR-graded ToS distributions are hosted by
-# Blender (mango.blender.org). The mp4 chosen here is the official
-# UHD HDR HEVC encode that ships HDR10 metadata in-band via SEI.
-TOS_URL="https://media.xiph.org/video/derf/ElFuente/Netflix_Aerial_4096x2160_60fps_10bit_420.y4m"
-TOS_SHA="DOWNLOAD_AND_RECORD"   # populated by hand on first run
-TOS_SOURCE="$CACHE_DIR/tos_hdr_source.mkv"
-TOS_CLIP="$CACHE_DIR/tos_hdr_clip.mkv"
+HDR_CLIP="$CACHE_DIR/hdr_clip.mkv"
+HDR_MASTER_DISPLAY="G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(40000000,50)"
+HDR_MAX_CLL="1000,400"
 
-# DEFERRED: ToS HDR sourcing is non-trivial (Blender ships several
-# HDR variants; none is a single ~100 MB direct-download mp4 like
-# BBB). The Phase 8 m4 milestone will pin a specific upstream + sha.
-# For m1 we get BBB working and stub ToS so the CMake plumbing is
-# correct.
-if [[ "${VMAV_FETCH_HDR_FIXTURE:-0}" = "1" ]]; then
-    fetch_with_sha "$TOS_URL" "$TOS_SOURCE" "$TOS_SHA"
-    # ... trim path follows the BBB pattern
-    log "ToS HDR clip ready: $(du -h "$TOS_CLIP" | awk '{print $1}')"
+if [[ $FORCE -eq 1 || ! -f "$HDR_CLIP" ]]; then
+    log "synthesizing HDR10 fixture -> $HDR_CLIP (2s 3840x2160 HEVC HDR10)"
+    # libx265 --master-display + --max-cll inject the SEI metadata
+    # that the HDR probe in video_encode.c reads from frame side
+    # data. We keep it short (2 sec) — encoding 4K HEVC eats CPU
+    # but the cache means we only pay this cost once per CI runner.
+    # `preset=ultrafast` belongs on ffmpeg's -preset flag, not in
+    # x265-params (the wrapper warns + ignores it there).
+    ffmpeg -y -hide_banner -loglevel warning \
+        -f lavfi -i "testsrc2=size=3840x2160:rate=24:duration=2" \
+        -pix_fmt yuv420p10le \
+        -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc -color_range tv \
+        -c:v libx265 -tag:v hvc1 -preset ultrafast \
+        -x265-params "master-display=${HDR_MASTER_DISPLAY}:max-cll=${HDR_MAX_CLL}:hdr10=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:range=limited" \
+        "$HDR_CLIP"
+    log "HDR clip ready: $(du -h "$HDR_CLIP" | awk '{print $1}')"
 else
-    log "ToS HDR fixture deferred to Phase 8 m4 (set VMAV_FETCH_HDR_FIXTURE=1 to opt in)"
+    log "HDR clip already present: $HDR_CLIP"
 fi
 
 log "real-content fixtures ready under $CACHE_DIR"

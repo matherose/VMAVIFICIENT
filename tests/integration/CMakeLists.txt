@@ -25,6 +25,13 @@ vmav_add_integration_test(NAME it_encode_bbb
     SOURCES it_encode_bbb.c
     LINK_LIBS vmav::media vmav::foundations vmav::encode)
 
+# Phase 8 m4: HDR10 passthrough regression. Decodes the source +
+# output with libav directly to harvest mastering display + CLL side
+# data (same code path the encoder uses internally).
+vmav_add_integration_test(NAME it_encode_hdr
+    SOURCES it_encode_hdr.c
+    LINK_LIBS vmav::media vmav::foundations vmav::encode vmav::tp::avformat vmav::tp::avcodec vmav::tp::avutil)
+
 # Phase 5 m3 (it_pgs_to_srt) intentionally deferred to post-v2.0.
 # Generating a real PGS bitstream programmatically needs either
 # ffmpeg's pgssub *encoder* (only the decoder ships in stock builds)
