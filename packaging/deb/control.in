@@ -1,0 +1,17 @@
+Package: vmavificient
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: VMAVIFICIENT contributors <noreply@example.invalid>
+Section: video
+Priority: optional
+Homepage: https://github.com/matherose/VMAVIFICIENT
+Depends: libc6 (>= 2.31)
+Description: VMAF-aware AV1 encoder for HDR Blu-ray content
+ vmavificient encodes UHD HDR Blu-ray sources to AV1 using
+ SVT-AV1-HDR + libvmaf, with HDR10 mastering display + content
+ light level passthrough, Dolby Vision profile 8.1 detection,
+ in-process PGS subtitle OCR via Tesseract, and CRF search
+ driven by VMAF targets per resolution.
+ .
+ Built as a single static binary; tessdata for English OCR is
+ bundled at /usr/share/vmavificient/tessdata/.
