@@ -61,10 +61,17 @@ require() {
 }
 require curl
 require ffmpeg
-require shasum
-
-# sha256 helper (portable: shasum -a 256 works on macOS + Linux).
-sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+# sha256: prefer GNU sha256sum (Linux + Windows git-bash); fall back to
+# BSD shasum (macOS default). One of the two ships on every host we
+# fetch fixtures on.
+if command -v sha256sum > /dev/null 2>&1; then
+    sha256() { sha256sum "$1" | awk '{print $1}'; }
+elif command -v shasum > /dev/null 2>&1; then
+    sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+else
+    echo "fetch_real_content.sh: missing required tool: sha256sum or shasum" >&2
+    exit 2
+fi
 
 # Download $1 → $2 if missing or if --force, then verify sha256 == $3.
 # Aborts on hash mismatch.

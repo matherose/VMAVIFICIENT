@@ -44,8 +44,17 @@ require() {
     fi
 }
 require curl
-require shasum
-sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+# sha256: prefer GNU sha256sum (Linux + Windows git-bash); fall back to
+# BSD shasum (macOS default). One of the two ships on every host we
+# package for.
+if command -v sha256sum > /dev/null 2>&1; then
+    sha256() { sha256sum "$1" | awk '{print $1}'; }
+elif command -v shasum > /dev/null 2>&1; then
+    sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+else
+    echo "fetch_tessdata.sh: missing required tool: sha256sum or shasum" >&2
+    exit 2
+fi
 
 # eng.traineddata from tesseract-ocr/tessdata @ tag 4.1.0. This is the
 # last release with the legacy + LSTM models in a single file (the 5.x
