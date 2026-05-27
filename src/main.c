@@ -4,9 +4,9 @@
 #include "commands/commands.h"
 
 const vmav_subcmd_t VMAV_CMD_TABLE[] = {
-    {"encode", "Encode a video to AV1 (stub — Phase 4)", cmd_encode_run},
-    {"analyze", "Probe a video without encoding (stub — Phase 3)", cmd_analyze_run},
-    {"search", "TMDB metadata lookup (stub — Phase 3)", cmd_search_run},
+    {"encode", "Encode a video to AV1 (the main workflow)", cmd_encode_run},
+    {"analyze", "Probe a video without encoding", cmd_analyze_run},
+    {"search", "TMDB metadata lookup", cmd_search_run},
     {"doctor", "Environment self-check", cmd_doctor_run},
     {"version", "Print version information", cmd_version_run},
     {"help", "Print this message", cmd_help_run},
