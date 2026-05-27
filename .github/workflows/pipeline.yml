@@ -168,17 +168,14 @@ jobs:
         if: matrix.target.host == 'macos'
         run: brew install meson nasm ffmpeg zstd gnu-tar
 
-      - name: Setup Windows cross toolchain (llvm-mingw + wine + dotnet/WiX)
+      - name: Setup Windows cross toolchain (llvm-mingw + wine + ffmpeg)
         if: matrix.target.name == 'windows-x86_64'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-              wine nasm pkg-config meson ninja-build \
-              ffmpeg zstd dotnet-sdk-8.0
+              wine nasm pkg-config meson ninja-build ffmpeg zstd
           dir="$(bash scripts/fetch_llvm_mingw.sh | tail -n 1)"
           echo "${dir}/bin" >> "$GITHUB_PATH"
-          dotnet tool install --global wix --version 5.0.2
-          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
       # Rust setup (vendored deps with Rust components: dovi, hdr10plus).
       - name: Add Rust target
@@ -341,17 +338,25 @@ jobs:
           retention-days: 7
 
   # ====================================================================
-  #  STAGE 4 - Package
+  #  STAGE 4a - Package (linux + macos)
   #
   #  PR + main + tag only. Feature branches don't waste CI on packaging;
-  #  users running locally use `cmake --install` or the packaging
-  #  scripts directly.
+  #  users running locally use `cmake --install` or the packaging scripts
+  #  directly.
   #
-  #  Each arch produces:
+  #  This matrix covers the 3 POSIX-host arches:
   #    linux-x86_64   -> .tar.zst + .deb (amd64)
   #    linux-aarch64  -> .tar.zst + .deb (arm64)
   #    macos-arm64    -> .tar.zst + .pkg
-  #    windows-x86_64 -> .tar.zst + .msi
+  #
+  #  Windows .msi packaging is intentionally split into its own job
+  #  (package-windows-msi) below, running on windows-latest. WiX's
+  #  BundleValidator does Path.GetFullPath("C:\\" + relativePath) and
+  #  checks for the C:\\ prefix — only valid on Windows hosts. Running
+  #  WiX under Linux dotnet fails every Directory@Name + Component@
+  #  Subdirectory attribute with WIX0389. The WiX toolset itself warns
+  #  "All behavior after this point is undefined" when invoked on a
+  #  non-Windows host.
   # ====================================================================
 
   package:
@@ -377,21 +382,14 @@ jobs:
             preset: macos-arm64
             host: macos
             format: pkg
-          - name: windows-x86_64
-            runs_on: ubuntu-latest
-            preset: windows-x86_64-mingw
-            host: linux
-            format: msi
     runs-on: ${{ matrix.target.runs_on }}
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
       - uses: lukka/get-cmake@latest
 
-      # Same toolchain setup as build. Disabled-tests + bundled-tessdata
-      # configure here is the only delta from the test build.
       - name: Setup Linux toolchain
-        if: matrix.target.host == 'linux' && matrix.target.name != 'windows-x86_64'
+        if: matrix.target.host == 'linux'
         run: |
           wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x /tmp/llvm.sh
@@ -402,32 +400,16 @@ jobs:
       - name: Setup macOS toolchain
         if: matrix.target.host == 'macos'
         run: brew install meson nasm ffmpeg zstd gnu-tar
-      - name: Setup Windows cross toolchain (+ WiX)
-        if: matrix.target.name == 'windows-x86_64'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-              wine nasm pkg-config meson ninja-build ffmpeg zstd dotnet-sdk-8.0
-          dir="$(bash scripts/fetch_llvm_mingw.sh | tail -n 1)"
-          echo "${dir}/bin" >> "$GITHUB_PATH"
-          dotnet tool install --global wix --version 5.0.2
-          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
       - name: Add Rust target
         run: |
           case "${{ matrix.target.name }}" in
-              linux-x86_64)   rustup target add x86_64-unknown-linux-gnu ;;
-              linux-aarch64)  rustup target add aarch64-unknown-linux-gnu ;;
-              macos-arm64)    rustup target add aarch64-apple-darwin ;;
-              windows-x86_64) rustup target add x86_64-pc-windows-gnu ;;
+              linux-x86_64)  rustup target add x86_64-unknown-linux-gnu ;;
+              linux-aarch64) rustup target add aarch64-unknown-linux-gnu ;;
+              macos-arm64)   rustup target add aarch64-apple-darwin ;;
           esac
       - uses: taiki-e/install-action@v2
         with: { tool: cargo-c }
-      - name: Point cargo at llvm-mingw linker (Windows only)
-        if: matrix.target.name == 'windows-x86_64'
-        run: |
-          echo "CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc" >> "$GITHUB_ENV"
-          echo "CC_x86_64_pc_windows_gnu=x86_64-w64-mingw32-gcc" >> "$GITHUB_ENV"
 
       - name: Capture submodule SHAs
         run: git submodule status --recursive | awk '{print $1}' > .vmav-tp-shas
@@ -474,17 +456,79 @@ jobs:
               --build-dir build/${{ matrix.target.preset }} \
               --triple    ${{ matrix.target.preset }} \
               --out-dir   dist/
-      - name: Build .msi
-        if: matrix.target.format == 'msi'
-        run: |
-          packaging/msi/build_msi.sh \
-              --build-dir build/${{ matrix.target.preset }} \
-              --triple    ${{ matrix.target.preset }} \
-              --out-dir   dist/
 
       - uses: actions/upload-artifact@v4
         with:
           name: package-${{ matrix.target.name }}
+          path: dist/*
+          retention-days: 14
+          if-no-files-found: error
+
+  # ====================================================================
+  #  STAGE 4b - Package (Windows MSI on windows-latest)
+  #
+  #  Separate job because WiX's validator needs a Windows host (see the
+  #  big comment on the `package` job above). The Windows .exe is cross-
+  #  built on Linux as part of stage 2; this job DOWNLOADS that artifact
+  #  + the tessdata cache, stages the files, runs `wix build` natively.
+  #
+  #  Inputs: build-windows-x86_64 artifact (vmavificient.exe), repo
+  #  checkout (LICENSE files, .wxs.in template), tessdata cache.
+  #  Outputs: .tar.zst (built here too for consistency) + .msi.
+  # ====================================================================
+
+  package-windows-msi:
+    name: Package • windows-x86_64
+    needs: test
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'pull_request'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install WiX (native Windows)
+        run: dotnet tool install --global wix --version 5.0.2
+      - name: Install zstd (for the parallel .tar.zst output)
+        run: choco install -y --no-progress zstandard
+      - name: Download cross-compiled Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: build-windows-x86_64
+          path: build-artifact/
+      - name: Restore tessdata cache (built by stage 2)
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/.tessdata-cache
+          key: vmav-tessdata-${{ hashFiles('scripts/fetch_tessdata.sh') }}
+      - name: Fetch tessdata if cache missed
+        shell: bash
+        run: |
+          if [[ ! -f tests/fixtures/.tessdata-cache/eng.traineddata ]]; then
+              bash scripts/fetch_tessdata.sh
+          fi
+      - name: Stage files into MSI tree
+        shell: bash
+        run: |
+          # Lay out the staging dir to mirror what cmake --install
+          # would produce on a Linux/macOS host. build_msi.sh's
+          # --stage-dir path consumes this directly.
+          stage="$(pwd)/msi-stage"
+          mkdir -p "$stage/bin" \
+                   "$stage/share/vmavificient/tessdata" \
+                   "$stage/share/doc/vmavificient"
+          cp build-artifact/src/vmavificient.exe "$stage/bin/"
+          cp tests/fixtures/.tessdata-cache/eng.traineddata "$stage/share/vmavificient/tessdata/"
+          cp LICENSE LICENSE-BINARY README.md "$stage/share/doc/vmavificient/"
+          ls -R "$stage"
+          echo "MSI_STAGE=$stage" >> "$GITHUB_ENV"
+      - name: Build .msi (native WiX on Windows)
+        shell: bash
+        run: |
+          packaging/msi/build_msi.sh \
+              --stage-dir "$MSI_STAGE" \
+              --triple    windows-x86_64-mingw \
+              --out-dir   dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-windows-x86_64
           path: dist/*
           retention-days: 14
           if-no-files-found: error
@@ -500,7 +544,7 @@ jobs:
 
   publish:
     name: Publish • GitHub Release
-    needs: package
+    needs: [package, package-windows-msi]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:

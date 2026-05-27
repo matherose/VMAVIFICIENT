@@ -23,6 +23,7 @@
 set -euo pipefail
 
 BUILD_DIR=""
+STAGE_DIR=""
 TRIPLE=""
 OUT_DIR=""
 VERSION=""
@@ -31,6 +32,7 @@ SDE=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --build-dir) BUILD_DIR="$2"; shift 2;;
+        --stage-dir) STAGE_DIR="$2"; shift 2;;
         --triple)    TRIPLE="$2";    shift 2;;
         --out-dir)   OUT_DIR="$2";   shift 2;;
         --version)   VERSION="$2";   shift 2;;
@@ -42,8 +44,23 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "$BUILD_DIR" || -z "$TRIPLE" || -z "$OUT_DIR" ]]; then
-    echo "build_msi.sh: --build-dir, --triple, --out-dir all required" >&2
+# Either --build-dir (we run cmake --install ourselves on the same host)
+# or --stage-dir (caller already staged the tree, we just run wix on it).
+# Distinct args make the two flows explicit:
+#   --build-dir → Linux/macOS host cross-builds + runs WiX in-place
+#   --stage-dir → Windows-runner job downloads the cross-built artifact +
+#                 stages it, then we run WiX natively on the same Windows
+#                 host (where WiX's BundleValidator works correctly).
+if [[ -n "$BUILD_DIR" && -n "$STAGE_DIR" ]]; then
+    echo "build_msi.sh: --build-dir and --stage-dir are mutually exclusive" >&2
+    exit 2
+fi
+if [[ -z "$BUILD_DIR" && -z "$STAGE_DIR" ]]; then
+    echo "build_msi.sh: one of --build-dir / --stage-dir required" >&2
+    exit 2
+fi
+if [[ -z "$TRIPLE" || -z "$OUT_DIR" ]]; then
+    echo "build_msi.sh: --triple, --out-dir required" >&2
     exit 2
 fi
 
@@ -78,20 +95,33 @@ require() {
         exit 2
     fi
 }
-require cmake
 require wix
 
 log() { printf '[build_msi] %s\n' "$*"; }
 
-stage="$(mktemp -d)"
-trap 'rm -rf "$stage"' EXIT
-
-log "installing $BUILD_DIR -> $stage (no prefix; tree mirrors target layout)"
-# We install with --prefix=stage so the staging layout is bin/...,
-# share/..., etc. The .wxs file references these by absolute path
-# (we substitute @STAGE@ below). Strip removes debug symbols.
-SOURCE_DATE_EPOCH="$SDE" cmake --install "$BUILD_DIR" \
-    --prefix "$stage" --strip
+# Determine the stage dir + populate if needed.
+if [[ -n "$STAGE_DIR" ]]; then
+    # Caller-supplied stage tree; trust it exists with the layout the
+    # .wxs expects (bin/vmavificient.exe, share/vmavificient/tessdata/
+    # eng.traineddata, share/doc/vmavificient/{LICENSE,...}).
+    stage="$STAGE_DIR"
+    if [[ ! -f "$stage/bin/vmavificient.exe" ]]; then
+        echo "build_msi.sh: --stage-dir '$stage' missing bin/vmavificient.exe" >&2
+        exit 2
+    fi
+    log "using pre-staged tree at $stage"
+else
+    # Cross-build host: run cmake --install ourselves into a temp stage.
+    require cmake
+    stage="$(mktemp -d)"
+    trap 'rm -rf "$stage"' EXIT
+    log "installing $BUILD_DIR -> $stage (no prefix; tree mirrors target layout)"
+    # We install with --prefix=stage so the staging layout is bin/...,
+    # share/..., etc. The .wxs file references these by absolute path
+    # (we substitute @STAGE@ below). Strip removes debug symbols.
+    SOURCE_DATE_EPOCH="$SDE" cmake --install "$BUILD_DIR" \
+        --prefix "$stage" --strip
+fi
 
 # Substitute template tokens into a copy of the .wxs.
 wxs_in="$repo_root/packaging/msi/vmavificient.wxs.in"
