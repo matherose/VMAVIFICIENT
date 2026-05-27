@@ -518,7 +518,13 @@ jobs:
           cp tests/fixtures/.tessdata-cache/eng.traineddata "$stage/share/vmavificient/tessdata/"
           cp LICENSE LICENSE-BINARY README.md "$stage/share/doc/vmavificient/"
           ls -R "$stage"
-          echo "MSI_STAGE=$stage" >> "$GITHUB_ENV"
+          # WiX is a native Windows .NET app and rejects git-bash
+          # unix-style paths like /d/a/... in File@Source attributes.
+          # cygpath -m emits a "mixed" Windows path with forward
+          # slashes (D:/a/...) — works with WiX + survives sed
+          # substitution in build_msi.sh without backslash escaping.
+          stage_win="$(cygpath -m "$stage")"
+          echo "MSI_STAGE=$stage_win" >> "$GITHUB_ENV"
       - name: Build .msi (native WiX on Windows)
         shell: bash
         run: |
