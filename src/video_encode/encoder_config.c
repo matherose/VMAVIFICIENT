@@ -83,8 +83,14 @@ void apply_preset_to_config(EbSvtAv1EncConfiguration *cfg, const EncodePreset *p
   if (p->enable_mfmv != UNSET)
     cfg->enable_mfmv = (p->enable_mfmv == 1);
 
-  if (p->irefresh_type != UNSET)
-    cfg->intra_refresh_type = (int8_t)p->irefresh_type;
+  /* Seekability invariant: the output MUST carry periodic IDR keyframes so
+   * players can seek. Open GOP (CRA, intra_refresh_type 1) produces
+   * un-seekable output (the SVT-AV1 v1.5.0 single-keyframe defect). This is
+   * the single funnel both the CRF probe and the final encode pass through,
+   * so forcing closed GOP here makes the invariant un-regressable — no preset
+   * can reintroduce open GOP. Paired with a positive intra_period_length
+   * (set from keyint above) this guarantees periodic, seekable keyframes. */
+  cfg->intra_refresh_type = 2; /* closed GOP (IDR) */
 
   if (p->aq_mode != UNSET)
     cfg->aq_mode = (uint8_t)p->aq_mode;

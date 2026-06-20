@@ -141,8 +141,6 @@ typedef struct {
   int max_qp;                        /**< Maximum QP allowed (0–63, -1=default). */
   int enable_mfmv;                   /**< Motion field motion vectors (0–1, -1=default). */
   int unrestricted_mv;               /**< Unrestricted motion vectors (0–1, -1=default). */
-  int irefresh_type;                 /**< Intra refresh type (1=open GOP, 2=closed, -1=default).
-                                      */
   int aq_mode;                       /**< Adaptive quantization mode (0–2, -1=default). */
   int enable_restoration;            /**< Restoration filter (0–1, -1=default). */
   int recode_loop;                   /**< Recode loop level (0–4, -1=default). */
