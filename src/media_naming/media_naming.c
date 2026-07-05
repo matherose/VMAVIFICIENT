@@ -305,6 +305,90 @@ static void sanitize_title(char *out, size_t outsize, const char *title) {
   out[j] = '\0';
 }
 
+/* ── Season/episode parsing ────────────────────────────────────── */
+
+static int is_name_sep(char c) { return c == '.' || c == '_' || c == ' ' || c == '-'; }
+
+int parse_season_episode(const char *filename, int *season, int *episode) {
+  if (!filename || !season || !episode)
+    return -1;
+
+  /* Pass 1: SxxEyy with an optional single separator between the groups.
+     The 'S' must sit on a word boundary so e.g. "PS4E10" is not a match. */
+  for (const char *p = filename; *p; p++) {
+    if ((*p != 'S' && *p != 's') || !isdigit((unsigned char)p[1]))
+      continue;
+    if (p != filename && isalnum((unsigned char)p[-1]))
+      continue;
+
+    const char *q = p + 1;
+    int s = 0, ndig = 0;
+    while (isdigit((unsigned char)*q) && ndig < 2) {
+      s = s * 10 + (*q - '0');
+      q++;
+      ndig++;
+    }
+    if (isdigit((unsigned char)*q))
+      continue; /* 3+ digit "season": not a season tag */
+    if (is_name_sep(*q))
+      q++;
+    if ((*q == 'E' || *q == 'e') && isdigit((unsigned char)q[1])) {
+      q++;
+      int e = 0;
+      ndig = 0;
+      while (isdigit((unsigned char)*q) && ndig < 3) {
+        e = e * 10 + (*q - '0');
+        q++;
+        ndig++;
+      }
+      if (s > 0 && e > 0) {
+        *season = s;
+        *episode = e;
+        return 0;
+      }
+    }
+  }
+
+  /* Pass 2: NxNN (1x05), guarded against resolutions: both values are
+     capped at 2 digits and the match must be separator-bounded, so
+     1920x1080 / 720x480 never parse. */
+  for (const char *p = filename; *p; p++) {
+    if (!isdigit((unsigned char)*p))
+      continue;
+    if (p != filename && !is_name_sep(p[-1]))
+      continue;
+
+    const char *q = p;
+    int s = 0, ndig = 0;
+    while (isdigit((unsigned char)*q) && ndig < 2) {
+      s = s * 10 + (*q - '0');
+      q++;
+      ndig++;
+    }
+    if (isdigit((unsigned char)*q))
+      continue; /* 3+ digits: resolution width or year */
+    if (*q != 'x' && *q != 'X')
+      continue;
+    q++;
+    int e = 0;
+    ndig = 0;
+    while (isdigit((unsigned char)*q) && ndig < 2) {
+      e = e * 10 + (*q - '0');
+      q++;
+      ndig++;
+    }
+    if (ndig == 0 || isdigit((unsigned char)*q))
+      continue; /* no episode digits, or 3+ (e.g. x1080) */
+    if (s > 0 && e > 0) {
+      *season = s;
+      *episode = e;
+      return 0;
+    }
+  }
+
+  return -1;
+}
+
 /* ── Filename builder ──────────────────────────────────────────── */
 
 int build_output_filename(char *buf, size_t bufsize, const char *title, int year,

@@ -85,6 +85,24 @@ SourceType detect_source_from_filename(const char *filename);
 const char *language_tag_to_string(LanguageTag tag);
 
 /**
+ * @brief Parse season/episode numbers from a filename.
+ *
+ * Recognized patterns, in priority order:
+ *   1. SxxEyy — any case, optional single separator between the groups
+ *      (S01E05, s02e17, S01.E05). Episode may be up to 3 digits.
+ *   2. NxNN (1x05) — guarded: both values capped at 2 digits and the
+ *      match must be separator-bounded, so 1920x1080 never parses.
+ *
+ * Double episodes (S01E05E06) yield the first episode number.
+ *
+ * @param filename  Filename to scan (basename preferred).
+ * @param season    Out: season number.
+ * @param episode   Out: episode number.
+ * @return 0 on success, -1 if no pattern matched.
+ */
+int parse_season_episode(const char *filename, int *season, int *episode);
+
+/**
  * @brief Build the standardized output filename.
  *
  * Format:

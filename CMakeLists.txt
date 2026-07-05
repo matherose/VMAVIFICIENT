@@ -1080,3 +1080,16 @@ if(DOXYGEN_FOUND)
         COMMENT "Generating API documentation with Doxygen"
     )
 endif()
+
+# ---------------------------------------------------------------------------
+# Unit tests (pure-logic modules only; no external deps linked).
+#   Build:  cmake --build build --target vmav_tests
+#   Run:    ./build/vmav_tests
+# ---------------------------------------------------------------------------
+add_executable(vmav_tests
+    tests/test_media_naming.c
+    src/media_naming/media_naming.c
+)
+target_include_directories(vmav_tests PRIVATE
+    "${CMAKE_SOURCE_DIR}/include/vmavificient"
+)
