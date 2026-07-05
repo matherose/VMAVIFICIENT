@@ -50,6 +50,8 @@ static void test_parse_season_episode(void) {
   s = e = 0;
   CHECK(parse_season_episode("Show 1x05.mkv", &s, &e) == 0 && s == 1 && e == 5);
   s = e = 0;
+  CHECK(parse_season_episode("Show.1x05.mkv", &s, &e) == 0 && s == 1 && e == 5);
+  s = e = 0;
   /* 3-digit episodes (long-running anime). */
   CHECK(parse_season_episode("Show.S01E105.mkv", &s, &e) == 0 && s == 1 && e == 105);
   s = e = 0;

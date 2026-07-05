@@ -1093,3 +1093,5 @@ add_executable(vmav_tests
 target_include_directories(vmav_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/include/vmavificient"
 )
+target_compile_options(vmav_tests PRIVATE ${VMAV_OPT_FLAGS})
+target_link_options(vmav_tests PRIVATE ${VMAV_LINK_FLAGS})

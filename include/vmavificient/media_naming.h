@@ -94,6 +94,7 @@ const char *language_tag_to_string(LanguageTag tag);
  *      match must be separator-bounded, so 1920x1080 never parses.
  *
  * Double episodes (S01E05E06) yield the first episode number.
+ * Season 0 (S00, specials) is intentionally not matched.
  *
  * @param filename  Filename to scan (basename preferred).
  * @param season    Out: season number.
