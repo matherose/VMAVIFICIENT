@@ -393,7 +393,7 @@ int parse_season_episode(const char *filename, int *season, int *episode) {
 
 int build_output_filename(char *buf, size_t bufsize, const char *title, int year,
                           LanguageTag lang_tag, const MediaInfo *info, const HdrInfo *hdr,
-                          SourceType source) {
+                          SourceType source, const EpisodeInfo *ep) {
   char safe_title[512];
   sanitize_title(safe_title, sizeof(safe_title), title);
 
@@ -411,10 +411,26 @@ int build_output_filename(char *buf, size_t bufsize, const char *title, int year
       snprintf(feature, sizeof(feature), "HDR10");
   }
 
+  /* Head: movie = TITLE.YEAR; TV = TITLE.SxxEyy[.EPISODE.TITLE]
+     (year omitted per scene convention). */
+  char head[1024];
+  if (ep) {
+    char safe_ep_title[512] = "";
+    if (ep->title[0])
+      sanitize_title(safe_ep_title, sizeof(safe_ep_title), ep->title);
+    if (safe_ep_title[0])
+      snprintf(head, sizeof(head), "%s.S%02dE%02d.%s", safe_title, ep->season, ep->episode,
+               safe_ep_title);
+    else
+      snprintf(head, sizeof(head), "%s.S%02dE%02d", safe_title, ep->season, ep->episode);
+  } else {
+    snprintf(head, sizeof(head), "%s.%d", safe_title, year);
+  }
+
   /* Assemble:
-   * TITLE.YEAR.LANG.RES.FEATURE.SOURCE.QUALITY.10bit.AV1.OPUS-<group>.mkv */
+   * HEAD.LANG.RES.FEATURE.SOURCE.QUALITY.10bit.AV1.OPUS-<group>.mkv */
   const VmavConfig *cfg = config_get();
-  snprintf(buf, bufsize, "%s.%d.%s.%s.%s.%s.%s.10bit.AV1.OPUS-%s.mkv", safe_title, year,
+  snprintf(buf, bufsize, "%s.%s.%s.%s.%s.%s.10bit.AV1.OPUS-%s.mkv", head,
            language_tag_to_string(lang_tag), resolution, feature, source_to_string(source), quality,
            cfg->release_group);
 

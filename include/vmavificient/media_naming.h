@@ -58,6 +58,15 @@ typedef enum {
 } FrenchVariant;
 
 /**
+ * @brief TV episode identity for output naming.
+ */
+typedef struct {
+  int season;      /**< Season number (1-based). */
+  int episode;     /**< Episode number (1-based). */
+  char title[256]; /**< Episode title from TMDB; empty string = omit. */
+} EpisodeInfo;
+
+/**
  * @brief Convert ISO 639-1 (2-letter) to ISO 639-2/B (3-letter) code.
  * @return Static string or NULL if not found.
  */
@@ -106,21 +115,25 @@ int parse_season_episode(const char *filename, int *season, int *episode);
 /**
  * @brief Build the standardized output filename.
  *
- * Format:
+ * Movie (ep == NULL):
  * TITLE.YEAR.LANGUAGES.RESOLUTION.FEATURE.SOURCE.QUALITY.10bit.AV1.OPUS-matherose.mkv
+ *
+ * TV (ep != NULL) — year omitted per scene convention:
+ * TITLE.SxxEyy[.EPISODE.TITLE].LANGUAGES.RESOLUTION.FEATURE.SOURCE.QUALITY.10bit.AV1.OPUS-matherose.mkv
  *
  * @param buf       Output buffer.
  * @param bufsize   Size of output buffer.
- * @param title     Original movie title (from TMDB).
- * @param year      Release year.
+ * @param title     Original title (movie) or show name (TV), from TMDB.
+ * @param year      Release year (unused when ep != NULL).
  * @param lang_tag  Language tag.
  * @param info      Media info (for resolution).
  * @param hdr       HDR info (for features).
  * @param source    Source type.
+ * @param ep        Episode identity for TV, or NULL for movies.
  * @return 0 on success, -1 on error.
  */
 int build_output_filename(char *buf, size_t bufsize, const char *title, int year,
                           LanguageTag lang_tag, const MediaInfo *info, const HdrInfo *hdr,
-                          SourceType source);
+                          SourceType source, const EpisodeInfo *ep);
 
 #endif /* MEDIA_NAMING_H */

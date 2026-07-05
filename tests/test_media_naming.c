@@ -68,8 +68,47 @@ static void test_parse_season_episode(void) {
   CHECK(parse_season_episode(NULL, &s, &e) != 0);
 }
 
+static void test_build_output_filename_movie(void) {
+  MediaInfo info;
+  memset(&info, 0, sizeof(info));
+  info.height = 1080;
+  char buf[1024];
+
+  /* NULL episode => movie format, unchanged from before this feature. */
+  CHECK(build_output_filename(buf, sizeof(buf), "The Matrix", 1999, LANG_TAG_MULTI, &info, NULL,
+                              SOURCE_BLURAY, NULL) == 0);
+  CHECK_STR(buf, "The.Matrix.1999.MULTi.1080p.SDR.BluRay.HDLight.10bit.AV1.OPUS-TEST.mkv");
+}
+
+static void test_build_output_filename_tv(void) {
+  MediaInfo info;
+  memset(&info, 0, sizeof(info));
+  info.height = 1080;
+  char buf[1024];
+
+  EpisodeInfo ep = {.season = 1, .episode = 5};
+  snprintf(ep.title, sizeof(ep.title), "Sheridan");
+  CHECK(build_output_filename(buf, sizeof(buf), "The Bear", 2022, LANG_TAG_MULTI, &info, NULL,
+                              SOURCE_WEBDL, &ep) == 0);
+  CHECK_STR(buf, "The.Bear.S01E05.Sheridan.MULTi.1080p.SDR.WEB-DL.HDLight.10bit.AV1.OPUS-TEST.mkv");
+
+  /* Empty episode title => segment omitted (TMDB gap is non-fatal). */
+  ep.title[0] = '\0';
+  CHECK(build_output_filename(buf, sizeof(buf), "The Bear", 2022, LANG_TAG_MULTI, &info, NULL,
+                              SOURCE_WEBDL, &ep) == 0);
+  CHECK_STR(buf, "The.Bear.S01E05.MULTi.1080p.SDR.WEB-DL.HDLight.10bit.AV1.OPUS-TEST.mkv");
+
+  /* 3-digit episode. */
+  ep.episode = 105;
+  CHECK(build_output_filename(buf, sizeof(buf), "One Piece", 1999, LANG_TAG_VOST, &info, NULL,
+                              SOURCE_WEBRIP, &ep) == 0);
+  CHECK_STR(buf, "One.Piece.S01E105.VOST.1080p.SDR.WEBRip.HDLight.10bit.AV1.OPUS-TEST.mkv");
+}
+
 int main(void) {
   test_parse_season_episode();
+  test_build_output_filename_movie();
+  test_build_output_filename_tv();
   if (failures) {
     fprintf(stderr, "%d failure(s)\n", failures);
     return 1;

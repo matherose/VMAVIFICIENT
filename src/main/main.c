@@ -1337,7 +1337,7 @@ int main(int argc, char *argv[]) {
       saved_tmdb_year = tmdb.release_year;
 
       build_output_filename(output_name, sizeof(output_name), tmdb.original_title,
-                            tmdb.release_year, lang_tag, &info, &hdr, source);
+                            tmdb.release_year, lang_tag, &info, &hdr, source, NULL);
 
       /* Strip .mkv to get base name. */
       snprintf(base_name, sizeof(base_name), "%s", output_name);
@@ -2052,7 +2052,7 @@ int main(int argc, char *argv[]) {
         char hd_base_name[1024] = "";
         if (saved_tmdb_title[0]) {
           build_output_filename(hd_output_name, sizeof(hd_output_name), saved_tmdb_title,
-                                saved_tmdb_year, resolved_lang_tag, &hd_info, &hd_hdr, source);
+                                saved_tmdb_year, resolved_lang_tag, &hd_info, &hd_hdr, source, NULL);
           snprintf(hd_base_name, sizeof(hd_base_name), "%s", hd_output_name);
           char *hd_ext = strrchr(hd_base_name, '.');
           if (hd_ext && strcmp(hd_ext, ".mkv") == 0)
