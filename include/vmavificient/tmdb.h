@@ -1,6 +1,6 @@
 /**
  * @file tmdb.h
- * @brief TheMovieDB API client for fetching movie metadata.
+ * @brief TheMovieDB API client for fetching movie and TV metadata.
  */
 
 #ifndef TMDB_H
