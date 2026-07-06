@@ -99,6 +99,8 @@ static void test_build_output_filename_tv(void) {
   CHECK_STR(buf, "The.Bear.S01E05.MULTi.1080p.SDR.WEB-DL.HDLight.10bit.AV1.OPUS-TEST.mkv");
 
   /* 3-digit episode. */
+  memset(&ep, 0, sizeof(ep));
+  ep.season = 1;
   ep.episode = 105;
   CHECK(build_output_filename(buf, sizeof(buf), "One Piece", 1999, LANG_TAG_VOST, &info, NULL,
                               SOURCE_WEBRIP, &ep) == 0);
