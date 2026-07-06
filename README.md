@@ -65,6 +65,9 @@ Differences:
 
 ```
 --tmdb <id>      TMDB movie ID for naming (requires TMDB_API_KEY)
+--tv             TV mode: --tmdb <id> is a TMDB series ID (tmdb.org/tv/<id>)
+--season <N>     Season number (with --tv; else parsed from filename, then prompted)
+--episode <N>    Episode number (with --tv; else parsed from filename, then prompted)
 --blind          Skip TMDB; name output as <input-stem>.mkv
 --bitrate <kbps> Override target video bitrate (skips tier table)
 --srt <path>     Additional SRT subtitle file (can be repeated)
@@ -177,6 +180,9 @@ Adds `-fsanitize=address,undefined` for catching memory / UB bugs locally. Used 
 ```bash
 # Basic — auto-detects everything, names from TMDB
 ./build/vmavificient --tmdb 335984 input.mkv
+
+# TV mode example (TMDB series ID, manual season/episode)
+./build/vmavificient --tv --tmdb 890 "Neon Genesis Evangelion - Episode 01.mkv" --season 1 --episode 1
 
 # Blind mode — keep the input filename, skip TMDB lookup
 ./build/vmavificient --blind input.mkv
