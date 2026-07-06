@@ -73,6 +73,14 @@ static void print_usage(const char *prog) {
           "\n"
           "Options:\n"
           "  --tmdb <id>      TMDB movie ID for naming (requires TMDB_API_KEY)\n"
+          "  --tv             TV mode: --tmdb <id> is a TMDB series ID\n"
+          "                   (themoviedb.org/tv/<id>). Output is named\n"
+          "                   Show.SxxEyy.Episode.Title.<...> — no year.\n"
+          "  --mv             Movie mode (the default; explicit form)\n"
+          "  --season <N>     Season number (with --tv; overrides filename\n"
+          "                   parsing, prompts if still unknown)\n"
+          "  --episode <N>    Episode number (with --tv; same resolution\n"
+          "                   order as --season)\n"
           "  --blind          Skip TMDB lookup; name output as <input-stem>.mkv\n"
           "                   (no config required)\n"
           "  --config         Run interactive setup once; writes\n"
@@ -278,6 +286,27 @@ static SourceType ask_source(void) {
   default:
     return SOURCE_BLURAY;
   }
+}
+
+/**
+ * @brief Prompt for a positive integer on stdin (fgets + parse, no scanf).
+ * @return 0 on success, -1 on EOF/non-interactive stdin or 3 bad answers.
+ */
+static int ask_positive_int(const char *prompt, int *out) {
+  char line[16];
+  for (int tries = 0; tries < 3; tries++) {
+    printf("%s", prompt);
+    fflush(stdout);
+    if (!fgets(line, sizeof(line), stdin))
+      return -1;
+    int v = parse_int_or_zero(line);
+    if (v > 0) {
+      *out = v;
+      return 0;
+    }
+    printf("Please enter a positive number.\n");
+  }
+  return -1;
 }
 
 /* ---- Track display helpers ---- */
@@ -570,6 +599,9 @@ int main(int argc, char *argv[]) {
   char cli_cache_dir[4096] = ""; /* CLI-provided cache dir, optional */
   LanguageTag cli_lang_tag = LANG_TAG_NONE;
   SourceType cli_source = SOURCE_UNKNOWN;
+  bool tv_mode = false;
+  int cli_season = 0;  /* 0 = resolve from filename, then prompt */
+  int cli_episode = 0; /* same resolution order as cli_season */
   QualityType cli_quality = QUALITY_LIVEACTION;
   const char *extra_srt_paths[16] = {NULL};
   int extra_srt_count = 0;
@@ -633,6 +665,10 @@ int main(int argc, char *argv[]) {
     OPT_COMPANION_HD,
     OPT_SCALE_TO_HD,
     OPT_CACHE_DIR,
+    OPT_TV,
+    OPT_MV,
+    OPT_SEASON,
+    OPT_EPISODE,
   };
 
   static struct option long_options[] = {
@@ -687,6 +723,10 @@ int main(int argc, char *argv[]) {
       {"companion-hd", no_argument, 0, OPT_COMPANION_HD},
       {"scale-to-hd", no_argument, 0, OPT_SCALE_TO_HD},
       {"cache-dir", required_argument, 0, OPT_CACHE_DIR},
+      {"tv", no_argument, 0, OPT_TV},
+      {"mv", no_argument, 0, OPT_MV},
+      {"season", required_argument, 0, OPT_SEASON},
+      {"episode", required_argument, 0, OPT_EPISODE},
       {0, 0, 0, 0},
   };
 
@@ -860,6 +900,26 @@ int main(int argc, char *argv[]) {
         return 1;
       }
       break;
+    case OPT_TV:
+      tv_mode = true;
+      break;
+    case OPT_MV:
+      tv_mode = false;
+      break;
+    case OPT_SEASON:
+      cli_season = parse_int_or_zero(optarg);
+      if (cli_season <= 0) {
+        fprintf(stderr, "Error: --season must be a positive integer\n");
+        return 1;
+      }
+      break;
+    case OPT_EPISODE:
+      cli_episode = parse_int_or_zero(optarg);
+      if (cli_episode <= 0) {
+        fprintf(stderr, "Error: --episode must be a positive integer\n");
+        return 1;
+      }
+      break;
     default:
       print_usage(argv[0]);
       return 1;
@@ -878,6 +938,10 @@ int main(int argc, char *argv[]) {
 
   if (companion_hd && scale_to_hd) {
     fprintf(stderr, "Error: --companion-hd and --scale-to-hd are mutually exclusive\n");
+    return 1;
+  }
+  if (!tv_mode && (cli_season > 0 || cli_episode > 0)) {
+    fprintf(stderr, "Error: --season/--episode require --tv\n");
     return 1;
   }
   int do_hd = companion_hd || scale_to_hd;
@@ -1252,6 +1316,8 @@ int main(int argc, char *argv[]) {
   /* Saved for HD companion naming (filled by TMDB branch below). */
   char saved_tmdb_title[512] = "";
   int saved_tmdb_year = 0;
+  EpisodeInfo saved_episode = {0};
+  bool saved_is_tv = false;
   const char *video_language = "und";
   SourceType source = cli_source;
   FrenchVariant fv = FRENCH_VARIANT_UNKNOWN;
@@ -1284,17 +1350,85 @@ int main(int argc, char *argv[]) {
 
     naming_ok = true;
   } else if (tmdb_id > 0) {
-    ui_section("TMDB lookup");
-    ui_kv("Movie ID", "%d", tmdb_id);
-    TmdbMovieInfo tmdb = tmdb_fetch_movie(tmdb_id);
-    if (tmdb.error != 0) {
-      ui_stage_fail("TMDB fetch", "could not fetch movie info");
-      ui_hint("verify TMDB_API_KEY is set in config.ini and the ID is "
-              "correct (e.g. tmdb.org/movie/<id>)");
+    /* Common metadata, filled from the movie or TV endpoint. */
+    char meta_title[512] = "";
+    int meta_year = 0;
+    char meta_lang[8] = "";
+    bool meta_ok = false;
+    EpisodeInfo ep = {0};
+
+    if (tv_mode) {
+      /* S/E resolution: flags > filename parse > interactive prompt. */
+      int season = cli_season;
+      int episode = cli_episode;
+      if (season <= 0 || episode <= 0) {
+        const char *fname = strrchr(filepath, '/');
+        fname = fname ? fname + 1 : filepath;
+        int ps = 0, pe = 0;
+        if (parse_season_episode(fname, &ps, &pe) == 0) {
+          if (season <= 0)
+            season = ps;
+          if (episode <= 0)
+            episode = pe;
+        }
+      }
+      if (season <= 0 &&
+          ask_positive_int("\nSeason not detected from filename. Season: ", &season) != 0) {
+        ui_stage_fail("Naming", "season unknown; pass --season <N>");
+        return 1;
+      }
+      if (episode <= 0 &&
+          ask_positive_int("Episode not detected from filename. Episode: ", &episode) != 0) {
+        ui_stage_fail("Naming", "episode unknown; pass --episode <N>");
+        return 1;
+      }
+
+      ui_section("TMDB lookup");
+      ui_kv("TV ID", "%d", tmdb_id);
+      ui_kv("Episode", "S%02dE%02d", season, episode);
+      TmdbTvInfo tv = tmdb_fetch_tv(tmdb_id);
+      if (tv.error != 0) {
+        ui_stage_fail("TMDB fetch", "could not fetch TV show info");
+        ui_hint("verify TMDB_API_KEY is set in config.ini and the ID is a "
+                "TV series ID (tmdb.org/tv/<id>, not /movie/)");
+      } else {
+        snprintf(meta_title, sizeof(meta_title), "%s", tv.original_name);
+        meta_year = tv.first_air_year;
+        snprintf(meta_lang, sizeof(meta_lang), "%s", tv.original_language);
+        ep.season = season;
+        ep.episode = episode;
+        TmdbEpisodeInfo epi = tmdb_fetch_episode(tmdb_id, season, episode);
+        if (epi.error == 0)
+          snprintf(ep.title, sizeof(ep.title), "%s", epi.name);
+        else
+          ui_hint("episode title unavailable on TMDB; filename will omit it");
+        meta_ok = true;
+      }
     } else {
-      ui_kv("Title", "%s", tmdb.original_title);
-      ui_kv("Year", "%d", tmdb.release_year);
-      ui_kv("Language", "%s", tmdb.original_language);
+      ui_section("TMDB lookup");
+      ui_kv("Movie ID", "%d", tmdb_id);
+      TmdbMovieInfo tmdb = tmdb_fetch_movie(tmdb_id);
+      if (tmdb.error != 0) {
+        ui_stage_fail("TMDB fetch", "could not fetch movie info");
+        ui_hint("verify TMDB_API_KEY is set in config.ini and the ID is "
+                "correct (e.g. tmdb.org/movie/<id>)");
+      } else {
+        snprintf(meta_title, sizeof(meta_title), "%s", tmdb.original_title);
+        meta_year = tmdb.release_year;
+        snprintf(meta_lang, sizeof(meta_lang), "%s", tmdb.original_language);
+        meta_ok = true;
+      }
+    }
+
+    if (meta_ok) {
+      ui_kv("Title", "%s", meta_title);
+      if (tv_mode) {
+        if (ep.title[0])
+          ui_kv("Episode title", "%s", ep.title);
+      } else {
+        ui_kv("Year", "%d", meta_year);
+      }
+      ui_kv("Language", "%s", meta_lang);
 
       /* Source: CLI flag > filename detection > interactive prompt. */
       if (source == SOURCE_UNKNOWN)
@@ -1321,7 +1455,7 @@ int main(int argc, char *argv[]) {
       if (cli_lang_tag != LANG_TAG_NONE) {
         lang_tag = cli_lang_tag;
       } else {
-        LanguageTag auto_tag = determine_language_tag(&tracks, tmdb.original_language, fv);
+        LanguageTag auto_tag = determine_language_tag(&tracks, meta_lang, fv);
 
         /* If auto-detection produced a definitive result, use it.
            Otherwise ask the user interactively. */
@@ -1333,11 +1467,13 @@ int main(int argc, char *argv[]) {
       }
       resolved_lang_tag = lang_tag;
 
-      snprintf(saved_tmdb_title, sizeof(saved_tmdb_title), "%s", tmdb.original_title);
-      saved_tmdb_year = tmdb.release_year;
+      snprintf(saved_tmdb_title, sizeof(saved_tmdb_title), "%s", meta_title);
+      saved_tmdb_year = meta_year;
+      saved_episode = ep;
+      saved_is_tv = tv_mode;
 
-      build_output_filename(output_name, sizeof(output_name), tmdb.original_title,
-                            tmdb.release_year, lang_tag, &info, &hdr, source, NULL);
+      build_output_filename(output_name, sizeof(output_name), meta_title, meta_year, lang_tag,
+                            &info, &hdr, source, tv_mode ? &ep : NULL);
 
       /* Strip .mkv to get base name. */
       snprintf(base_name, sizeof(base_name), "%s", output_name);
@@ -1378,7 +1514,7 @@ int main(int argc, char *argv[]) {
         break;
       }
 
-      if (strcmp(tmdb.original_language, "fr") == 0) {
+      if (strcmp(meta_lang, "fr") == 0) {
         fr_audio_origin = FRENCH_AUDIO_VO;
       } else {
         switch (fv) {
@@ -1394,9 +1530,18 @@ int main(int argc, char *argv[]) {
         }
       }
 
-      snprintf(mkv_title, sizeof(mkv_title), "%s (%d)", tmdb.original_title, tmdb.release_year);
+      if (tv_mode) {
+        if (ep.title[0])
+          snprintf(mkv_title, sizeof(mkv_title), "%s - S%02dE%02d - %s", meta_title, ep.season,
+                   ep.episode, ep.title);
+        else
+          snprintf(mkv_title, sizeof(mkv_title), "%s - S%02dE%02d", meta_title, ep.season,
+                   ep.episode);
+      } else {
+        snprintf(mkv_title, sizeof(mkv_title), "%s (%d)", meta_title, meta_year);
+      }
       {
-        const char *vlang = iso639_1_to_2b(tmdb.original_language);
+        const char *vlang = iso639_1_to_2b(meta_lang);
         if (vlang)
           video_language = vlang;
       }
@@ -2052,7 +2197,8 @@ int main(int argc, char *argv[]) {
         char hd_base_name[1024] = "";
         if (saved_tmdb_title[0]) {
           build_output_filename(hd_output_name, sizeof(hd_output_name), saved_tmdb_title,
-                                saved_tmdb_year, resolved_lang_tag, &hd_info, &hd_hdr, source, NULL);
+                                saved_tmdb_year, resolved_lang_tag, &hd_info, &hd_hdr, source,
+                                saved_is_tv ? &saved_episode : NULL);
           snprintf(hd_base_name, sizeof(hd_base_name), "%s", hd_output_name);
           char *hd_ext = strrchr(hd_base_name, '.');
           if (hd_ext && strcmp(hd_ext, ".mkv") == 0)
