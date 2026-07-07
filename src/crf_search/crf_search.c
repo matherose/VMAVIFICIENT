@@ -232,8 +232,9 @@ static int build_vfilter(Source *s, const char *vfilter_expr, VFilter *vf) {
     return -1;
   }
 
-  enum AVPixelFormat pixfmts[] = {AV_PIX_FMT_YUV420P10LE, AV_PIX_FMT_NONE};
-  r = av_opt_set_int_list(vf->sink, "pix_fmts", pixfmts, AV_PIX_FMT_NONE, AV_OPT_SEARCH_CHILDREN);
+  enum AVPixelFormat pixfmts[] = {AV_PIX_FMT_YUV420P10LE};
+  r = av_opt_set_array(vf->sink, "pixel_formats", AV_OPT_SEARCH_CHILDREN, 0, 1,
+                       AV_OPT_TYPE_PIXEL_FMT, pixfmts);
   if (r < 0) {
     fprintf(stderr, "crf_search: build_vfilter: set pix_fmts failed (%d)\n", r);
     return -1;

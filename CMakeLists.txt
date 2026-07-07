@@ -328,14 +328,16 @@ if(VMAV_USE_SYSTEM_DEPS)
     find_package(ZLIB REQUIRED)
 
     # FFmpeg — bundle six modules into one IMPORTED target so the link line
-    # gets a single dependency to chase instead of six.
+    # gets a single dependency to chase instead of six. Floors are the
+    # FFmpeg 8.0 module majors (av_opt_set_array + buffersink
+    # "pixel_formats" require ≥ 7.1; we standardize on 8+).
     pkg_check_modules(VMAV_LIBAV REQUIRED IMPORTED_TARGET
-        libavformat
-        libavcodec
-        libavutil
-        libavfilter
-        libswscale
-        libswresample
+        libavformat>=62
+        libavcodec>=62
+        libavutil>=60
+        libavfilter>=11
+        libswscale>=9
+        libswresample>=6
     )
     pkg_check_modules(VMAV_OPUS      REQUIRED IMPORTED_TARGET opus)
     pkg_check_modules(VMAV_DOVI      REQUIRED IMPORTED_TARGET dovi)
