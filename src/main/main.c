@@ -1254,6 +1254,22 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
+  /* ---- OCR preflight: verify tessdata before any expensive work ---- */
+  if (tracks.error == 0 && tracks.subtitle_count > 0 && !dry_run && !grain_only) {
+    for (int i = 0; i < tracks.subtitle_count; i++) {
+      TrackInfo *sub = &tracks.subtitles[i];
+      if (sub->is_karaoke || !is_pgs_subtitle(sub))
+        continue;
+      const char *lang = sub->language[0] ? sub->language : "und";
+      const char *tess_lang = iso639_to_tesseract_lang(lang);
+      if (subtitle_ocr_preflight(tess_lang, NULL, 0) != 0) {
+        ui_stage_fail("OCR preflight", "no usable tessdata for PGS subtitle OCR");
+        ui_hint("install tessdata_best (eng+fra) and set TESSDATA_PREFIX, or drop PGS tracks");
+        return 1;
+      }
+    }
+  }
+
   /* ---- Grain analysis ---- */
   ui_section("Grain analysis");
   int film_grain = 0;

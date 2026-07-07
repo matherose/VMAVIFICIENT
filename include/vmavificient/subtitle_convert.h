@@ -19,6 +19,10 @@ typedef struct {
   int subtitle_count;     /**< Number of subtitle events converted. */
 } SubtitleConvertResult;
 
+/* Verify usable tessdata exists for the language: 0 = found (out_dir optionally filled),
+   -1 = no tessdata dir or missing <lang>.traineddata. */
+int subtitle_ocr_preflight(const char *tesseract_lang, char *out_dir, size_t out_size);
+
 /**
  * @brief Convert a PGS (HDMV) bitmap subtitle track to SRT using Tesseract OCR.
  *

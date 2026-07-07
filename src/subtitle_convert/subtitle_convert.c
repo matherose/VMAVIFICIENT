@@ -550,6 +550,40 @@ static void strip_whitespace(char *text) {
 }
 
 /* ====================================================================== */
+/*  Tessdata preflight                                                    */
+/* ====================================================================== */
+
+int subtitle_ocr_preflight(const char *tesseract_lang, char *out_dir, size_t out_size) {
+  const char *tessdata_path = getenv("TESSDATA_PREFIX");
+  if (!tessdata_path || !tessdata_path[0]) {
+    /* Common tessdata_best locations */
+    static const char *paths[] = {
+        "/usr/local/share/tessdata",
+        "/opt/homebrew/share/tessdata",
+        NULL,
+    };
+    tessdata_path = NULL;
+    for (int i = 0; paths[i]; i++) {
+      struct stat tst;
+      if (stat(paths[i], &tst) == 0) {
+        tessdata_path = paths[i];
+        break;
+      }
+    }
+  }
+  if (!tessdata_path)
+    return -1;
+  char model[1024];
+  snprintf(model, sizeof(model), "%s/%s.traineddata", tessdata_path, tesseract_lang);
+  struct stat mst;
+  if (stat(model, &mst) != 0)
+    return -1;
+  if (out_dir)
+    snprintf(out_dir, out_size, "%s", tessdata_path);
+  return 0;
+}
+
+/* ====================================================================== */
 /*  Main conversion function                                              */
 /* ====================================================================== */
 
@@ -570,24 +604,11 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path, const TrackInfo
   if (!tess_lang || !tess_lang[0])
     tess_lang = iso639_to_tesseract_lang(track->language);
 
-  /* Initialize Tesseract — prefer tessdata_best for higher accuracy.
-     Try TESSDATA_PREFIX env first, then common paths. */
-  const char *tessdata_path = getenv("TESSDATA_PREFIX");
-  if (!tessdata_path || !tessdata_path[0]) {
-    /* Common tessdata_best locations */
-    static const char *paths[] = {
-        "/usr/local/share/tessdata",
-        "/opt/homebrew/share/tessdata",
-        NULL,
-    };
-    for (int i = 0; paths[i]; i++) {
-      struct stat tst;
-      if (stat(paths[i], &tst) == 0) {
-        tessdata_path = paths[i];
-        break;
-      }
-    }
-  }
+  /* Initialize Tesseract — prefer tessdata_best for higher accuracy. */
+  char tessdata_buf[1024];
+  const char *tessdata_path = NULL;
+  if (subtitle_ocr_preflight(tess_lang, tessdata_buf, sizeof(tessdata_buf)) == 0)
+    tessdata_path = tessdata_buf;
 
   TessBaseAPI *tess = TessBaseAPICreate();
   if (TessBaseAPIInit3(tess, tessdata_path, tess_lang) != 0) {
