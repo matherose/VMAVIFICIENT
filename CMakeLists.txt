@@ -385,20 +385,24 @@ else()
     file(MAKE_DIRECTORY "${TESS_INSTALL}/include/tesseract")
     file(MAKE_DIRECTORY "${VMAF_INSTALL}/include")
 
-    set(FFMPEG_GIT_TAG    "n8.1")
-    set(OPUS_GIT_TAG      "v1.5.2")
+    set(FFMPEG_GIT_TAG    "n8.1.2")
+    set(OPUS_GIT_TAG      "v1.6.1")
     set(LIBDOVI_GIT_TAG   "libdovi-3.3.2")
     set(LIBDOVI_VERSION   "3.3.2")
-    set(CJSON_GIT_TAG     "v1.7.18")
-    set(ZLIB_GIT_TAG      "v1.3.1")
-    set(OPENSSL_GIT_TAG   "openssl-3.3.2")
-    set(CURL_GIT_TAG      "curl-8_11_0")
-    set(LIBPNG_GIT_TAG    "v1.6.43")
-    set(LIBJPEG_GIT_TAG   "3.1.0")
-    set(LIBTIFF_GIT_TAG   "v4.7.0")
-    set(LEPTONICA_GIT_TAG "1.85.0")
-    set(TESSERACT_GIT_TAG "5.5.0")
-    set(LIBVMAF_GIT_TAG   "v3.1.0")
+    set(CJSON_GIT_TAG     "v1.7.19")
+    set(ZLIB_GIT_TAG      "v1.3.2")
+    set(OPENSSL_GIT_TAG   "openssl-3.5.7")
+    set(CURL_GIT_TAG      "curl-8_21_0")
+    set(LIBPNG_GIT_TAG    "v1.6.58")
+    set(LIBJPEG_GIT_TAG   "3.2.0")
+    set(LIBTIFF_GIT_TAG   "v4.7.2")
+    set(LEPTONICA_GIT_TAG "1.86.0")
+    # 5.5.2's new cmake/SourceLists.cmake broke DISABLED_LEGACY_ENGINE:
+    # relative core paths vs absolute legacy paths make REMOVE_ITEM a
+    # no-op, so legacy sources (equationdetect.cpp) compile against
+    # legacy-gated headers and fail. Stay on 5.5.1 until fixed upstream.
+    set(TESSERACT_GIT_TAG "5.5.1")
+    set(LIBVMAF_GIT_TAG   "v3.2.0")
 
     # ---- cJSON via FetchContent ----------------------------------------
     FetchContent_Declare(cjson
@@ -942,6 +946,7 @@ add_executable(vmavificient
     src/subtitle_convert/subtitle_convert.c
     src/tmdb/tmdb.c
     src/ui/ui.c
+    src/utils/proc.c
     src/utils/utils.c
     src/video_encode/encoder_config.c
     src/video_encode/video_encode.c
