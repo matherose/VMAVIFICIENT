@@ -55,6 +55,9 @@ static void test_parse_season_episode(void) {
   /* 3-digit episodes (long-running anime). */
   CHECK(parse_season_episode("Show.S01E105.mkv", &s, &e) == 0 && s == 1 && e == 105);
   s = e = 0;
+  /* A 4th digit after the episode means it's not an episode tag. */
+  CHECK(parse_season_episode("Show.S01E1050.1080p.mkv", &s, &e) == -1);
+  s = e = 0;
   /* Double episode: first number wins (documented v1 limitation). */
   CHECK(parse_season_episode("Show.S01E05E06.mkv", &s, &e) == 0 && s == 1 && e == 5);
 

@@ -341,6 +341,8 @@ int parse_season_episode(const char *filename, int *season, int *episode) {
         q++;
         ndig++;
       }
+      if (isdigit((unsigned char)*q))
+        continue; /* 4+ digit "episode": not an episode tag */
       if (s > 0 && e > 0) {
         *season = s;
         *episode = e;
