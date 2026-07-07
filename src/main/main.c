@@ -558,6 +558,8 @@ int main(int argc, char *argv[]) {
   init_logging();
   ui_init();
   time_t encode_start_time = time(NULL);
+  /* Set on any audio/video/mux failure; drives the process exit code. */
+  int pipeline_failed = 0;
   printf("vmavificient v%s — SVT-AV1-HDR %s\n", VMAV_VERSION, get_svt_av1_version());
 
   /* Handle --help / -h before config_init so users can discover the CLI
@@ -1643,10 +1645,14 @@ int main(int argc, char *argv[]) {
       if (enc_best && enc_best_count > 1)
         qsort(enc_best, enc_best_count, sizeof(TrackInfo), cmp_audio_order);
 
-      /* Store OPUS paths and track names for final mux */
+      /* Store OPUS paths, track names and languages for final mux.
+         All three are written through the opus_count write-index so a
+         failed track never leaves a hole in the mux inputs. */
       char opus_paths[32][4096];
       char audio_names[32][256];
+      char audio_langs[32][16];
       int opus_count = 0;
+      int audio_fail_count = 0;
 
       if (enc_best && enc_best_count > 0 && !dry_run && !grain_only) {
         ui_section("Audio");
@@ -1675,25 +1681,28 @@ int main(int argc, char *argv[]) {
           /* Write opus to cache directory */
           char opus_cache_path[4096];
           build_cache_path(opus_cache_path, sizeof(opus_cache_path), opus_name);
-          snprintf(opus_paths[i], sizeof(opus_paths[i]), "%s", opus_cache_path);
+          snprintf(opus_paths[opus_count], sizeof(opus_paths[0]), "%s", opus_cache_path);
 
-          /* Build display name for MKV track */
-          build_audio_track_name(audio_names[i], sizeof(audio_names[i]), enc_best[i].language,
-                                 enc_best[i].channels, track_origin);
+          /* Build display name and language for MKV track */
+          build_audio_track_name(audio_names[opus_count], sizeof(audio_names[0]),
+                                 enc_best[i].language, enc_best[i].channels, track_origin);
+          snprintf(audio_langs[opus_count], sizeof(audio_langs[0]), "%s", enc_best[i].language);
 
           ui_row("[%d/%d] %s  %s  %dch  %lld kbps  →  \"%s\"", i + 1, enc_best_count,
                  enc_best[i].language, enc_best[i].codec, enc_best[i].channels,
-                 (long long)(enc_best[i].bitrate / 1000), audio_names[i]);
+                 (long long)(enc_best[i].bitrate / 1000), audio_names[opus_count]);
 
           time_t track_t0 = time(NULL);
-          OpusEncodeResult r = encode_track_to_opus(filepath, &enc_best[i], opus_paths[i]);
+          OpusEncodeResult r = encode_track_to_opus(filepath, &enc_best[i], opus_paths[opus_count]);
 
           if (r.skipped) {
             ui_stage_skip(opus_name, "already exists");
+            opus_count++;
           } else if (r.error == 0) {
             char detail[64];
             snprintf(detail, sizeof(detail), "%s", ui_fmt_duration(difftime(time(NULL), track_t0)));
             ui_stage_ok(opus_name, detail);
+            opus_count++;
           } else {
             char err[128];
             snprintf(err, sizeof(err), "stream #%d (%s, %dch): error %d", enc_best[i].index,
@@ -1701,9 +1710,9 @@ int main(int argc, char *argv[]) {
             ui_stage_fail(opus_name, err);
             ui_hint("verify the source stream is decodable; opusenc-style "
                     "channel layouts (>2ch) require ffmpeg with libopus");
+            audio_fail_count++;
+            pipeline_failed = 1;
           }
-
-          opus_count++;
         }
       }
 
@@ -2031,6 +2040,7 @@ int main(int argc, char *argv[]) {
             ui_stage_fail("video.mkv", err);
             ui_hint("re-run with --verbose to forward SVT-AV1's own log to "
                     "stderr (rate control, GOP layout, fatal warnings)");
+            pipeline_failed = 1;
           }
         }
 
@@ -2043,7 +2053,7 @@ int main(int argc, char *argv[]) {
           MuxAudioTrack mux_audio[32];
           for (int i = 0; i < opus_count && i < 32; i++) {
             mux_audio[i].path = opus_paths[i];
-            mux_audio[i].language = enc_best ? enc_best[i].language : "und";
+            mux_audio[i].language = audio_langs[i];
             mux_audio[i].track_name = audio_names[i];
             mux_audio[i].is_default = (i == 0) ? 1 : 0;
           }
@@ -2084,21 +2094,38 @@ int main(int argc, char *argv[]) {
           ui_kv("Inputs", "1 video + %d audio + %d subtitle track%s", opus_count, srt_count,
                 srt_count == 1 ? "" : "s");
           time_t mux_t0 = time(NULL);
-          FinalMuxResult mr = final_mux(&mux_cfg);
+          FinalMuxResult mr = {.error = -1, .skipped = 0};
 
-          if (mr.skipped) {
-            ui_stage_skip(output_name, "already exists");
-          } else if (mr.error == 0) {
-            char detail[64];
-            snprintf(detail, sizeof(detail), "%s", ui_fmt_duration(difftime(time(NULL), mux_t0)));
-            ui_stage_ok(output_name, detail);
-          } else {
+          if (audio_fail_count > 0) {
             char err[128];
-            snprintf(err, sizeof(err), "error %d (%d audio + %d sub inputs)", mr.error, opus_count,
-                     srt_count);
+            snprintf(err, sizeof(err), "%d audio track%s failed to encode — mux skipped",
+                     audio_fail_count, audio_fail_count == 1 ? "" : "s");
             ui_stage_fail(output_name, err);
-            ui_hint("intermediates kept on disk; inspect them next to the "
-                    "source file before re-running");
+            ui_hint("a release missing an announced audio track is broken; "
+                    "cached intermediates are kept, fix the source and re-run");
+            pipeline_failed = 1;
+          } else if (vr.error != 0) {
+            ui_stage_fail(output_name, "video encode failed — mux skipped");
+            pipeline_failed = 1;
+          } else {
+            mr = final_mux(&mux_cfg);
+
+            if (mr.skipped) {
+              ui_stage_skip(output_name, "already exists");
+            } else if (mr.error == 0) {
+              char detail[64];
+              snprintf(detail, sizeof(detail), "%s",
+                       ui_fmt_duration(difftime(time(NULL), mux_t0)));
+              ui_stage_ok(output_name, detail);
+            } else {
+              char err[128];
+              snprintf(err, sizeof(err), "error %d (%d audio + %d sub inputs)", mr.error,
+                       opus_count, srt_count);
+              ui_stage_fail(output_name, err);
+              ui_hint("intermediates kept on disk; inspect them next to the "
+                      "source file before re-running");
+              pipeline_failed = 1;
+            }
           }
 
           /* Clean up intermediate files on success. Leaving sidecar .srt
@@ -2356,6 +2383,7 @@ int main(int argc, char *argv[]) {
           ui_stage_fail("video.mkv", hd_verr);
           ui_hint("re-run with --verbose to forward SVT-AV1's own log to "
                   "stderr");
+          pipeline_failed = 1;
         }
 
         /* ---- HD final mux (reuse opus + srt from this session) ---- */
@@ -2366,7 +2394,7 @@ int main(int argc, char *argv[]) {
           MuxAudioTrack hd_mux_audio[32];
           for (int i = 0; i < opus_count && i < 32; i++) {
             hd_mux_audio[i].path = opus_paths[i];
-            hd_mux_audio[i].language = enc_best ? enc_best[i].language : "und";
+            hd_mux_audio[i].language = audio_langs[i];
             hd_mux_audio[i].track_name = audio_names[i];
             hd_mux_audio[i].is_default = (i == 0) ? 1 : 0;
           }
@@ -2405,22 +2433,38 @@ int main(int argc, char *argv[]) {
           ui_kv("Inputs", "1 video + %d audio + %d subtitle track%s", opus_count, srt_count,
                 srt_count == 1 ? "" : "s");
           time_t hd_mux_t0 = time(NULL);
-          FinalMuxResult hd_mr = final_mux(&hd_mux_cfg);
+          FinalMuxResult hd_mr = {.error = -1, .skipped = 0};
 
-          if (hd_mr.skipped) {
-            ui_stage_skip(hd_output_name, "already exists");
-          } else if (hd_mr.error == 0) {
-            char hd_mux_detail[64];
-            snprintf(hd_mux_detail, sizeof(hd_mux_detail), "%s",
-                     ui_fmt_duration(difftime(time(NULL), hd_mux_t0)));
-            ui_stage_ok(hd_output_name, hd_mux_detail);
+          if (audio_fail_count > 0) {
+            char err[128];
+            snprintf(err, sizeof(err), "%d audio track%s failed to encode — mux skipped",
+                     audio_fail_count, audio_fail_count == 1 ? "" : "s");
+            ui_stage_fail(hd_output_name, err);
+            ui_hint("a release missing an announced audio track is broken; "
+                    "cached intermediates are kept, fix the source and re-run");
+            pipeline_failed = 1;
+          } else if (hd_vr.error != 0) {
+            ui_stage_fail(hd_output_name, "video encode failed — mux skipped");
+            pipeline_failed = 1;
           } else {
-            char hd_mux_err[128];
-            snprintf(hd_mux_err, sizeof(hd_mux_err), "error %d (%d audio + %d sub inputs)",
-                     hd_mr.error, opus_count, srt_count);
-            ui_stage_fail(hd_output_name, hd_mux_err);
-            ui_hint("intermediates kept on disk; inspect them next to the "
-                    "source file before re-running");
+            hd_mr = final_mux(&hd_mux_cfg);
+
+            if (hd_mr.skipped) {
+              ui_stage_skip(hd_output_name, "already exists");
+            } else if (hd_mr.error == 0) {
+              char hd_mux_detail[64];
+              snprintf(hd_mux_detail, sizeof(hd_mux_detail), "%s",
+                       ui_fmt_duration(difftime(time(NULL), hd_mux_t0)));
+              ui_stage_ok(hd_output_name, hd_mux_detail);
+            } else {
+              char hd_mux_err[128];
+              snprintf(hd_mux_err, sizeof(hd_mux_err), "error %d (%d audio + %d sub inputs)",
+                       hd_mr.error, opus_count, srt_count);
+              ui_stage_fail(hd_output_name, hd_mux_err);
+              ui_hint("intermediates kept on disk; inspect them next to the "
+                      "source file before re-running");
+              pipeline_failed = 1;
+            }
           }
 
           int hd_removed = 0;
@@ -2481,5 +2525,5 @@ int main(int argc, char *argv[]) {
   if (tracks.error == 0)
     free_media_tracks(&tracks);
 
-  return 0;
+  return pipeline_failed ? 1 : 0;
 }
