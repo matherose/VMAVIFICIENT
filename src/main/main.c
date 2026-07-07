@@ -1796,9 +1796,17 @@ int main(int argc, char *argv[]) {
 
               int rc = system(cmd);
               int exit_code = (rc == -1 || !WIFEXITED(rc)) ? -1 : WEXITSTATUS(rc);
-              if (exit_code == 0) {
+              struct stat srt_out_st;
+              if (exit_code == 0 && stat(srt_paths[srt_count], &srt_out_st) == 0 &&
+                  srt_out_st.st_size > 0) {
                 ui_stage_ok(srt_fname, NULL);
                 srt_count++;
+              } else if (exit_code == 0) {
+                /* ffmpeg succeeded but wrote no events (e.g. a forced track
+                   with nothing to force in this cut). An empty SRT is not a
+                   valid mux input, so drop it. */
+                remove(srt_paths[srt_count]);
+                ui_stage_skip(srt_fname, "no subtitle events in stream");
               } else {
                 char err[128];
                 snprintf(err, sizeof(err), "stream #%d (%s, %s): ffmpeg rc=%d", sub->index, lang,
