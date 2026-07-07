@@ -255,6 +255,14 @@ OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *t
     goto cleanup;
   }
 
+  /* Some sources carry PCM tracks with an unspecified channel layout
+     (e.g. 6ch pcm_s16le muxed without one).  swresample rejects frames
+     whose layout differs from its configuration (AVERROR_INPUT_CHANGED),
+     so pin the default layout for the channel count before the decoder
+     starts producing frames. */
+  if (dec_ctx->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC)
+    av_channel_layout_default(&dec_ctx->ch_layout, dec_ctx->ch_layout.nb_channels);
+
   ret = avcodec_open2(dec_ctx, decoder, NULL);
   if (ret < 0) {
     fprintf(stderr, "  Error: cannot open decoder\n");
@@ -401,6 +409,9 @@ OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *t
     }
 
     while (avcodec_receive_frame(dec_ctx, frame) == 0) {
+      if (frame->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC)
+        av_channel_layout_default(&frame->ch_layout, frame->ch_layout.nb_channels);
+
       /* Resample to 48kHz float. */
       resampled->sample_rate = 48000;
       resampled->format = AV_SAMPLE_FMT_FLT;
@@ -446,6 +457,9 @@ OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *t
   /* ── Flush decoder ── */
   avcodec_send_packet(dec_ctx, NULL);
   while (avcodec_receive_frame(dec_ctx, frame) == 0) {
+    if (frame->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC)
+      av_channel_layout_default(&frame->ch_layout, frame->ch_layout.nb_channels);
+
     resampled->sample_rate = 48000;
     resampled->format = AV_SAMPLE_FMT_FLT;
     av_channel_layout_copy(&resampled->ch_layout, &enc_ctx->ch_layout);
