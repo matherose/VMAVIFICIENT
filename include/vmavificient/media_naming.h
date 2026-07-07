@@ -63,7 +63,7 @@ typedef enum {
 typedef struct {
   int season;      /**< Season number (1-based). */
   int episode;     /**< Episode number (1-based). */
-  char title[256]; /**< Episode title from TMDB; empty string = omit. */
+  char title[512]; /**< Episode title from TMDB; empty string = omit. */
 } EpisodeInfo;
 
 /**

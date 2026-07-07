@@ -415,7 +415,7 @@ int build_output_filename(char *buf, size_t bufsize, const char *title, int year
 
   /* Head: movie = TITLE.YEAR; TV = TITLE.SxxEyy[.EPISODE.TITLE]
      (year omitted per scene convention). */
-  char head[1024];
+  char head[2048];
   if (ep) {
     char safe_ep_title[512] = "";
     if (ep->title[0])
