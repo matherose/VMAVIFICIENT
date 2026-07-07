@@ -2114,8 +2114,7 @@ int main(int argc, char *argv[]) {
               ui_stage_skip(output_name, "already exists");
             } else if (mr.error == 0) {
               char detail[64];
-              snprintf(detail, sizeof(detail), "%s",
-                       ui_fmt_duration(difftime(time(NULL), mux_t0)));
+              snprintf(detail, sizeof(detail), "%s", ui_fmt_duration(difftime(time(NULL), mux_t0)));
               ui_stage_ok(output_name, detail);
             } else {
               char err[128];

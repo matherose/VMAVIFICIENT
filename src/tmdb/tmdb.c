@@ -50,8 +50,7 @@ static cJSON *tmdb_get_json(const char *path) {
   }
 
   char url[512];
-  snprintf(url, sizeof(url), "https://api.themoviedb.org/3/%s?api_key=%s", path,
-           cfg->tmdb_api_key);
+  snprintf(url, sizeof(url), "https://api.themoviedb.org/3/%s?api_key=%s", path, cfg->tmdb_api_key);
 
   CURL *curl = curl_easy_init();
   if (!curl) {

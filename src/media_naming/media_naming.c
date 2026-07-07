@@ -307,7 +307,9 @@ static void sanitize_title(char *out, size_t outsize, const char *title) {
 
 /* ── Season/episode parsing ────────────────────────────────────── */
 
-static int is_name_sep(char c) { return c == '.' || c == '_' || c == ' ' || c == '-'; }
+static int is_name_sep(char c) {
+  return c == '.' || c == '_' || c == ' ' || c == '-';
+}
 
 int parse_season_episode(const char *filename, int *season, int *episode) {
   if (!filename || !season || !episode)
