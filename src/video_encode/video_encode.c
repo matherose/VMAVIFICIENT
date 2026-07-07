@@ -46,11 +46,12 @@
 static void svt_log_callback(void *context, SvtAv1LogLevel level, const char *tag, const char *fmt,
                              va_list args) {
   (void)context;
-  if (!ui_is_verbose())
+  /* SVT-AV1 levels: 0=fatal, 1=error, 2=warn, 3=info, 4=debug. Fatal,
+     error, and warn always reach stderr — suppressing them behind
+     --verbose masked a FATAL misconfiguration for a month (the v1.5.0
+     single-keyframe defect). Info and debug stay verbose-gated. */
+  if (level > SVT_AV1_LOG_WARN && !ui_is_verbose())
     return;
-  /* SVT-AV1 levels: 0=fatal, 1=error, 2=warn, 3=info, 4=debug. We always
-     forward warn+ to stderr; info+ also gated by verbose (already checked
-     above, so this is effectively all levels when verbose is on). */
   const char *level_str = "info";
   switch (level) {
   case SVT_AV1_LOG_FATAL:
