@@ -328,6 +328,21 @@ git commit -m "build(deps): refresh vendored stack (FFmpeg n8.1.2, OpenSSL 3.5 L
 
 ---
 
+### Task 5b: Vendor dav1d — fix vendored-build CRF scoring (found by the oracle)
+
+**Discovery 2026-07-07:** the CRF oracle FAILS on the vendored binary — `score_sample failed at sample 0 (480 packets, scored 0)`. Root cause: `crf_search.c:605` needs `avcodec_find_decoder(AV_CODEC_ID_AV1)` to software-decode the probe encodes, but the vendored FFmpeg (`--disable-autodetect`, no external AV1 decoder) only has the native `av1` decoder, which is hwaccel-oriented and yields no frames here. Homebrew FFmpeg ships dav1d, so the system build passes. **Pre-existing defect, not a bump regression: every static release binary since #21 has a broken CRF search** (CI never caught it because the vendored jobs run `--bitrate`, which skips CRF search).
+
+**Files:** Modify `CMakeLists.txt` (vendored branch).
+
+- [ ] Add `set(DAV1D_GIT_TAG "1.5.3")` beside the other pins and a `DAV1D_INSTALL` prefix beside the others.
+- [ ] Add `ep_dav1d` ExternalProject cloning `https://code.videolan.org/videolan/dav1d.git`, meson pattern copied from `ep_libvmaf` (`--default-library=static`, `-Denable_tools=false -Denable_tests=false`), byproduct `libdav1d.a`.
+- [ ] `ep_ffmpeg`: add `ep_dav1d` to DEPENDS, dav1d's pkgconfig dir to PKG_CONFIG_PATH, and `--enable-libdav1d` to configure.
+- [ ] Final vendored link list: add `"${DAV1D_INSTALL}/lib/libdav1d.a"` next to the opus static lib.
+- [ ] Rebuild vendored, re-run the CRF oracle: MUST now report a CRF near 35 and exit 0.
+- [ ] Commit: `build(deps): vendor dav1d so the static binary can score CRF probes`.
+
+---
+
 ### Task 6: CI hardening
 
 **Files:**
