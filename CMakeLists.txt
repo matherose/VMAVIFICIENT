@@ -367,6 +367,7 @@ else()
     set(LEPT_INSTALL    "${DEPS_PREFIX}/leptonica")
     set(TESS_INSTALL    "${DEPS_PREFIX}/tesseract")
     set(VMAF_INSTALL    "${DEPS_PREFIX}/libvmaf")
+    set(DAV1D_INSTALL   "${DEPS_PREFIX}/dav1d")
 
     # CMake validates INTERFACE_INCLUDE_DIRECTORIES at configure time,
     # so the directories must already exist even though headers arrive later.
@@ -384,6 +385,7 @@ else()
     file(MAKE_DIRECTORY "${TESS_INSTALL}/include")
     file(MAKE_DIRECTORY "${TESS_INSTALL}/include/tesseract")
     file(MAKE_DIRECTORY "${VMAF_INSTALL}/include")
+    file(MAKE_DIRECTORY "${DAV1D_INSTALL}/include")
 
     set(FFMPEG_GIT_TAG    "n8.1.2")
     set(OPUS_GIT_TAG      "v1.6.1")
@@ -403,6 +405,7 @@ else()
     # legacy-gated headers and fail. Stay on 5.5.1 until fixed upstream.
     set(TESSERACT_GIT_TAG "5.5.1")
     set(LIBVMAF_GIT_TAG   "v3.2.0")
+    set(DAV1D_GIT_TAG     "1.5.3")
 
     # ---- cJSON via FetchContent ----------------------------------------
     FetchContent_Declare(cjson
@@ -743,16 +746,46 @@ else()
         LOG_OUTPUT_ON_FAILURE TRUE
     )
 
+    # ---- dav1d (meson) --------------------------------------------------
+    find_program(MESON_EXECUTABLE meson REQUIRED)
+    # CRF search decodes its own AV1 probe encodes in software
+    # (crf_search.c, avcodec_find_decoder(AV_CODEC_ID_AV1)). FFmpeg's
+    # native av1 decoder is hwaccel-only, so without dav1d the static
+    # binary scores 0 frames and CRF search silently fails.
+    ExternalProject_Add(ep_dav1d
+        GIT_REPOSITORY  https://code.videolan.org/videolan/dav1d.git
+        GIT_TAG         ${DAV1D_GIT_TAG}
+        GIT_SHALLOW     TRUE
+        PREFIX          "${DEPS_PREFIX}/build/dav1d"
+        CONFIGURE_COMMAND
+            ${MESON_EXECUTABLE} setup
+                --prefix=${DAV1D_INSTALL}
+                --libdir=${DAV1D_INSTALL}/lib
+                --buildtype=release
+                --default-library=static
+                -Denable_tools=false
+                -Denable_tests=false
+                <BINARY_DIR>
+                <SOURCE_DIR>
+        BUILD_COMMAND   ${MESON_EXECUTABLE} compile -C <BINARY_DIR>
+        INSTALL_COMMAND ${MESON_EXECUTABLE} install -C <BINARY_DIR>
+        BUILD_BYPRODUCTS "${DAV1D_INSTALL}/lib/libdav1d.a"
+        LOG_CONFIGURE   TRUE
+        LOG_BUILD       TRUE
+        LOG_INSTALL     TRUE
+        LOG_OUTPUT_ON_FAILURE TRUE
+    )
+
     # ---- FFmpeg --------------------------------------------------------
     ExternalProject_Add(ep_ffmpeg
         GIT_REPOSITORY  https://github.com/FFmpeg/FFmpeg.git
         GIT_TAG         ${FFMPEG_GIT_TAG}
         GIT_SHALLOW     TRUE
         PREFIX          "${DEPS_PREFIX}/build/ffmpeg"
-        DEPENDS         ep_opus ep_zlib
+        DEPENDS         ep_opus ep_zlib ep_dav1d
         CONFIGURE_COMMAND
             ${CMAKE_COMMAND} -E env
-                "PKG_CONFIG_PATH=${OPUS_INSTALL}/lib/pkgconfig:${ZLIB_INSTALL}/lib/pkgconfig:${ZLIB_INSTALL}/share/pkgconfig"
+                "PKG_CONFIG_PATH=${OPUS_INSTALL}/lib/pkgconfig:${ZLIB_INSTALL}/lib/pkgconfig:${ZLIB_INSTALL}/share/pkgconfig:${DAV1D_INSTALL}/lib/pkgconfig"
             <SOURCE_DIR>/configure
                 --prefix=${FF_INSTALL}
                 --enable-static
@@ -765,6 +798,8 @@ else()
                 --enable-libopus
                 --enable-encoder=libopus
                 --enable-decoder=libopus
+                --enable-libdav1d
+                --enable-decoder=libdav1d
                 --enable-zlib
                 --extra-cflags=-I${OPUS_INSTALL}/include
                 --extra-cflags=-I${ZLIB_INSTALL}/include
@@ -787,7 +822,6 @@ else()
     )
 
     # ---- libvmaf (meson) ----------------------------------------------
-    find_program(MESON_EXECUTABLE meson REQUIRED)
     ExternalProject_Add(ep_libvmaf
         GIT_REPOSITORY  https://github.com/Netflix/vmaf.git
         GIT_TAG         ${LIBVMAF_GIT_TAG}
@@ -1024,6 +1058,7 @@ else()
         Dovi::dovi
         Vmav::libvmaf
         "${OPUS_INSTALL}/lib/libopus.a"
+        "${DAV1D_INSTALL}/lib/libdav1d.a"
         Vmav::tesseract
         Vmav::leptonica
         Vmav::tiff
