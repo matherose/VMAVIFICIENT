@@ -11,7 +11,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <time.h>
 
 /* Cache directory - file scope so helper functions can access it. */
@@ -34,6 +33,7 @@ static char g_cache_dir[4096] = "";
 #include "media_info.h"
 #include "media_naming.h"
 #include "media_tracks.h"
+#include "proc.h"
 #include "rpu_extract.h"
 #include "subtitle_convert.h"
 #include "tmdb.h"
@@ -356,26 +356,11 @@ static void cleanup_cache_dir(void) {
       return;
     }
     /* Delete old cache in background (non-blocking) */
-    char cmd[4096];
-    char escaped_old[4096];
-    shell_quote_append(escaped_old, sizeof(escaped_old), &(size_t){0}, old_cache_path);
-    snprintf(cmd, sizeof(cmd), "rm -rf '%s' &", escaped_old);
-    int ret = system(cmd);
-    (void)ret; /* Ignore background rm errors */
+    vmav_rmtree_async(old_cache_path);
   } else {
     /* Rename failed (e.g., cache doesn't exist or is in use)
      * Try to recreate in place */
-    char cmd[4096];
-    char escaped_path[4096];
-    size_t j = 0;
-    for (size_t i = 0; i < strlen(g_cache_dir) && j < sizeof(escaped_path) - 2; i++) {
-      if (g_cache_dir[i] == '\'' || g_cache_dir[i] == '\\')
-        escaped_path[j++] = '\\';
-      escaped_path[j++] = g_cache_dir[i];
-    }
-    escaped_path[j] = '\0';
-    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", escaped_path);
-    if (system(cmd) != 0) {
+    if (vmav_rmtree(g_cache_dir) != 0) {
       fprintf(stderr, "Warning: failed to cleanup cache directory '%s'\n", g_cache_dir);
     }
     /* Recreate empty cache directory */
@@ -1799,28 +1784,26 @@ int main(int argc, char *argv[]) {
               srt_count++;
             } else {
               /* Extract text subtitle using ffmpeg command */
-              char cmd[8192];
               /* If already SRT (subrip), copy stream; else convert to srt. */
               const char *codec_arg = (strcmp(sub->codec, "subrip") == 0) ? "copy" : "srt";
-              /* Build the command with shell_quote_append() for paths so
-                 a filename containing $(…), backticks, or quotes can't
-                 escape into the shell. */
-              size_t pos = 0;
-              int n = snprintf(cmd, sizeof(cmd), "ffmpeg -y -loglevel error -i ");
-              if (n > 0)
-                pos = (size_t)n;
-              shell_quote_append(cmd, sizeof(cmd), &pos, filepath);
-              n = snprintf(cmd + pos, sizeof(cmd) - pos, " -map 0:%d -c:s %s ", sub->index,
-                           codec_arg);
-              if (n > 0 && (size_t)n < sizeof(cmd) - pos)
-                pos += (size_t)n;
-              shell_quote_append(cmd, sizeof(cmd), &pos, srt_paths[srt_count]);
+              VmavCommand c;
+              vmav_cmd_init(&c);
+              vmav_cmd_arg(&c, "ffmpeg");
+              vmav_cmd_arg(&c, "-y");
+              vmav_cmd_arg(&c, "-loglevel");
+              vmav_cmd_arg(&c, "error");
+              vmav_cmd_arg(&c, "-i");
+              vmav_cmd_arg(&c, filepath);
+              vmav_cmd_arg(&c, "-map");
+              vmav_cmd_argf(&c, "0:%d", sub->index);
+              vmav_cmd_arg(&c, "-c:s");
+              vmav_cmd_arg(&c, codec_arg);
+              vmav_cmd_arg(&c, srt_paths[srt_count]);
 
               ui_row("Extract  #%-2d  %s  %s  →  \"%s\"", sub->index, lang, sub->codec,
                      srt_names[srt_count]);
 
-              int rc = system(cmd);
-              int exit_code = (rc == -1 || !WIFEXITED(rc)) ? -1 : WEXITSTATUS(rc);
+              int exit_code = vmav_run(c.argv);
               struct stat srt_out_st;
               if (exit_code == 0 && stat(srt_paths[srt_count], &srt_out_st) == 0 &&
                   srt_out_st.st_size > 0) {
