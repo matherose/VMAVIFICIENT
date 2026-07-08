@@ -1551,6 +1551,16 @@ int main(int argc, char *argv[]) {
 
       naming_ok = true;
     }
+  } else {
+    /* Neither --blind nor --tmdb: without this branch the pipeline body
+       below is silently skipped and the program exits 0 after grain
+       analysis, having encoded nothing. */
+    ui_stage_fail("Naming", "no naming source: pass --tmdb <id> or --blind");
+    ui_hint("--tmdb <id> names from TMDB metadata; --blind names the "
+            "output <input-stem>.mkv next to the source");
+    if (tracks.error == 0)
+      free_media_tracks(&tracks);
+    return 1;
   }
 
   if (naming_ok) {
