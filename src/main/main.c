@@ -4,7 +4,6 @@
  */
 
 #include <errno.h>
-#include <getopt.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -38,101 +37,6 @@
 #include "ui.h"
 #include "utils.h"
 #include "video_encode.h"
-
-static void print_usage(const char *prog) {
-  fprintf(stderr,
-          "Usage: %s [options] <input_file>\n"
-          "\n"
-          "Options:\n"
-          "  --tmdb <id>      TMDB movie ID for naming (requires TMDB_API_KEY)\n"
-          "  --tv             TV mode: --tmdb <id> is a TMDB series ID\n"
-          "                   (themoviedb.org/tv/<id>). Output is named\n"
-          "                   Show.SxxEyy.Episode.Title.<...> — no year.\n"
-          "  --mv             Movie mode (the default; explicit form)\n"
-          "  --season <N>     Season number (with --tv; overrides filename\n"
-          "                   parsing, prompts if still unknown)\n"
-          "  --episode <N>    Episode number (with --tv; same resolution\n"
-          "                   order as --season)\n"
-          "  --blind          Skip TMDB lookup; name output as <input-stem>.mkv\n"
-          "                   (no config required)\n"
-          "  --config         Run interactive setup once; writes\n"
-          "                   $HOME/.config/vmavificient/config.ini with the TMDB\n"
-          "                   API key and release group. Subsequent runs read it\n"
-          "                   automatically.\n"
-          "  --crf <N>        Skip CRF search; encode at this CRF directly\n"
-          "                   (1–63, lower = higher quality)\n"
-          "  --vmaf-target <N> Override the VMAF target for CRF search\n"
-          "                   (default: per-preset, 90–96)\n"
-          "  --bitrate <kbps> Skip CRF search; encode VBR at this bitrate\n"
-          "  --srt <path>     Additional SRT subtitle file (can be repeated)\n"
-          "  --dry-run        Run analysis + CRF search + naming, print the\n"
-          "                   encoding plan, then exit. No files written.\n"
-          "  --quiet          Compact output: hide informational sections, keep\n"
-          "                   only stage status lines + the Plan / Done blocks.\n"
-          "  --verbose        Forward SVT-AV1 encoder log messages to stderr\n"
-          "                   (rate control, GOP layout, warnings). Composes\n"
-          "                   with --quiet.\n"
-          "  --grain-only     Like --dry-run, plus dump every encoder knob the\n"
-          "                   resolved preset configures (grain mech, tune,\n"
-          "                   ac-bias, filters, QMs). For sanity-checking what\n"
-          "                   each tier actually does without a full encode.\n"
-          "  --companion-hd   After the 4K encode, produce a second 1080p HDLight\n"
-          "                   release from the same REMUX source. Requires a 4K\n"
-          "                   source. Audio and subtitles are shared between both\n"
-          "                   outputs. Dolby Vision is stripped from the HD "
-          "output.\n"
-          "  --scale-to-hd    Produce only a 1080p HDLight release (no 4K "
-          "output).\n"
-          "                   Requires a 4K source. Full independent pipeline.\n"
-          "                   Mutually exclusive with --companion-hd.\n"
-          "  --cache-dir <path>\n"
-          "                   Use specified directory for intermediate files\n"
-          "                   (grain analysis, CRF search results, extracted\n"
-          "                   audio/subtitles). Cache is deleted after successful\n"
-          "                   encode. Defaults to a hidden .vmavificient-cache folder\n"
-          "                   in the project root.\n"
-          "  --help           Show this help\n"
-          "\n"
-          "Language flags (override auto-detection):\n"
-          "  --multi          MULTi\n"
-          "  --multivfi       MULTi.VFI\n"
-          "  --multivff       MULTi.VFF\n"
-          "  --multivfq       MULTi.VFQ\n"
-          "  --multivf2       MULTi.VF2\n"
-          "  --multivof       MULTi.VOF\n"
-          "  --dual_vfi       DUAL.VFI\n"
-          "  --dual_vff       DUAL.VFF\n"
-          "  --dual_vfq       DUAL.VFQ\n"
-          "  --french         FRENCH\n"
-          "  --vff            VFF\n"
-          "  --vof            VOF\n"
-          "  --truefrench     TRUEFRENCH\n"
-          "  --vo             VO\n"
-          "  --vost           VOST\n"
-          "  --fansub         FANSUB\n"
-          "\n"
-          "Source flags (override auto-detection):\n"
-          "  --bdrip          BDRip\n"
-          "  --bluray         BluRay\n"
-          "  --remux          REMUX\n"
-          "  --dvdrip         DVDRip\n"
-          "  --dvdremux       DVDRemux\n"
-          "  --webrip         WEBRip\n"
-          "  --webdl          WEB-DL\n"
-          "  --web            WEB\n"
-          "  --hdtv           HDTV\n"
-          "  --hdrip          HDRip\n"
-          "  --tvrip          TVRip\n"
-          "  --vhsrip         VHSRip\n"
-          "\n"
-          "Quality presets (default: live-action):\n"
-          "  --animation       Animation content\n"
-          "  --super35_analog  Super 35mm analog film\n"
-          "  --super35_digital Super 35mm digital\n"
-          "  --imax_analog     IMAX analog film\n"
-          "  --imax_digital    IMAX digital\n",
-          prog);
-}
 
 /**
  * @brief Prompt user to choose a language tag interactively.
@@ -292,411 +196,29 @@ int main(int argc, char *argv[]) {
   int pipeline_failed = 0;
   printf("vmavificient v%s — SVT-AV1-HDR %s\n", VMAV_VERSION, get_svt_av1_version());
 
-  /* Handle --help / -h before config_init so users can discover the CLI
-   * without having to provision a config first. Likewise, --blind runs
-   * the encode pipeline without any TMDB/release-group metadata, so the
-   * config file is not required in that mode either. --config runs the
-   * interactive setup and exits; it must also bypass config_init. */
-  bool blind = false;
-  for (int i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-      print_usage(argv[0]);
-      free(ctx);
-      return 0;
-    }
-    if (strcmp(argv[i], "--config") == 0) {
-      free(ctx);
-      return config_interactive_setup();
-    }
-    if (strcmp(argv[i], "--blind") == 0)
-      blind = true;
+  int prescan_rc = vmav_cli_prescan(argc, argv, &ctx->opt);
+  if (prescan_rc >= 0) {
+    free(ctx);
+    return prescan_rc;
   }
-
-  if (!blind)
+  if (!ctx->opt.blind)
     config_init();
-
   if (check_dependencies() != 0) {
     fprintf(stderr, "Fatal: dependency sanity check failed.\n");
     free(ctx);
     return 1;
   }
-
-  /* ---- CLI parsing ---- */
-  int tmdb_id = 0;
-  int cli_bitrate = 0;     /* 0 = run crf-search (default path) */
-  int cli_crf = 0;         /* 0 = run crf-search; >0 = skip search, use directly */
-  int cli_vmaf_target = 0; /* 0 = use per-preset default from get_vmaf_target() */
-  bool dry_run = false;
-  bool quiet = false;
-  bool verbose = false;
-  bool grain_only = false;
-  bool companion_hd = false;
-  bool scale_to_hd = false;
-  char cli_cache_dir[4096] = ""; /* CLI-provided cache dir, optional */
-  LanguageTag cli_lang_tag = LANG_TAG_NONE;
-  SourceType cli_source = SOURCE_UNKNOWN;
-  bool tv_mode = false;
-  int cli_season = 0;  /* 0 = resolve from filename, then prompt */
-  int cli_episode = 0; /* same resolution order as cli_season */
-  QualityType cli_quality = QUALITY_LIVEACTION;
-  const char *extra_srt_paths[16] = {NULL};
-  int extra_srt_count = 0;
-
-  enum {
-    OPT_TMDB = 't',
-    OPT_HELP = 'h',
-    OPT_BITRATE = 'b',
-    OPT_SRT = 's',
-    /* Language flags (start at 256 to avoid ASCII collision). */
-    OPT_BLIND = 255,
-    OPT_MULTI = 256,
-    OPT_MULTIVFI,
-    OPT_MULTIVFF,
-    OPT_MULTIVFQ,
-    OPT_MULTIVF2,
-    OPT_MULTIVOF,
-    OPT_DUAL_VFI,
-    OPT_DUAL_VFF,
-    OPT_DUAL_VFQ,
-    OPT_FRENCH,
-    OPT_VFF,
-    OPT_VOF,
-    OPT_TRUEFRENCH,
-    OPT_VO,
-    OPT_VOST,
-    OPT_FANSUB,
-    /* Source flags. */
-    OPT_BDRIP,
-    OPT_BLURAY,
-    OPT_REMUX,
-    OPT_DVDRIP,
-    OPT_DVDREMUX,
-    OPT_WEBRIP,
-    OPT_WEBDL,
-    OPT_WEB,
-    OPT_HDTV,
-    OPT_HDRIP,
-    OPT_TVRIP,
-    OPT_VHSRIP,
-    /* Quality preset flags. */
-    OPT_ANIMATION,
-    OPT_SUPER35_ANALOG,
-    OPT_SUPER35_DIGITAL,
-    OPT_IMAX_ANALOG,
-    OPT_IMAX_DIGITAL,
-    /* Auxiliary flags appended at the end so they get the next free
-       sequential value without colliding with the explicit OPT_MULTI=256
-       anchor above. */
-    OPT_DRY_RUN,
-    OPT_QUIET,
-    OPT_VERBOSE,
-    OPT_GRAIN_ONLY,
-    /* --config is pre-scanned and dispatched before getopt_long runs;
-       it's still registered with getopt so the parser doesn't reject it
-       when it shows up alongside other flags. Placed at the end so its
-       auto-incremented value can't collide with OPT_MULTI = 256 anchor. */
-    OPT_CONFIG_SETUP,
-    OPT_CRF,
-    OPT_VMAF_TARGET,
-    OPT_COMPANION_HD,
-    OPT_SCALE_TO_HD,
-    OPT_CACHE_DIR,
-    OPT_TV,
-    OPT_MV,
-    OPT_SEASON,
-    OPT_EPISODE,
-  };
-
-  static struct option long_options[] = {
-      {"tmdb", required_argument, 0, OPT_TMDB},
-      {"bitrate", required_argument, 0, OPT_BITRATE},
-      {"crf", required_argument, 0, OPT_CRF},
-      {"vmaf-target", required_argument, 0, OPT_VMAF_TARGET},
-      {"srt", required_argument, 0, OPT_SRT},
-      {"help", no_argument, 0, OPT_HELP},
-      {"blind", no_argument, 0, OPT_BLIND},
-      {"config", no_argument, 0, OPT_CONFIG_SETUP},
-      {"dry-run", no_argument, 0, OPT_DRY_RUN},
-      {"quiet", no_argument, 0, OPT_QUIET},
-      {"verbose", no_argument, 0, OPT_VERBOSE},
-      {"grain-only", no_argument, 0, OPT_GRAIN_ONLY},
-      /* Language flags. */
-      {"multi", no_argument, 0, OPT_MULTI},
-      {"multivfi", no_argument, 0, OPT_MULTIVFI},
-      {"multivff", no_argument, 0, OPT_MULTIVFF},
-      {"multivfq", no_argument, 0, OPT_MULTIVFQ},
-      {"multivf2", no_argument, 0, OPT_MULTIVF2},
-      {"multivof", no_argument, 0, OPT_MULTIVOF},
-      {"dual_vfi", no_argument, 0, OPT_DUAL_VFI},
-      {"dual_vff", no_argument, 0, OPT_DUAL_VFF},
-      {"dual_vfq", no_argument, 0, OPT_DUAL_VFQ},
-      {"french", no_argument, 0, OPT_FRENCH},
-      {"vff", no_argument, 0, OPT_VFF},
-      {"vof", no_argument, 0, OPT_VOF},
-      {"truefrench", no_argument, 0, OPT_TRUEFRENCH},
-      {"vo", no_argument, 0, OPT_VO},
-      {"vost", no_argument, 0, OPT_VOST},
-      {"fansub", no_argument, 0, OPT_FANSUB},
-      /* Source flags. */
-      {"bdrip", no_argument, 0, OPT_BDRIP},
-      {"bluray", no_argument, 0, OPT_BLURAY},
-      {"remux", no_argument, 0, OPT_REMUX},
-      {"dvdrip", no_argument, 0, OPT_DVDRIP},
-      {"dvdremux", no_argument, 0, OPT_DVDREMUX},
-      {"webrip", no_argument, 0, OPT_WEBRIP},
-      {"webdl", no_argument, 0, OPT_WEBDL},
-      {"web", no_argument, 0, OPT_WEB},
-      {"hdtv", no_argument, 0, OPT_HDTV},
-      {"hdrip", no_argument, 0, OPT_HDRIP},
-      {"tvrip", no_argument, 0, OPT_TVRIP},
-      {"vhsrip", no_argument, 0, OPT_VHSRIP},
-      /* Quality preset flags. */
-      {"animation", no_argument, 0, OPT_ANIMATION},
-      {"super35_analog", no_argument, 0, OPT_SUPER35_ANALOG},
-      {"super35_digital", no_argument, 0, OPT_SUPER35_DIGITAL},
-      {"imax_analog", no_argument, 0, OPT_IMAX_ANALOG},
-      {"imax_digital", no_argument, 0, OPT_IMAX_DIGITAL},
-      {"companion-hd", no_argument, 0, OPT_COMPANION_HD},
-      {"scale-to-hd", no_argument, 0, OPT_SCALE_TO_HD},
-      {"cache-dir", required_argument, 0, OPT_CACHE_DIR},
-      {"tv", no_argument, 0, OPT_TV},
-      {"mv", no_argument, 0, OPT_MV},
-      {"season", required_argument, 0, OPT_SEASON},
-      {"episode", required_argument, 0, OPT_EPISODE},
-      {0, 0, 0, 0},
-  };
-
-  int opt;
-  while ((opt = getopt_long(argc, argv, "hb:s:", long_options, NULL)) != -1) {
-    switch (opt) {
-    case OPT_TMDB:
-      tmdb_id = vmav_parse_int_or_zero(optarg);
-      break;
-    case OPT_BITRATE:
-      cli_bitrate = vmav_parse_int_or_zero(optarg);
-      if (cli_bitrate <= 0) {
-        fprintf(stderr, "Error: --bitrate must be a positive integer (kbps)\n");
-        free(ctx);
-        return 1;
-      }
-      break;
-    case OPT_CRF:
-      cli_crf = vmav_parse_int_or_zero(optarg);
-      if (cli_crf < 1 || cli_crf > 63) {
-        fprintf(stderr, "Error: --crf must be in range 1–63\n");
-        free(ctx);
-        return 1;
-      }
-      break;
-    case OPT_VMAF_TARGET:
-      cli_vmaf_target = vmav_parse_int_or_zero(optarg);
-      if (cli_vmaf_target < 1 || cli_vmaf_target > 100) {
-        fprintf(stderr, "Error: --vmaf-target must be in range 1–100\n");
-        free(ctx);
-        return 1;
-      }
-      break;
-    case OPT_SRT:
-      if (extra_srt_count < 16)
-        extra_srt_paths[extra_srt_count++] = optarg;
-      else
-        fprintf(stderr, "Warning: too many --srt files, ignoring '%s'\n", optarg);
-      break;
-    case OPT_HELP:
-      print_usage(argv[0]);
-      free(ctx);
-      return 0;
-    case OPT_BLIND:
-      /* Already detected in the pre-scan above; nothing more to do here. */
-      break;
-    case OPT_CONFIG_SETUP:
-      /* Pre-scan dispatches this; reaching here means a flag came before
-         it that getopt processed first. Run setup and exit anyway. */
-      free(ctx);
-      return config_interactive_setup();
-    case OPT_DRY_RUN:
-      dry_run = true;
-      break;
-    case OPT_QUIET:
-      quiet = true;
-      break;
-    case OPT_VERBOSE:
-      verbose = true;
-      break;
-    case OPT_GRAIN_ONLY:
-      grain_only = true;
-      break;
-    /* Language flags. */
-    case OPT_MULTI:
-      cli_lang_tag = LANG_TAG_MULTI;
-      break;
-    case OPT_MULTIVFI:
-      cli_lang_tag = LANG_TAG_MULTI_VFI;
-      break;
-    case OPT_MULTIVFF:
-      cli_lang_tag = LANG_TAG_MULTI_VFF;
-      break;
-    case OPT_MULTIVFQ:
-      cli_lang_tag = LANG_TAG_MULTI_VFQ;
-      break;
-    case OPT_MULTIVF2:
-      cli_lang_tag = LANG_TAG_MULTI_VF2;
-      break;
-    case OPT_MULTIVOF:
-      cli_lang_tag = LANG_TAG_MULTI_VOF;
-      break;
-    case OPT_DUAL_VFI:
-      cli_lang_tag = LANG_TAG_DUAL_VFI;
-      break;
-    case OPT_DUAL_VFF:
-      cli_lang_tag = LANG_TAG_DUAL_VFF;
-      break;
-    case OPT_DUAL_VFQ:
-      cli_lang_tag = LANG_TAG_DUAL_VFQ;
-      break;
-    case OPT_FRENCH:
-      cli_lang_tag = LANG_TAG_FRENCH;
-      break;
-    case OPT_VFF:
-      cli_lang_tag = LANG_TAG_VFF;
-      break;
-    case OPT_VOF:
-      cli_lang_tag = LANG_TAG_VOF;
-      break;
-    case OPT_TRUEFRENCH:
-      cli_lang_tag = LANG_TAG_TRUEFRENCH;
-      break;
-    case OPT_VO:
-      cli_lang_tag = LANG_TAG_VO;
-      break;
-    case OPT_VOST:
-      cli_lang_tag = LANG_TAG_VOST;
-      break;
-    case OPT_FANSUB:
-      cli_lang_tag = LANG_TAG_FANSUB;
-      break;
-    /* Source flags. */
-    case OPT_BDRIP:
-      cli_source = SOURCE_BDRIP;
-      break;
-    case OPT_BLURAY:
-      cli_source = SOURCE_BLURAY;
-      break;
-    case OPT_REMUX:
-      cli_source = SOURCE_REMUX;
-      break;
-    case OPT_DVDRIP:
-      cli_source = SOURCE_DVDRIP;
-      break;
-    case OPT_DVDREMUX:
-      cli_source = SOURCE_DVDREMUX;
-      break;
-    case OPT_WEBRIP:
-      cli_source = SOURCE_WEBRIP;
-      break;
-    case OPT_WEBDL:
-      cli_source = SOURCE_WEBDL;
-      break;
-    case OPT_WEB:
-      cli_source = SOURCE_WEB;
-      break;
-    case OPT_HDTV:
-      cli_source = SOURCE_HDTV;
-      break;
-    case OPT_HDRIP:
-      cli_source = SOURCE_HDRIP;
-      break;
-    case OPT_TVRIP:
-      cli_source = SOURCE_TVRIP;
-      break;
-    case OPT_VHSRIP:
-      cli_source = SOURCE_VHSRIP;
-      break;
-    /* Quality preset flags. */
-    case OPT_ANIMATION:
-      cli_quality = QUALITY_ANIMATION;
-      break;
-    case OPT_SUPER35_ANALOG:
-      cli_quality = QUALITY_SUPER35_ANALOG;
-      break;
-    case OPT_SUPER35_DIGITAL:
-      cli_quality = QUALITY_SUPER35_DIGITAL;
-      break;
-    case OPT_IMAX_ANALOG:
-      cli_quality = QUALITY_IMAX_ANALOG;
-      break;
-    case OPT_IMAX_DIGITAL:
-      cli_quality = QUALITY_IMAX_DIGITAL;
-      break;
-    case OPT_COMPANION_HD:
-      companion_hd = true;
-      break;
-    case OPT_SCALE_TO_HD:
-      scale_to_hd = true;
-      break;
-    case OPT_CACHE_DIR:
-      snprintf(cli_cache_dir, sizeof(cli_cache_dir), "%s", optarg);
-      if (strlen(cli_cache_dir) == 0) {
-        fprintf(stderr, "Error: --cache-dir requires a directory path\n");
-        free(ctx);
-        return 1;
-      }
-      break;
-    case OPT_TV:
-      tv_mode = true;
-      break;
-    case OPT_MV:
-      tv_mode = false;
-      break;
-    case OPT_SEASON:
-      cli_season = vmav_parse_int_or_zero(optarg);
-      if (cli_season <= 0) {
-        fprintf(stderr, "Error: --season must be a positive integer\n");
-        free(ctx);
-        return 1;
-      }
-      break;
-    case OPT_EPISODE:
-      cli_episode = vmav_parse_int_or_zero(optarg);
-      if (cli_episode <= 0) {
-        fprintf(stderr, "Error: --episode must be a positive integer\n");
-        free(ctx);
-        return 1;
-      }
-      break;
-    default:
-      print_usage(argv[0]);
-      free(ctx);
-      return 1;
-    }
-  }
-
-  /* Apply --quiet now that all flags are parsed. Sections that should
-     always render (Encoding plan, Done) bracket themselves with
-     ui_set_quiet(0) / ui_set_quiet(1). */
-  if (quiet)
-    ui_set_quiet(1);
-  /* --verbose is orthogonal: it forwards SVT-AV1 chatter to stderr.
-     Compatible with --quiet (compact our-output, raw encoder log). */
-  if (verbose)
-    ui_set_verbose(1);
-
-  if (companion_hd && scale_to_hd) {
-    fprintf(stderr, "Error: --companion-hd and --scale-to-hd are mutually exclusive\n");
+  int cli_rc = vmav_cli_parse(argc, argv, &ctx->opt);
+  if (cli_rc >= 0) {
     free(ctx);
-    return 1;
+    return cli_rc;
   }
-  if (!tv_mode && (cli_season > 0 || cli_episode > 0)) {
-    fprintf(stderr, "Error: --season/--episode require --tv\n");
-    free(ctx);
-    return 1;
-  }
-  int do_hd = companion_hd || scale_to_hd;
+  int do_hd = ctx->opt.companion_hd || ctx->opt.scale_to_hd;
 
   /* ---- Cache directory setup ---- */
-  if (strlen(cli_cache_dir) > 0) {
+  if (strlen(ctx->opt.cache_dir) > 0) {
     /* User-provided cache directory */
-    snprintf(ctx->cache_dir, sizeof(ctx->cache_dir), "%s", cli_cache_dir);
+    snprintf(ctx->cache_dir, sizeof(ctx->cache_dir), "%s", ctx->opt.cache_dir);
   } else {
     /* Default: .vmavificient-cache in project root */
     snprintf(ctx->cache_dir, sizeof(ctx->cache_dir), "./.vmavificient-cache");
@@ -710,15 +232,11 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  const char *filepath = NULL;
-  if (optind < argc)
-    filepath = argv[optind];
-  else
-    filepath = DEFAULT_TEST_FILE;
+  const char *filepath = ctx->opt.filepath;
 
   /* Cache scores file path */
-  char scores_cache_path[4096];
-  snprintf(scores_cache_path, sizeof(scores_cache_path), "%s/scores.json", ctx->cache_dir);
+  snprintf(ctx->scores_cache_path, sizeof(ctx->scores_cache_path), "%s/scores.json",
+           ctx->cache_dir);
 
   /* Score cache state - used for grain analysis and CRF caching */
   double cached_grain_score = 0.0;
@@ -771,7 +289,7 @@ int main(int argc, char *argv[]) {
   if (tracks.error == 0) {
     ui_section("Tracks");
 
-    int split_fre = (cli_lang_tag == LANG_TAG_MULTI_VF2) ? 1 : 0;
+    int split_fre = (ctx->opt.lang_tag == LANG_TAG_MULTI_VF2) ? 1 : 0;
     best = select_best_audio_per_language(&tracks, split_fre, &best_count);
 
     /* ── Audio table ──────────────────────────────────────────────────────
@@ -981,7 +499,7 @@ int main(int argc, char *argv[]) {
 
   snprintf(video_4k_cache_path, sizeof(video_4k_cache_path), "%s/%s.video.mkv", ctx->cache_dir,
            base_for_cache);
-  if (do_hd && !scale_to_hd) {
+  if (do_hd && !ctx->opt.scale_to_hd) {
     snprintf(video_hd_cache_path, sizeof(video_hd_cache_path), "%s/%s-HDLight.video.mkv",
              ctx->cache_dir, base_for_cache);
   } else {
@@ -1004,7 +522,7 @@ int main(int argc, char *argv[]) {
   }
 
   /* ---- OCR preflight: verify tessdata before any expensive work ---- */
-  if (tracks.error == 0 && tracks.subtitle_count > 0 && !dry_run && !grain_only) {
+  if (tracks.error == 0 && tracks.subtitle_count > 0 && !ctx->opt.dry_run && !ctx->opt.grain_only) {
     for (int i = 0; i < tracks.subtitle_count; i++) {
       TrackInfo *sub = &tracks.subtitles[i];
       if (sub->is_karaoke || !is_pgs_subtitle(sub))
@@ -1025,26 +543,28 @@ int main(int argc, char *argv[]) {
   int film_grain = 0;
 
   /* Check for cached scores (uses global cached_* variables) */
-  scores_cached = vmav_load_cached_scores(scores_cache_path, &cached_grain_score,
+  scores_cached = vmav_load_cached_scores(ctx->scores_cache_path, &cached_grain_score,
                                           &cached_grain_variance, &cached_crf);
 
   if (scores_cached) {
-    film_grain = get_film_grain_from_score(cached_grain_score, cached_grain_variance, cli_quality);
+    film_grain =
+        get_film_grain_from_score(cached_grain_score, cached_grain_variance, ctx->opt.quality);
     ui_kv("Luma score", "%.4f  (from cache)", cached_grain_score);
     ui_kv("Chroma score", "%.4f", cached_grain_variance * 100); /* approximate */
     ui_kv("Variance", "%.4f  (from cache)", cached_grain_variance);
     ui_kv("Synth level", "%d  (from cache)", film_grain);
     ui_stage_ok("Grain analysis", "loaded from cache");
     /* Refresh timestamp when using cached scores */
-    if (!cli_crf && !cli_bitrate) {
-      vmav_save_cached_scores(scores_cache_path, cached_grain_score, cached_grain_variance,
+    if (!ctx->opt.crf && !ctx->opt.bitrate) {
+      vmav_save_cached_scores(ctx->scores_cache_path, cached_grain_score, cached_grain_variance,
                               cached_crf);
     }
   } else {
     ui_row("Sampling 4 windows (extends to 7 if variance is high)…");
     grain = get_grain_score(filepath);
     if (grain.error == 0) {
-      film_grain = get_film_grain_from_score(grain.grain_score, grain.grain_variance, cli_quality);
+      film_grain =
+          get_film_grain_from_score(grain.grain_score, grain.grain_variance, ctx->opt.quality);
       /* Per-window OK/FAIL lines already printed by media_analysis as it
          worked; these summary kvs collect the aggregate signal. */
       ui_kv("Luma score", "%.4f  (max across windows)", grain.grain_score);
@@ -1053,9 +573,9 @@ int main(int argc, char *argv[]) {
             grain.windows_succeeded > 4 ? "  (refinement triggered)" : "");
       ui_kv("Synth level", "%d  (0–50)", film_grain);
       /* Save grain scores to cache */
-      if (!cli_crf && !cli_bitrate) {
-        if (!vmav_save_cached_scores(scores_cache_path, grain.grain_score, grain.grain_variance,
-                                     0)) {
+      if (!ctx->opt.crf && !ctx->opt.bitrate) {
+        if (!vmav_save_cached_scores(ctx->scores_cache_path, grain.grain_score,
+                                     grain.grain_variance, 0)) {
           fprintf(stderr, "Warning: failed to save scores to cache\n");
         } else {
           ui_stage_ok("Cache", "saved grain analysis scores");
@@ -1070,7 +590,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  const EncodePreset *enc_preset = get_encode_preset(cli_quality, info.height);
+  const EncodePreset *enc_preset = get_encode_preset(ctx->opt.quality, info.height);
 
   if (do_hd && info.height < 2160) {
     ui_stage_fail("Source", "--companion-hd / --scale-to-hd requires a 4K source "
@@ -1090,13 +610,13 @@ int main(int argc, char *argv[]) {
   EpisodeInfo saved_episode = {0};
   bool saved_is_tv = false;
   const char *video_language = "und";
-  SourceType source = cli_source;
+  SourceType source = ctx->opt.source;
   FrenchVariant fv = FRENCH_VARIANT_UNKNOWN;
   FrenchAudioOrigin fr_audio_origin = FRENCH_AUDIO_VFF;
-  LanguageTag resolved_lang_tag = cli_lang_tag;
+  LanguageTag resolved_lang_tag = ctx->opt.lang_tag;
   bool naming_ok = false;
 
-  if (blind) {
+  if (ctx->opt.blind) {
     /* Derive the output name straight from the input filepath: no TMDB,
        no release-group suffix — just `<input-stem>.mkv` next to the
        source file. Used by CI and anyone without a config.ini. */
@@ -1120,7 +640,7 @@ int main(int argc, char *argv[]) {
       video_language = tracks.audio[0].language;
 
     naming_ok = true;
-  } else if (tmdb_id > 0) {
+  } else if (ctx->opt.tmdb_id > 0) {
     /* Common metadata, filled from the movie or TV endpoint. */
     char meta_title[512] = "";
     int meta_year = 0;
@@ -1128,10 +648,10 @@ int main(int argc, char *argv[]) {
     bool meta_ok = false;
     EpisodeInfo ep = {0};
 
-    if (tv_mode) {
+    if (ctx->opt.tv_mode) {
       /* S/E resolution: flags > filename parse > interactive prompt. */
-      int season = cli_season;
-      int episode = cli_episode;
+      int season = ctx->opt.season;
+      int episode = ctx->opt.episode;
       if (season <= 0 || episode <= 0) {
         const char *fname = strrchr(filepath, '/');
         fname = fname ? fname + 1 : filepath;
@@ -1157,9 +677,9 @@ int main(int argc, char *argv[]) {
       }
 
       ui_section("TMDB lookup");
-      ui_kv("TV ID", "%d", tmdb_id);
+      ui_kv("TV ID", "%d", ctx->opt.tmdb_id);
       ui_kv("Episode", "S%02dE%02d", season, episode);
-      TmdbTvInfo tv = tmdb_fetch_tv(tmdb_id);
+      TmdbTvInfo tv = tmdb_fetch_tv(ctx->opt.tmdb_id);
       if (tv.error != 0) {
         ui_stage_fail("TMDB fetch", "could not fetch TV show info");
         ui_hint("verify TMDB_API_KEY is set in config.ini and the ID is a "
@@ -1170,7 +690,7 @@ int main(int argc, char *argv[]) {
         snprintf(meta_lang, sizeof(meta_lang), "%s", tv.original_language);
         ep.season = season;
         ep.episode = episode;
-        TmdbEpisodeInfo epi = tmdb_fetch_episode(tmdb_id, season, episode);
+        TmdbEpisodeInfo epi = tmdb_fetch_episode(ctx->opt.tmdb_id, season, episode);
         if (epi.error == 0)
           snprintf(ep.title, sizeof(ep.title), "%s", epi.name);
         else
@@ -1179,8 +699,8 @@ int main(int argc, char *argv[]) {
       }
     } else {
       ui_section("TMDB lookup");
-      ui_kv("Movie ID", "%d", tmdb_id);
-      TmdbMovieInfo tmdb = tmdb_fetch_movie(tmdb_id);
+      ui_kv("Movie ID", "%d", ctx->opt.tmdb_id);
+      TmdbMovieInfo tmdb = tmdb_fetch_movie(ctx->opt.tmdb_id);
       if (tmdb.error != 0) {
         ui_stage_fail("TMDB fetch", "could not fetch movie info");
         ui_hint("verify TMDB_API_KEY is set in config.ini and the ID is "
@@ -1195,7 +715,7 @@ int main(int argc, char *argv[]) {
 
     if (meta_ok) {
       ui_kv("Title", "%s", meta_title);
-      if (tv_mode) {
+      if (ctx->opt.tv_mode) {
         if (ep.title[0])
           ui_kv("Episode title", "%s", ep.title);
       } else {
@@ -1225,8 +745,8 @@ int main(int argc, char *argv[]) {
 
       /* Language: CLI flag > auto-detection > interactive prompt. */
       LanguageTag lang_tag;
-      if (cli_lang_tag != LANG_TAG_NONE) {
-        lang_tag = cli_lang_tag;
+      if (ctx->opt.lang_tag != LANG_TAG_NONE) {
+        lang_tag = ctx->opt.lang_tag;
       } else {
         LanguageTag auto_tag = determine_language_tag(&tracks, meta_lang, fv);
 
@@ -1243,10 +763,10 @@ int main(int argc, char *argv[]) {
       snprintf(saved_tmdb_title, sizeof(saved_tmdb_title), "%s", meta_title);
       saved_tmdb_year = meta_year;
       saved_episode = ep;
-      saved_is_tv = tv_mode;
+      saved_is_tv = ctx->opt.tv_mode;
 
       build_output_filename(output_name, sizeof(output_name), meta_title, meta_year, lang_tag,
-                            &info, &hdr, source, tv_mode ? &ep : NULL);
+                            &info, &hdr, source, ctx->opt.tv_mode ? &ep : NULL);
 
       /* Strip .mkv to get base name. */
       snprintf(base_name, sizeof(base_name), "%s", output_name);
@@ -1303,7 +823,7 @@ int main(int argc, char *argv[]) {
         }
       }
 
-      if (tv_mode) {
+      if (ctx->opt.tv_mode) {
         if (ep.title[0])
           snprintf(mkv_title, sizeof(mkv_title), "%s - S%02dE%02d - %s", meta_title, ep.season,
                    ep.episode, ep.title);
@@ -1336,26 +856,26 @@ int main(int argc, char *argv[]) {
 
   if (naming_ok) {
     /* ---- Rate control: CRF search or manual override ---- */
-    int crf = cli_crf;         /* 0 if not specified */
-    int bitrate = cli_bitrate; /* 0 if not specified; VBR only when set */
+    int crf = ctx->opt.crf;         /* 0 if not specified */
+    int bitrate = ctx->opt.bitrate; /* 0 if not specified; VBR only when set */
     int vmaf_used = 0;
 
-    if (!scale_to_hd) {
+    if (!ctx->opt.scale_to_hd) {
       /* ---- 4K rate control + plan ---- */
-      if (!grain_only && crf == 0 && bitrate == 0) {
+      if (!ctx->opt.grain_only && crf == 0 && bitrate == 0) {
         /* Check for cached CRF before running search */
         if (scores_cached && cached_crf > 0) {
           crf = cached_crf;
-          vmaf_used =
-              cli_vmaf_target > 0 ? cli_vmaf_target : get_vmaf_target(cli_quality, info.height);
+          vmaf_used = ctx->opt.vmaf_target > 0 ? ctx->opt.vmaf_target
+                                               : get_vmaf_target(ctx->opt.quality, info.height);
           ui_section("CRF search");
           char detail[64];
           snprintf(detail, sizeof(detail), "using cached CRF %d", crf);
           ui_stage_ok("skip", detail);
         } else {
           /* Default path: probe CRF in-process at source (4K) resolution. */
-          vmaf_used =
-              cli_vmaf_target > 0 ? cli_vmaf_target : get_vmaf_target(cli_quality, info.height);
+          vmaf_used = ctx->opt.vmaf_target > 0 ? ctx->opt.vmaf_target
+                                               : get_vmaf_target(ctx->opt.quality, info.height);
           ui_section("CRF search");
           CrfSearchResult csr = run_crf_search(filepath, vmaf_used, enc_preset, film_grain, NULL);
           if (csr.crf < 0) {
@@ -1372,20 +892,20 @@ int main(int argc, char *argv[]) {
           ui_stage_ok("crf-search", detail);
           crf = csr.crf;
         }
-      } else if (cli_vmaf_target > 0) {
-        vmaf_used = cli_vmaf_target;
+      } else if (ctx->opt.vmaf_target > 0) {
+        vmaf_used = ctx->opt.vmaf_target;
       }
 
       /* Plan + Dry-run notice always render. */
       int saved_quiet = ui_is_quiet();
       ui_set_quiet(0);
       ui_section("Encoding plan");
-      ui_kv("Preset", "%s  (%s)", quality_type_to_string(cli_quality),
+      ui_kv("Preset", "%s  (%s)", quality_type_to_string(ctx->opt.quality),
             info.height >= 2160 ? "4K" : "HD");
       ui_kv("SVT-AV1", "preset %d, tune %d, keyint %d, ac-bias %.1f", enc_preset->preset,
             enc_preset->tune, enc_preset->keyint, enc_preset->ac_bias);
       if (grain.error == 0) {
-        int is_anim = (cli_quality == QUALITY_ANIMATION);
+        int is_anim = (ctx->opt.quality == QUALITY_ANIMATION);
         const char *content_tier =
             is_anim ? "animation" : (grain.grain_score >= 0.08 ? "grainy" : "clean");
         ui_kv("Grain", "level %d  (%s tier)", film_grain, content_tier);
@@ -1402,22 +922,22 @@ int main(int argc, char *argv[]) {
       }
       ui_kv("Output", "%s%s", output_dir, output_name);
 
-      if (grain_only)
+      if (ctx->opt.grain_only)
         vmav_print_encoder_knobs(enc_preset, film_grain);
 
       /* For companion-hd, fall through so the HD plan section also renders
          before exiting.  For solo dry-run / grain-only, exit here. */
-      if ((dry_run || grain_only) && !companion_hd) {
-        ui_section(grain_only ? "Grain-only" : "Dry run");
+      if ((ctx->opt.dry_run || ctx->opt.grain_only) && !ctx->opt.companion_hd) {
+        ui_section(ctx->opt.grain_only ? "Grain-only" : "Dry run");
         ui_row("No files written. Re-run without %s to encode.",
-               grain_only ? "--grain-only" : "--dry-run");
+               ctx->opt.grain_only ? "--grain-only" : "--dry-run");
         if (tracks.error == 0)
           free_media_tracks(&tracks);
         free(ctx);
         return 0;
       }
       ui_set_quiet(saved_quiet);
-    } /* !scale_to_hd */
+    } /* !ctx->opt.scale_to_hd */
 
     {
       /* ---- OPUS audio encoding ---- */
@@ -1438,7 +958,7 @@ int main(int argc, char *argv[]) {
       int opus_count = 0;
       int audio_fail_count = 0;
 
-      if (enc_best && enc_best_count > 0 && !dry_run && !grain_only) {
+      if (enc_best && enc_best_count > 0 && !ctx->opt.dry_run && !ctx->opt.grain_only) {
         ui_section("Audio");
         ui_kv("Encode", "%d track%s → OPUS", enc_best_count, enc_best_count == 1 ? "" : "s");
         for (int i = 0; i < enc_best_count && i < 32; i++) {
@@ -1511,7 +1031,8 @@ int main(int argc, char *argv[]) {
       int srt_count = 0;
       int sub_split_fre = (resolved_lang_tag == LANG_TAG_MULTI_VF2) ? 1 : 0;
 
-      if (tracks.error == 0 && tracks.subtitle_count > 0 && !dry_run && !grain_only) {
+      if (tracks.error == 0 && tracks.subtitle_count > 0 && !ctx->opt.dry_run &&
+          !ctx->opt.grain_only) {
         ui_section("Subtitles");
         int n_sub_process = 0;
         for (int i = 0; i < tracks.subtitle_count; i++)
@@ -1672,27 +1193,29 @@ int main(int argc, char *argv[]) {
       }
 
       /* ---- Add user-supplied SRT files ---- */
-      for (int i = 0; i < extra_srt_count && srt_count < 64; i++) {
-        snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s", extra_srt_paths[i]);
+      for (int i = 0; i < ctx->opt.extra_srt_count && srt_count < 64; i++) {
+        snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s", ctx->opt.extra_srt_paths[i]);
 
         /* Try to guess language from filename */
         const char *srt_lang = "und";
-        if (strstr(extra_srt_paths[i], ".fre.") || strstr(extra_srt_paths[i], ".fra."))
+        if (strstr(ctx->opt.extra_srt_paths[i], ".fre.") ||
+            strstr(ctx->opt.extra_srt_paths[i], ".fra."))
           srt_lang = "fre";
-        else if (strstr(extra_srt_paths[i], ".eng."))
+        else if (strstr(ctx->opt.extra_srt_paths[i], ".eng."))
           srt_lang = "eng";
-        else if (strstr(extra_srt_paths[i], ".ger.") || strstr(extra_srt_paths[i], ".deu."))
+        else if (strstr(ctx->opt.extra_srt_paths[i], ".ger.") ||
+                 strstr(ctx->opt.extra_srt_paths[i], ".deu."))
           srt_lang = "ger";
-        else if (strstr(extra_srt_paths[i], ".spa."))
+        else if (strstr(ctx->opt.extra_srt_paths[i], ".spa."))
           srt_lang = "spa";
-        else if (strstr(extra_srt_paths[i], ".ita."))
+        else if (strstr(ctx->opt.extra_srt_paths[i], ".ita."))
           srt_lang = "ita";
 
-        int forced = (strstr(extra_srt_paths[i], "forced") != NULL) ? 1 : 0;
-        int sdh =
-            (strstr(extra_srt_paths[i], "sdh") != NULL || strstr(extra_srt_paths[i], "SDH") != NULL)
-                ? 1
-                : 0;
+        int forced = (strstr(ctx->opt.extra_srt_paths[i], "forced") != NULL) ? 1 : 0;
+        int sdh = (strstr(ctx->opt.extra_srt_paths[i], "sdh") != NULL ||
+                   strstr(ctx->opt.extra_srt_paths[i], "SDH") != NULL)
+                      ? 1
+                      : 0;
 
         build_subtitle_track_name(srt_names[srt_count], sizeof(srt_names[0]), srt_lang, 1, forced,
                                   sdh, fr_audio_origin);
@@ -1701,7 +1224,7 @@ int main(int argc, char *argv[]) {
         srt_is_sdh[srt_count] = sdh;
         srt_variant[srt_count] = 0;
 
-        printf("  [SRT]  %s → \"%s\"\n", extra_srt_paths[i], srt_names[srt_count]);
+        printf("  [SRT]  %s → \"%s\"\n", ctx->opt.extra_srt_paths[i], srt_names[srt_count]);
         srt_count++;
       }
 
@@ -1746,7 +1269,8 @@ int main(int argc, char *argv[]) {
 
       /* ---- RPU extraction (Dolby Vision) ---- */
       char rpu_path[4096] = "";
-      if (!scale_to_hd && !dry_run && !grain_only) { /* 4K encode block */
+      if (!ctx->opt.scale_to_hd && !ctx->opt.dry_run &&
+          !ctx->opt.grain_only) { /* 4K encode block */
         if (hdr.error == 0 && hdr.has_dolby_vision) {
           char rpu_name[2048];
           build_rpu_filename(rpu_name, sizeof(rpu_name), base_name);
@@ -1918,7 +1442,7 @@ int main(int argc, char *argv[]) {
             /* For --companion-hd and --scale-to-hd, audio/subtitle intermediates
                are reused by the HD mux; defer their removal to the HD cleanup pass.
                Only the 4K video.mkv and RPU (if not DV) are removed here. */
-            if (!companion_hd) {
+            if (!ctx->opt.companion_hd) {
               for (int i = 0; i < opus_count; i++)
                 if (remove(opus_paths[i]) == 0)
                   removed++;
@@ -1935,7 +1459,7 @@ int main(int argc, char *argv[]) {
               removed++;
             /* For --companion-hd the RPU is reused by the HD encode;
                defer deletion to the HD cleanup pass. */
-            if (rpu_path[0] && !companion_hd && remove(rpu_path) == 0)
+            if (rpu_path[0] && !ctx->opt.companion_hd && remove(rpu_path) == 0)
               removed++;
             if (removed > 0) {
               char detail[64];
@@ -1946,7 +1470,7 @@ int main(int argc, char *argv[]) {
             /* Clean up cache directory when everything succeeded
              * For companion-hd, defer cleanup to the HD mux pass (audio/subtitle
              * intermediates are shared between 4K and HD muxes). */
-            if (mr.error == 0 && !companion_hd)
+            if (mr.error == 0 && !ctx->opt.companion_hd)
               vmav_cleanup_cache_dir(ctx);
           }
 
@@ -1978,7 +1502,8 @@ int main(int argc, char *argv[]) {
             ui_set_quiet(saved_quiet_done);
           }
         }
-      } /* !scale_to_hd && !dry_run && !grain_only — end 4K encode block */
+      } /* !ctx->opt.scale_to_hd && !ctx->opt.dry_run && !ctx->opt.grain_only — end 4K encode block
+         */
 
       /* ================================================================== */
       /* HD companion / scale-to-hd pass                                    */
@@ -2003,11 +1528,11 @@ int main(int argc, char *argv[]) {
         /* DV Profile 8.1 is resolution-independent; keep it for HD. */
         HdrInfo hd_hdr = hdr;
 
-        const EncodePreset *hd_preset = get_encode_preset(cli_quality, hd_h);
-        int hd_vmaf_default = get_vmaf_target(cli_quality, hd_h);
-        int hd_film_grain =
-            get_film_grain_from_score(grain.error == 0 ? grain.grain_score : 0.0,
-                                      grain.error == 0 ? grain.grain_variance : 0.0, cli_quality);
+        const EncodePreset *hd_preset = get_encode_preset(ctx->opt.quality, hd_h);
+        int hd_vmaf_default = get_vmaf_target(ctx->opt.quality, hd_h);
+        int hd_film_grain = get_film_grain_from_score(grain.error == 0 ? grain.grain_score : 0.0,
+                                                      grain.error == 0 ? grain.grain_variance : 0.0,
+                                                      ctx->opt.quality);
 
         /* HD output naming */
         char hd_output_name[1024] = "";
@@ -2027,11 +1552,11 @@ int main(int argc, char *argv[]) {
         }
 
         /* ---- HD CRF search ---- */
-        int hd_crf = cli_crf;
+        int hd_crf = ctx->opt.crf;
         int hd_vmaf_used = 0;
-        if (!grain_only && hd_crf == 0 && bitrate == 0) {
-          hd_vmaf_used = cli_vmaf_target > 0 ? cli_vmaf_target : hd_vmaf_default;
-          ui_section(companion_hd ? "HD CRF search" : "CRF search");
+        if (!ctx->opt.grain_only && hd_crf == 0 && bitrate == 0) {
+          hd_vmaf_used = ctx->opt.vmaf_target > 0 ? ctx->opt.vmaf_target : hd_vmaf_default;
+          ui_section(ctx->opt.companion_hd ? "HD CRF search" : "CRF search");
           CrfSearchResult hd_csr = run_crf_search(filepath, hd_vmaf_used, hd_preset, hd_film_grain,
                                                   "scale=1920:1080:flags=lanczos");
           if (hd_csr.crf < 0) {
@@ -2047,20 +1572,20 @@ int main(int argc, char *argv[]) {
                    hd_csr.crf, hd_csr.vmaf_result, hd_vmaf_used);
           ui_stage_ok("crf-search", hd_csr_detail);
           hd_crf = hd_csr.crf;
-        } else if (cli_vmaf_target > 0) {
-          hd_vmaf_used = cli_vmaf_target;
+        } else if (ctx->opt.vmaf_target > 0) {
+          hd_vmaf_used = ctx->opt.vmaf_target;
         }
 
         /* ---- HD plan section ---- */
         int hd_saved_quiet = ui_is_quiet();
         ui_set_quiet(0);
-        ui_section(companion_hd ? "HD encoding plan" : "Encoding plan");
-        ui_kv("Preset", "%s  (HD)", quality_type_to_string(cli_quality));
+        ui_section(ctx->opt.companion_hd ? "HD encoding plan" : "Encoding plan");
+        ui_kv("Preset", "%s  (HD)", quality_type_to_string(ctx->opt.quality));
         ui_kv("SVT-AV1", "preset %d, tune %d, keyint %d, ac-bias %.1f", hd_preset->preset,
               hd_preset->tune, hd_preset->keyint, hd_preset->ac_bias);
         ui_kv("Scale", "%d×%d  (from %d×%d 4K source)", hd_w, hd_h, info.width, info.height);
         if (grain.error == 0) {
-          int is_anim = (cli_quality == QUALITY_ANIMATION);
+          int is_anim = (ctx->opt.quality == QUALITY_ANIMATION);
           const char *content_tier =
               is_anim ? "animation" : (grain.grain_score >= 0.08 ? "grainy" : "clean");
           ui_kv("Grain", "level %d  (%s tier)", hd_film_grain, content_tier);
@@ -2077,13 +1602,13 @@ int main(int argc, char *argv[]) {
         }
         ui_kv("Output", "%s%s", output_dir, hd_output_name);
 
-        if (grain_only)
+        if (ctx->opt.grain_only)
           vmav_print_encoder_knobs(hd_preset, hd_film_grain);
 
-        if (dry_run || grain_only) {
-          ui_section(grain_only ? "Grain-only" : "Dry run");
+        if (ctx->opt.dry_run || ctx->opt.grain_only) {
+          ui_section(ctx->opt.grain_only ? "Grain-only" : "Dry run");
           ui_row("No files written. Re-run without %s to encode.",
-                 grain_only ? "--grain-only" : "--dry-run");
+                 ctx->opt.grain_only ? "--grain-only" : "--dry-run");
           if (tracks.error == 0)
             free_media_tracks(&tracks);
           free(ctx);
@@ -2093,7 +1618,7 @@ int main(int argc, char *argv[]) {
 
         /* For --scale-to-hd the 4K encode block was skipped, so RPU hasn't
            been extracted yet.  Do it here before the HD video encode. */
-        if (scale_to_hd && hdr.error == 0 && hdr.has_dolby_vision) {
+        if (ctx->opt.scale_to_hd && hdr.error == 0 && hdr.has_dolby_vision) {
           char hd_rpu_name[2048];
           build_rpu_filename(hd_rpu_name, sizeof(hd_rpu_name), hd_base_name);
 
@@ -2133,7 +1658,7 @@ int main(int argc, char *argv[]) {
         snprintf(hd_av1_video_path, sizeof(hd_av1_video_path), "%s", hd_av1_video_cache_path);
         time_t hd_video_t0 = time(NULL);
 
-        ui_section(companion_hd ? "HD video encoding" : "Video encoding");
+        ui_section(ctx->opt.companion_hd ? "HD video encoding" : "Video encoding");
         VideoEncodeConfig hd_vcfg = {
             .input_path = filepath,
             .output_path = hd_av1_video_path,
@@ -2213,7 +1738,7 @@ int main(int argc, char *argv[]) {
               .chapters_source_path = filepath,
           };
 
-          ui_section(companion_hd ? "HD final mux" : "Final mux");
+          ui_section(ctx->opt.companion_hd ? "HD final mux" : "Final mux");
           ui_kv("Inputs", "1 video + %d audio + %d subtitle track%s", opus_count, srt_count,
                 srt_count == 1 ? "" : "s");
           time_t hd_mux_t0 = time(NULL);
@@ -2255,7 +1780,7 @@ int main(int argc, char *argv[]) {
           if (hd_mr.error == 0) {
             /* For scale-to-hd and companion-hd, remove shared audio/subtitle
                intermediates after HD mux. */
-            if (scale_to_hd || companion_hd) {
+            if (ctx->opt.scale_to_hd || ctx->opt.companion_hd) {
               for (int i = 0; i < opus_count; i++)
                 if (remove(opus_paths[i]) == 0)
                   hd_removed++;
@@ -2291,7 +1816,7 @@ int main(int argc, char *argv[]) {
 
             int hd_done_quiet = ui_is_quiet();
             ui_set_quiet(0);
-            ui_section(companion_hd ? "HD Done" : "Done");
+            ui_section(ctx->opt.companion_hd ? "HD Done" : "Done");
             ui_kv("Output", "%s", hd_final_path);
             ui_kv("Size", "%s", ui_fmt_bytes(hd_final_bytes));
             ui_kv("Duration", "%s  encoded in %s  (%.2f× realtime)",
