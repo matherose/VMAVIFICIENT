@@ -978,6 +978,7 @@ add_executable(vmavificient
     src/media_tracks/media_tracks.c
     src/pipeline/cli.c
     src/pipeline/pipeline_util.c
+    src/pipeline/stage_probe.c
     src/rpu_extract/rpu_extract.c
     src/subtitle_convert/subtitle_convert.c
     src/tmdb/tmdb.c

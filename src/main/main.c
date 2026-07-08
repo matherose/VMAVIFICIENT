@@ -194,6 +194,7 @@ int main(int argc, char *argv[]) {
   time_t encode_start_time = time(NULL);
   /* Set on any audio/video/mux failure; drives the process exit code. */
   int pipeline_failed = 0;
+  int rc = 0;
   printf("vmavificient v%s — SVT-AV1-HDR %s\n", VMAV_VERSION, get_svt_av1_version());
 
   int prescan_rc = vmav_cli_prescan(argc, argv, &ctx->opt);
@@ -247,295 +248,10 @@ int main(int argc, char *argv[]) {
   /* GrainScore struct needed later for grain analysis and HD encode */
   GrainScore grain = {0};
 
-  /* ---- Source ---- */
-  MediaInfo info = get_media_info(filepath);
-  if (info.error != 0) {
-    char err[64];
-    snprintf(err, sizeof(err), "could not probe %s (error %d)", filepath, info.error);
-    ui_stage_fail("Source probe", err);
-    ui_hint("verify the path and that ffmpeg can read the container");
-    free(ctx);
-    return 1;
-  }
-  ui_section("Source");
-  ui_kv("File", "%s", filepath);
-  ui_kv("Resolution", "%d×%d", info.width, info.height);
-  ui_kv("Duration", "%s", ui_fmt_duration(info.duration));
-  ui_kv("Framerate", "%.3f fps", info.framerate);
-
-  /* ---- Color (HDR) ---- */
-  HdrInfo hdr = get_hdr_info(filepath);
-  if (hdr.error == 0) {
-    ui_section("Color");
-    ui_kv("HDR10", "%s", hdr.has_hdr10 ? "yes" : "no");
-    if (hdr.has_dolby_vision)
-      ui_kv("Dolby Vision", "yes  (profile %d, level %d)", hdr.dv_profile, hdr.dv_level);
-    else
-      ui_kv("Dolby Vision", "no");
-    ui_kv("HDR10+", "%s", hdr.has_hdr10plus ? "yes" : "no");
-  }
-
-  /* ---- Crop ---- */
-  CropInfo crop = get_crop_info(filepath);
-  if (crop.error == 0 && (crop.top || crop.bottom || crop.left || crop.right)) {
-    ui_section("Crop");
-    ui_kv("Detected", "T/B %d/%d   L/R %d/%d", crop.top, crop.bottom, crop.left, crop.right);
-  }
-
-  /* ---- Tracks ---- */
-  MediaTracks tracks = get_media_tracks(filepath);
-  TrackInfo *best = NULL;
-  int best_count = 0;
-  if (tracks.error == 0) {
-    ui_section("Tracks");
-
-    int split_fre = (ctx->opt.lang_tag == LANG_TAG_MULTI_VF2) ? 1 : 0;
-    best = select_best_audio_per_language(&tracks, split_fre, &best_count);
-
-    /* ── Audio table ──────────────────────────────────────────────────────
-     * Columns: #(2) lng(3) codec(7) ch(3) bitrate(10) title(20)
-     * "→" marker (3 UTF-8 bytes, 1 display col) + space sits outside the
-     * left border so the │ stays at the same column for all rows.       */
-    ui_kv("Audio", "%d source track%s", tracks.audio_count, tracks.audio_count == 1 ? "" : "s");
-    // clang-format off
-    ui_row("  \xe2\x94\x8c\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xac\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xac\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xac\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xac\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xac\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x90");
-    ui_row("  \xe2\x94\x82 %2s \xe2\x94\x82 %-3s \xe2\x94\x82 %-7s \xe2\x94\x82 %-3s \xe2\x94\x82 %10s \xe2\x94\x82 %-20s \xe2\x94\x82",
-           " #", "lng", "codec", " ch", "   bitrate", "title");
-    ui_row("  \xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xa4");
-    // clang-format on
-    for (int i = 0; i < tracks.audio_count; i++) {
-      long long kbps = (long long)(tracks.audio[i].bitrate / 1000);
-      char rate_buf[16];
-      if (kbps > 0)
-        snprintf(rate_buf, sizeof(rate_buf), "%5lld kbps", kbps);
-      else
-        snprintf(rate_buf, sizeof(rate_buf), "          ");
-      char ch_buf[8];
-      snprintf(ch_buf, sizeof(ch_buf), "%dch", tracks.audio[i].channels);
-      bool sel = false;
-      for (int j = 0; j < best_count && !sel; j++)
-        sel = (best[j].index == tracks.audio[i].index);
-      // clang-format off
-      ui_row(
-          "%s\xe2\x94\x82 %2d \xe2\x94\x82 %-3s \xe2\x94\x82 %-7.7s \xe2\x94\x82 %-3s \xe2\x94\x82 %s \xe2\x94\x82 %-20.20s \xe2\x94\x82",
-          sel ? "\xe2\x86\x92 " : "  ", tracks.audio[i].index,
-          tracks.audio[i].language, tracks.audio[i].codec, ch_buf, rate_buf,
-          tracks.audio[i].name);
-      // clang-format on
-    }
-    // clang-format off
-    ui_row("  \xe2\x94\x94\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xb4\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xb4\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xb4\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xb4\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xb4\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x98");
-    // clang-format on
-
-    if (best && best_count > 0) {
-      char idx_buf[64] = "";
-      size_t pos = 0;
-      for (int i = 0; i < best_count; i++) {
-        int n =
-            snprintf(idx_buf + pos, sizeof(idx_buf) - pos, i > 0 ? "  #%d" : "#%d", best[i].index);
-        if (n > 0 && (size_t)n < sizeof(idx_buf) - pos)
-          pos += (size_t)n;
-      }
-      ui_kv("Selected", "%d track%s for encode  (%s)", best_count, best_count == 1 ? "" : "s",
-            idx_buf);
-    }
-
-    /* ── Subtitle table ───────────────────────────────────────────────────
-     * Columns: #(2) lng(3) fmt(3) type(6) title(20)                     */
-    int n_karaoke = 0;
-    for (int i = 0; i < tracks.subtitle_count; i++)
-      if (tracks.subtitles[i].is_karaoke)
-        n_karaoke++;
-    int n_visible = tracks.subtitle_count - n_karaoke;
-    if (n_karaoke > 0)
-      ui_kv("Subtitles", "%d source track%s  (%d karaoke excluded)", n_visible,
-            n_visible == 1 ? "" : "s", n_karaoke);
-    else
-      ui_kv("Subtitles", "%d source track%s", tracks.subtitle_count,
-            tracks.subtitle_count == 1 ? "" : "s");
-
-    // Pre-compute which PGS subtitles will be skipped (already have text SRT)
-    // Two-pass: first collect all SRT tracks, then mark PGS as skipped
-    bool pgs_skipped[256] = {0}; // max 256 subtitle tracks
-    int pgs_skipped_count = 0;
-
-    // Track SRTs we've seen: (lang, variant, forced, sdh) for skip detection
-    int srt_seen_count = 0;
-    char srt_seen_lang[64][64];
-    int srt_seen_variant[64]; // FRENCH_VARIANT_* or 0 for non-French
-    int srt_seen_forced[64];
-    int srt_seen_sdh[64];
-
-    // PASS 1: Collect all SRT tracks
-    for (int i = 0; i < tracks.subtitle_count; i++) {
-      TrackInfo *sub = &tracks.subtitles[i];
-      if (sub->is_karaoke)
-        continue;
-      const char *lang = sub->language[0] ? sub->language : "und";
-
-      if (is_text_subtitle(sub)) {
-        if (srt_seen_count < 64) {
-          snprintf(srt_seen_lang[srt_seen_count], sizeof(srt_seen_lang[0]), "%s", lang);
-          srt_seen_variant[srt_seen_count] = detect_track_french_variant(sub);
-          srt_seen_forced[srt_seen_count] = sub->is_forced;
-          srt_seen_sdh[srt_seen_count] = sub->is_sdh;
-          srt_seen_count++;
-        }
-      }
-    }
-
-    // PASS 2: Mark PGS subtitles that have matching SRT (anywhere in list)
-    for (int i = 0; i < tracks.subtitle_count; i++) {
-      TrackInfo *sub = &tracks.subtitles[i];
-      if (sub->is_karaoke)
-        continue;
-
-      if (is_pgs_subtitle(sub)) {
-        const char *lang = sub->language[0] ? sub->language : "und";
-        int pgs_variant = detect_track_french_variant(sub);
-        for (int j = 0; j < srt_seen_count; j++) {
-          if (strcmp(srt_seen_lang[j], lang) == 0 && srt_seen_variant[j] == pgs_variant &&
-              srt_seen_forced[j] == sub->is_forced && srt_seen_sdh[j] == sub->is_sdh) {
-            pgs_skipped[sub->index] = true;
-            pgs_skipped_count++;
-            break;
-          }
-        }
-      }
-    }
-
-    if (n_visible > 0) {
-      // clang-format off
-      ui_row("  \xe2\x94\x8c\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xac\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xac\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xac\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xac\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x90");
-      ui_row("  \xe2\x94\x82 %2s \xe2\x94\x82 %-3s \xe2\x94\x82 %-3s \xe2\x94\x82 %-6s \xe2\x94\x82 %-20s \xe2\x94\x82",
-             " #", "lng", "fmt", " type", "title");
-      ui_row("  \xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xa4");
-      // clang-format on
-      for (int i = 0; i < tracks.subtitle_count; i++) {
-        const char *type = tracks.subtitles[i].is_forced ? "forced"
-                           : tracks.subtitles[i].is_sdh  ? "sdh"
-                                                         : "full";
-        const char *lang = tracks.subtitles[i].language[0] ? tracks.subtitles[i].language : "und";
-        const char *selection = "  ";
-
-        // Determine selection marker
-        if (tracks.subtitles[i].is_karaoke) {
-          // Karaoke tracks: Not selected (×)
-          selection = "\xc3\x97 ";
-        } else if (is_text_subtitle(&tracks.subtitles[i])) {
-          // Text SRT tracks: Selected for direct extraction (→)
-          selection = "\xe2\x86\x92 ";
-        } else if (is_pgs_subtitle(&tracks.subtitles[i])) {
-          // PGS tracks: check if skipped or needs OCR
-          if (pgs_skipped[tracks.subtitles[i].index]) {
-            // Has matching SRT - not selected (×)
-            selection = "\xc3\x97 ";
-          } else {
-            // Needs OCR conversion (O)
-            selection = "O ";
-          }
-        }
-        // clang-format off
-        ui_row(
-            "%s\xe2\x94\x82 %2d \xe2\x94\x82 %-3s \xe2\x94\x82 %-3s \xe2\x94\x82 %-6s \xe2\x94\x82 %-20.20s \xe2\x94\x82",
-            selection, tracks.subtitles[i].index, lang,
-            vmav_codec_short(tracks.subtitles[i].codec), type,
-            tracks.subtitles[i].name);
-        // clang-format on
-      }
-      // clang-format off
-      ui_row("  \xe2\x94\x94\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xb4\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xb4\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xb4\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xb4\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x98");
-      // clang-format on
-
-      // Count subtitle types for display:
-      // - text_count: SRT tracks (selected for direct extraction)
-      // - pgs_count: PGS tracks that need OCR (not skipped)
-      int text_count = 0, pgs_ocr_count = 0;
-      for (int i = 0; i < tracks.subtitle_count; i++) {
-        if (tracks.subtitles[i].is_karaoke)
-          continue;
-        if (is_text_subtitle(&tracks.subtitles[i]))
-          text_count++;
-        else if (is_pgs_subtitle(&tracks.subtitles[i]) && !pgs_skipped[tracks.subtitles[i].index])
-          pgs_ocr_count++;
-      }
-      if (text_count > 0 || pgs_ocr_count > 0) {
-        char detail[128] = "";
-        size_t pos = 0;
-        if (text_count > 0) {
-          int n = snprintf(detail + pos, sizeof(detail) - pos, "%d direct SRT", text_count);
-          if (n > 0 && (size_t)n < sizeof(detail) - pos)
-            pos += (size_t)n;
-        }
-        if (pgs_ocr_count > 0) {
-          int n = snprintf(detail + pos, sizeof(detail) - pos,
-                           pos > 0 ? ", %d OCR PGS" : "%d OCR PGS", pgs_ocr_count);
-          if (n > 0 && (size_t)n < sizeof(detail) - pos)
-            pos += (size_t)n;
-          if (pgs_skipped_count > 0) {
-            n = snprintf(detail + pos, sizeof(detail) - pos, " (%d already available)",
-                         pgs_skipped_count);
-            if (n > 0 && (size_t)n < sizeof(detail) - pos)
-              pos += (size_t)n;
-          }
-        }
-        ui_kv("Processing", "%s", detail);
-      }
-    }
-  }
-
-  /* Early resume check: if .video.mkv already exists, skip encoding */
-  char video_4k_cache_path[4096] = "";
-  char video_hd_cache_path[4096] = "";
-
-  /* Compute base name from filepath for cache lookup */
-  char base_for_cache[1024];
-  const char *fname = strrchr(filepath, '/');
-  fname = fname ? fname + 1 : filepath;
-  snprintf(base_for_cache, sizeof(base_for_cache), "%s", fname);
-  char *ext = strrchr(base_for_cache, '.');
-  if (ext)
-    *ext = '\0';
-
-  snprintf(video_4k_cache_path, sizeof(video_4k_cache_path), "%s/%s.video.mkv", ctx->cache_dir,
-           base_for_cache);
-  if (do_hd && !ctx->opt.scale_to_hd) {
-    snprintf(video_hd_cache_path, sizeof(video_hd_cache_path), "%s/%s-HDLight.video.mkv",
-             ctx->cache_dir, base_for_cache);
-  } else {
-    snprintf(video_hd_cache_path, sizeof(video_hd_cache_path), "%s/%s.video.mkv", ctx->cache_dir,
-             base_for_cache);
-  }
-
-  if (vmav_file_exists(video_4k_cache_path)) {
-    ui_section("Resume check");
-    ui_stage_ok("skip", "4K video.mkv already present in cache, proceeding to mux");
-    free(ctx);
-    return 0;
-  }
-
-  if (vmav_file_exists(video_hd_cache_path)) {
-    ui_section("Resume check");
-    ui_stage_ok("skip", "HD video.mkv already present in cache, proceeding to mux");
-    free(ctx);
-    return 0;
-  }
-
-  /* ---- OCR preflight: verify tessdata before any expensive work ---- */
-  if (tracks.error == 0 && tracks.subtitle_count > 0 && !ctx->opt.dry_run && !ctx->opt.grain_only) {
-    for (int i = 0; i < tracks.subtitle_count; i++) {
-      TrackInfo *sub = &tracks.subtitles[i];
-      if (sub->is_karaoke || !is_pgs_subtitle(sub))
-        continue;
-      const char *lang = sub->language[0] ? sub->language : "und";
-      const char *tess_lang = iso639_to_tesseract_lang(lang);
-      if (subtitle_ocr_preflight(tess_lang, NULL, 0) != 0) {
-        ui_stage_fail("OCR preflight", "no usable tessdata for PGS subtitle OCR");
-        ui_hint("install tessdata_best (eng+fra) and set TESSDATA_PREFIX, or drop PGS tracks");
-        free(ctx);
-        return 1;
-      }
-    }
+  StageStatus st = stage_probe(ctx);
+  if (st != STAGE_CONTINUE) {
+    rc = (st == STAGE_EXIT_FAIL) ? 1 : 0;
+    goto out;
   }
 
   /* ---- Grain analysis ---- */
@@ -590,9 +306,9 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  const EncodePreset *enc_preset = get_encode_preset(ctx->opt.quality, info.height);
+  const EncodePreset *enc_preset = get_encode_preset(ctx->opt.quality, ctx->info.height);
 
-  if (do_hd && info.height < 2160) {
+  if (do_hd && ctx->info.height < 2160) {
     ui_stage_fail("Source", "--companion-hd / --scale-to-hd requires a 4K source "
                             "(height >= 2160)");
     free(ctx);
@@ -636,8 +352,8 @@ int main(int argc, char *argv[]) {
     else
       snprintf(output_dir, sizeof(output_dir), "./");
 
-    if (tracks.error == 0 && tracks.audio_count > 0 && tracks.audio[0].language[0])
-      video_language = tracks.audio[0].language;
+    if (ctx->tracks.error == 0 && ctx->tracks.audio_count > 0 && ctx->tracks.audio[0].language[0])
+      video_language = ctx->tracks.audio[0].language;
 
     naming_ok = true;
   } else if (ctx->opt.tmdb_id > 0) {
@@ -731,10 +447,10 @@ int main(int argc, char *argv[]) {
 
       /* Determine French variant for OPUS naming. */
       bool has_french = false;
-      if (tracks.error == 0) {
-        for (int i = 0; i < tracks.audio_count; i++) {
-          if (strcmp(tracks.audio[i].language, "fre") == 0 ||
-              strcmp(tracks.audio[i].language, "fra") == 0) {
+      if (ctx->tracks.error == 0) {
+        for (int i = 0; i < ctx->tracks.audio_count; i++) {
+          if (strcmp(ctx->tracks.audio[i].language, "fre") == 0 ||
+              strcmp(ctx->tracks.audio[i].language, "fra") == 0) {
             has_french = true;
             break;
           }
@@ -748,14 +464,14 @@ int main(int argc, char *argv[]) {
       if (ctx->opt.lang_tag != LANG_TAG_NONE) {
         lang_tag = ctx->opt.lang_tag;
       } else {
-        LanguageTag auto_tag = determine_language_tag(&tracks, meta_lang, fv);
+        LanguageTag auto_tag = determine_language_tag(&ctx->tracks, meta_lang, fv);
 
         /* If auto-detection produced a definitive result, use it.
            Otherwise ask the user interactively. */
-        if (auto_tag != LANG_TAG_VO || tracks.audio_count <= 1) {
+        if (auto_tag != LANG_TAG_VO || ctx->tracks.audio_count <= 1) {
           lang_tag = auto_tag;
         } else {
-          lang_tag = ask_language_tag(&tracks);
+          lang_tag = ask_language_tag(&ctx->tracks);
         }
       }
       resolved_lang_tag = lang_tag;
@@ -766,7 +482,7 @@ int main(int argc, char *argv[]) {
       saved_is_tv = ctx->opt.tv_mode;
 
       build_output_filename(output_name, sizeof(output_name), meta_title, meta_year, lang_tag,
-                            &info, &hdr, source, ctx->opt.tv_mode ? &ep : NULL);
+                            &ctx->info, &ctx->hdr, source, ctx->opt.tv_mode ? &ep : NULL);
 
       /* Strip .mkv to get base name. */
       snprintf(base_name, sizeof(base_name), "%s", output_name);
@@ -848,8 +564,8 @@ int main(int argc, char *argv[]) {
     ui_stage_fail("Naming", "no naming source: pass --tmdb <id> or --blind");
     ui_hint("--tmdb <id> names from TMDB metadata; --blind names the "
             "output <input-stem>.mkv next to the source");
-    if (tracks.error == 0)
-      free_media_tracks(&tracks);
+    if (ctx->tracks.error == 0)
+      free_media_tracks(&ctx->tracks);
     free(ctx);
     return 1;
   }
@@ -866,23 +582,25 @@ int main(int argc, char *argv[]) {
         /* Check for cached CRF before running search */
         if (scores_cached && cached_crf > 0) {
           crf = cached_crf;
-          vmaf_used = ctx->opt.vmaf_target > 0 ? ctx->opt.vmaf_target
-                                               : get_vmaf_target(ctx->opt.quality, info.height);
+          vmaf_used = ctx->opt.vmaf_target > 0
+                          ? ctx->opt.vmaf_target
+                          : get_vmaf_target(ctx->opt.quality, ctx->info.height);
           ui_section("CRF search");
           char detail[64];
           snprintf(detail, sizeof(detail), "using cached CRF %d", crf);
           ui_stage_ok("skip", detail);
         } else {
           /* Default path: probe CRF in-process at source (4K) resolution. */
-          vmaf_used = ctx->opt.vmaf_target > 0 ? ctx->opt.vmaf_target
-                                               : get_vmaf_target(ctx->opt.quality, info.height);
+          vmaf_used = ctx->opt.vmaf_target > 0
+                          ? ctx->opt.vmaf_target
+                          : get_vmaf_target(ctx->opt.quality, ctx->info.height);
           ui_section("CRF search");
           CrfSearchResult csr = run_crf_search(filepath, vmaf_used, enc_preset, film_grain, NULL);
           if (csr.crf < 0) {
             ui_stage_fail("crf-search", csr.error ? csr.error : "CRF search failed");
             ui_hint("bypass with --crf <N> or --bitrate <kbps>");
-            if (tracks.error == 0)
-              free_media_tracks(&tracks);
+            if (ctx->tracks.error == 0)
+              free_media_tracks(&ctx->tracks);
             free(ctx);
             return 1;
           }
@@ -901,7 +619,7 @@ int main(int argc, char *argv[]) {
       ui_set_quiet(0);
       ui_section("Encoding plan");
       ui_kv("Preset", "%s  (%s)", quality_type_to_string(ctx->opt.quality),
-            info.height >= 2160 ? "4K" : "HD");
+            ctx->info.height >= 2160 ? "4K" : "HD");
       ui_kv("SVT-AV1", "preset %d, tune %d, keyint %d, ac-bias %.1f", enc_preset->preset,
             enc_preset->tune, enc_preset->keyint, enc_preset->ac_bias);
       if (grain.error == 0) {
@@ -931,8 +649,8 @@ int main(int argc, char *argv[]) {
         ui_section(ctx->opt.grain_only ? "Grain-only" : "Dry run");
         ui_row("No files written. Re-run without %s to encode.",
                ctx->opt.grain_only ? "--grain-only" : "--dry-run");
-        if (tracks.error == 0)
-          free_media_tracks(&tracks);
+        if (ctx->tracks.error == 0)
+          free_media_tracks(&ctx->tracks);
         free(ctx);
         return 0;
       }
@@ -943,7 +661,8 @@ int main(int argc, char *argv[]) {
       /* ---- OPUS audio encoding ---- */
       int enc_best_count = 0;
       int enc_split_fre = (resolved_lang_tag == LANG_TAG_MULTI_VF2) ? 1 : 0;
-      TrackInfo *enc_best = select_best_audio_per_language(&tracks, enc_split_fre, &enc_best_count);
+      TrackInfo *enc_best =
+          select_best_audio_per_language(&ctx->tracks, enc_split_fre, &enc_best_count);
 
       /* Sort: French first, then English, then others */
       if (enc_best && enc_best_count > 1)
@@ -1031,17 +750,17 @@ int main(int argc, char *argv[]) {
       int srt_count = 0;
       int sub_split_fre = (resolved_lang_tag == LANG_TAG_MULTI_VF2) ? 1 : 0;
 
-      if (tracks.error == 0 && tracks.subtitle_count > 0 && !ctx->opt.dry_run &&
+      if (ctx->tracks.error == 0 && ctx->tracks.subtitle_count > 0 && !ctx->opt.dry_run &&
           !ctx->opt.grain_only) {
         ui_section("Subtitles");
         int n_sub_process = 0;
-        for (int i = 0; i < tracks.subtitle_count; i++)
-          if (!tracks.subtitles[i].is_karaoke)
+        for (int i = 0; i < ctx->tracks.subtitle_count; i++)
+          if (!ctx->tracks.subtitles[i].is_karaoke)
             n_sub_process++;
         ui_kv("Process", "%d source track%s", n_sub_process, n_sub_process == 1 ? "" : "s");
 
-        for (int i = 0; i < tracks.subtitle_count && srt_count < 48; i++) {
-          TrackInfo *sub = &tracks.subtitles[i];
+        for (int i = 0; i < ctx->tracks.subtitle_count && srt_count < 48; i++) {
+          TrackInfo *sub = &ctx->tracks.subtitles[i];
           if (sub->is_karaoke)
             continue;
           const char *lang = sub->language[0] ? sub->language : "und";
@@ -1271,7 +990,7 @@ int main(int argc, char *argv[]) {
       char rpu_path[4096] = "";
       if (!ctx->opt.scale_to_hd && !ctx->opt.dry_run &&
           !ctx->opt.grain_only) { /* 4K encode block */
-        if (hdr.error == 0 && hdr.has_dolby_vision) {
+        if (ctx->hdr.error == 0 && ctx->hdr.has_dolby_vision) {
           char rpu_name[2048];
           build_rpu_filename(rpu_name, sizeof(rpu_name), base_name);
 
@@ -1325,9 +1044,9 @@ int main(int argc, char *argv[]) {
               .grain_variance = grain.error == 0 ? grain.grain_variance : 0.0,
               .target_bitrate = bitrate,
               .crf = crf,
-              .info = &info,
-              .crop = (crop.error == 0) ? &crop : NULL,
-              .hdr = &hdr,
+              .info = &ctx->info,
+              .crop = (ctx->crop.error == 0) ? &ctx->crop : NULL,
+              .hdr = &ctx->hdr,
           };
 
           vr = encode_video(&vcfg);
@@ -1483,10 +1202,10 @@ int main(int argc, char *argv[]) {
 
             double elapsed = difftime(time(NULL), encode_start_time);
             double avg_kbps = 0.0;
-            if (info.duration > 0.5 && final_bytes > 0)
-              avg_kbps = ((double)final_bytes * 8.0) / (info.duration * 1000.0);
+            if (ctx->info.duration > 0.5 && final_bytes > 0)
+              avg_kbps = ((double)final_bytes * 8.0) / (ctx->info.duration * 1000.0);
             double delta_pct = bitrate > 0 ? (avg_kbps - bitrate) / bitrate * 100.0 : 0.0;
-            double speed = elapsed > 0.5 ? info.duration / elapsed : 0.0;
+            double speed = elapsed > 0.5 ? ctx->info.duration / elapsed : 0.0;
 
             /* Done receipt always renders — it's the headline result. */
             int saved_quiet_done = ui_is_quiet();
@@ -1497,8 +1216,8 @@ int main(int argc, char *argv[]) {
             if (bitrate > 0 && avg_kbps > 0)
               ui_kv("Bitrate", "%.0f kbps avg  (%+.1f%% vs %d kbps target)", avg_kbps, delta_pct,
                     bitrate);
-            ui_kv("Duration", "%s  encoded in %s  (%.2f× realtime)", ui_fmt_duration(info.duration),
-                  ui_fmt_duration(elapsed), speed);
+            ui_kv("Duration", "%s  encoded in %s  (%.2f× realtime)",
+                  ui_fmt_duration(ctx->info.duration), ui_fmt_duration(elapsed), speed);
             ui_set_quiet(saved_quiet_done);
           }
         }
@@ -1512,8 +1231,10 @@ int main(int argc, char *argv[]) {
         /* Compute HD output dimensions from cropped source aspect ratio.
            Target width is always 1920; height is derived to preserve AR
            (rounded down to even for YUV420). */
-        int hd_crop_w = info.width - (crop.error == 0 ? crop.left + crop.right : 0);
-        int hd_crop_h = info.height - (crop.error == 0 ? crop.top + crop.bottom : 0);
+        int hd_crop_w =
+            ctx->info.width - (ctx->crop.error == 0 ? ctx->crop.left + ctx->crop.right : 0);
+        int hd_crop_h =
+            ctx->info.height - (ctx->crop.error == 0 ? ctx->crop.top + ctx->crop.bottom : 0);
         hd_crop_w = hd_crop_w & ~1;
         hd_crop_h = hd_crop_h & ~1;
         int hd_w = 1920;
@@ -1521,12 +1242,12 @@ int main(int argc, char *argv[]) {
         if (hd_h < 2)
           hd_h = 2;
 
-        MediaInfo hd_info = info;
+        MediaInfo hd_info = ctx->info;
         hd_info.width = hd_w;
         hd_info.height = hd_h;
 
         /* DV Profile 8.1 is resolution-independent; keep it for HD. */
-        HdrInfo hd_hdr = hdr;
+        HdrInfo hd_hdr = ctx->hdr;
 
         const EncodePreset *hd_preset = get_encode_preset(ctx->opt.quality, hd_h);
         int hd_vmaf_default = get_vmaf_target(ctx->opt.quality, hd_h);
@@ -1562,8 +1283,8 @@ int main(int argc, char *argv[]) {
           if (hd_csr.crf < 0) {
             ui_stage_fail("crf-search", hd_csr.error ? hd_csr.error : "CRF search failed");
             ui_hint("bypass with --crf <N> or --bitrate <kbps>");
-            if (tracks.error == 0)
-              free_media_tracks(&tracks);
+            if (ctx->tracks.error == 0)
+              free_media_tracks(&ctx->tracks);
             free(ctx);
             return 1;
           }
@@ -1583,7 +1304,8 @@ int main(int argc, char *argv[]) {
         ui_kv("Preset", "%s  (HD)", quality_type_to_string(ctx->opt.quality));
         ui_kv("SVT-AV1", "preset %d, tune %d, keyint %d, ac-bias %.1f", hd_preset->preset,
               hd_preset->tune, hd_preset->keyint, hd_preset->ac_bias);
-        ui_kv("Scale", "%d×%d  (from %d×%d 4K source)", hd_w, hd_h, info.width, info.height);
+        ui_kv("Scale", "%d×%d  (from %d×%d 4K source)", hd_w, hd_h, ctx->info.width,
+              ctx->info.height);
         if (grain.error == 0) {
           int is_anim = (ctx->opt.quality == QUALITY_ANIMATION);
           const char *content_tier =
@@ -1609,8 +1331,8 @@ int main(int argc, char *argv[]) {
           ui_section(ctx->opt.grain_only ? "Grain-only" : "Dry run");
           ui_row("No files written. Re-run without %s to encode.",
                  ctx->opt.grain_only ? "--grain-only" : "--dry-run");
-          if (tracks.error == 0)
-            free_media_tracks(&tracks);
+          if (ctx->tracks.error == 0)
+            free_media_tracks(&ctx->tracks);
           free(ctx);
           return 0;
         }
@@ -1618,7 +1340,7 @@ int main(int argc, char *argv[]) {
 
         /* For --scale-to-hd the 4K encode block was skipped, so RPU hasn't
            been extracted yet.  Do it here before the HD video encode. */
-        if (ctx->opt.scale_to_hd && hdr.error == 0 && hdr.has_dolby_vision) {
+        if (ctx->opt.scale_to_hd && ctx->hdr.error == 0 && ctx->hdr.has_dolby_vision) {
           char hd_rpu_name[2048];
           build_rpu_filename(hd_rpu_name, sizeof(hd_rpu_name), hd_base_name);
 
@@ -1669,8 +1391,8 @@ int main(int argc, char *argv[]) {
             .grain_variance = grain.error == 0 ? grain.grain_variance : 0.0,
             .target_bitrate = bitrate,
             .crf = hd_crf,
-            .info = &info, /* source 4K dims for decoder */
-            .crop = (crop.error == 0) ? &crop : NULL,
+            .info = &ctx->info, /* source 4K dims for decoder */
+            .crop = (ctx->crop.error == 0) ? &ctx->crop : NULL,
             .hdr = &hd_hdr,
             .scale_width = hd_w,
             .scale_height = hd_h,
@@ -1831,9 +1553,10 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  if (tracks.error == 0)
-    free_media_tracks(&tracks);
-
+  rc = pipeline_failed ? 1 : 0;
+out:
+  if (ctx->tracks.error == 0)
+    free_media_tracks(&ctx->tracks);
   free(ctx);
-  return pipeline_failed ? 1 : 0;
+  return rc;
 }
