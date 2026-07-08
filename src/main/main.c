@@ -239,80 +239,16 @@ int main(int argc, char *argv[]) {
   snprintf(ctx->scores_cache_path, sizeof(ctx->scores_cache_path), "%s/scores.json",
            ctx->cache_dir);
 
-  /* Score cache state - used for grain analysis and CRF caching */
-  double cached_grain_score = 0.0;
-  double cached_grain_variance = 0.0;
-  int cached_crf = 0;
-  bool scores_cached = false;
-
-  /* GrainScore struct needed later for grain analysis and HD encode */
-  GrainScore grain = {0};
-
   StageStatus st = stage_probe(ctx);
   if (st != STAGE_CONTINUE) {
     rc = (st == STAGE_EXIT_FAIL) ? 1 : 0;
     goto out;
   }
 
-  /* ---- Grain analysis ---- */
-  ui_section("Grain analysis");
-  int film_grain = 0;
-
-  /* Check for cached scores (uses global cached_* variables) */
-  scores_cached = vmav_load_cached_scores(ctx->scores_cache_path, &cached_grain_score,
-                                          &cached_grain_variance, &cached_crf);
-
-  if (scores_cached) {
-    film_grain =
-        get_film_grain_from_score(cached_grain_score, cached_grain_variance, ctx->opt.quality);
-    ui_kv("Luma score", "%.4f  (from cache)", cached_grain_score);
-    ui_kv("Chroma score", "%.4f", cached_grain_variance * 100); /* approximate */
-    ui_kv("Variance", "%.4f  (from cache)", cached_grain_variance);
-    ui_kv("Synth level", "%d  (from cache)", film_grain);
-    ui_stage_ok("Grain analysis", "loaded from cache");
-    /* Refresh timestamp when using cached scores */
-    if (!ctx->opt.crf && !ctx->opt.bitrate) {
-      vmav_save_cached_scores(ctx->scores_cache_path, cached_grain_score, cached_grain_variance,
-                              cached_crf);
-    }
-  } else {
-    ui_row("Sampling 4 windows (extends to 7 if variance is high)…");
-    grain = get_grain_score(filepath);
-    if (grain.error == 0) {
-      film_grain =
-          get_film_grain_from_score(grain.grain_score, grain.grain_variance, ctx->opt.quality);
-      /* Per-window OK/FAIL lines already printed by media_analysis as it
-         worked; these summary kvs collect the aggregate signal. */
-      ui_kv("Luma score", "%.4f  (max across windows)", grain.grain_score);
-      ui_kv("Chroma score", "%.4f", grain.grain_score * 100); /* approximate */
-      ui_kv("Variance", "%.4f%s", grain.grain_variance,
-            grain.windows_succeeded > 4 ? "  (refinement triggered)" : "");
-      ui_kv("Synth level", "%d  (0–50)", film_grain);
-      /* Save grain scores to cache */
-      if (!ctx->opt.crf && !ctx->opt.bitrate) {
-        if (!vmav_save_cached_scores(ctx->scores_cache_path, grain.grain_score,
-                                     grain.grain_variance, 0)) {
-          fprintf(stderr, "Warning: failed to save scores to cache\n");
-        } else {
-          ui_stage_ok("Cache", "saved grain analysis scores");
-        }
-      }
-    } else {
-      char err[64];
-      snprintf(err, sizeof(err), "all windows failed (last error %d)", grain.error);
-      ui_stage_fail("Grain analysis", err);
-      ui_hint("set VMAV_KEEP_GRAIN_TMP=1 to retain the per-window scratch "
-              "files for inspection");
-    }
-  }
-
-  const EncodePreset *enc_preset = get_encode_preset(ctx->opt.quality, ctx->info.height);
-
-  if (do_hd && ctx->info.height < 2160) {
-    ui_stage_fail("Source", "--companion-hd / --scale-to-hd requires a 4K source "
-                            "(height >= 2160)");
-    free(ctx);
-    return 1;
+  st = stage_grain(ctx);
+  if (st != STAGE_CONTINUE) {
+    rc = (st == STAGE_EXIT_FAIL) ? 1 : 0;
+    goto out;
   }
 
   /* ---- Naming setup (TMDB or --blind) ---- */
@@ -580,8 +516,8 @@ int main(int argc, char *argv[]) {
       /* ---- 4K rate control + plan ---- */
       if (!ctx->opt.grain_only && crf == 0 && bitrate == 0) {
         /* Check for cached CRF before running search */
-        if (scores_cached && cached_crf > 0) {
-          crf = cached_crf;
+        if (ctx->scores_cached && ctx->cached_crf > 0) {
+          crf = ctx->cached_crf;
           vmaf_used = ctx->opt.vmaf_target > 0
                           ? ctx->opt.vmaf_target
                           : get_vmaf_target(ctx->opt.quality, ctx->info.height);
@@ -595,7 +531,8 @@ int main(int argc, char *argv[]) {
                           ? ctx->opt.vmaf_target
                           : get_vmaf_target(ctx->opt.quality, ctx->info.height);
           ui_section("CRF search");
-          CrfSearchResult csr = run_crf_search(filepath, vmaf_used, enc_preset, film_grain, NULL);
+          CrfSearchResult csr =
+              run_crf_search(filepath, vmaf_used, ctx->enc_preset, ctx->film_grain, NULL);
           if (csr.crf < 0) {
             ui_stage_fail("crf-search", csr.error ? csr.error : "CRF search failed");
             ui_hint("bypass with --crf <N> or --bitrate <kbps>");
@@ -620,13 +557,13 @@ int main(int argc, char *argv[]) {
       ui_section("Encoding plan");
       ui_kv("Preset", "%s  (%s)", quality_type_to_string(ctx->opt.quality),
             ctx->info.height >= 2160 ? "4K" : "HD");
-      ui_kv("SVT-AV1", "preset %d, tune %d, keyint %d, ac-bias %.1f", enc_preset->preset,
-            enc_preset->tune, enc_preset->keyint, enc_preset->ac_bias);
-      if (grain.error == 0) {
+      ui_kv("SVT-AV1", "preset %d, tune %d, keyint %d, ac-bias %.1f", ctx->enc_preset->preset,
+            ctx->enc_preset->tune, ctx->enc_preset->keyint, ctx->enc_preset->ac_bias);
+      if (ctx->grain.error == 0) {
         int is_anim = (ctx->opt.quality == QUALITY_ANIMATION);
         const char *content_tier =
-            is_anim ? "animation" : (grain.grain_score >= 0.08 ? "grainy" : "clean");
-        ui_kv("Grain", "level %d  (%s tier)", film_grain, content_tier);
+            is_anim ? "animation" : (ctx->grain.grain_score >= 0.08 ? "grainy" : "clean");
+        ui_kv("Grain", "level %d  (%s tier)", ctx->film_grain, content_tier);
       }
       if (crf > 0) {
         if (vmaf_used > 0)
@@ -641,7 +578,7 @@ int main(int argc, char *argv[]) {
       ui_kv("Output", "%s%s", output_dir, output_name);
 
       if (ctx->opt.grain_only)
-        vmav_print_encoder_knobs(enc_preset, film_grain);
+        vmav_print_encoder_knobs(ctx->enc_preset, ctx->film_grain);
 
       /* For companion-hd, fall through so the HD plan section also renders
          before exiting.  For solo dry-run / grain-only, exit here. */
@@ -1038,10 +975,10 @@ int main(int argc, char *argv[]) {
               .input_path = filepath,
               .output_path = av1_video_path,
               .rpu_path = rpu_path[0] ? rpu_path : NULL,
-              .preset = enc_preset,
-              .film_grain = film_grain,
-              .grain_score = grain.error == 0 ? grain.grain_score : 0.0,
-              .grain_variance = grain.error == 0 ? grain.grain_variance : 0.0,
+              .preset = ctx->enc_preset,
+              .film_grain = ctx->film_grain,
+              .grain_score = ctx->grain.error == 0 ? ctx->grain.grain_score : 0.0,
+              .grain_variance = ctx->grain.error == 0 ? ctx->grain.grain_variance : 0.0,
               .target_bitrate = bitrate,
               .crf = crf,
               .info = &ctx->info,
@@ -1251,9 +1188,9 @@ int main(int argc, char *argv[]) {
 
         const EncodePreset *hd_preset = get_encode_preset(ctx->opt.quality, hd_h);
         int hd_vmaf_default = get_vmaf_target(ctx->opt.quality, hd_h);
-        int hd_film_grain = get_film_grain_from_score(grain.error == 0 ? grain.grain_score : 0.0,
-                                                      grain.error == 0 ? grain.grain_variance : 0.0,
-                                                      ctx->opt.quality);
+        int hd_film_grain = get_film_grain_from_score(
+            ctx->grain.error == 0 ? ctx->grain.grain_score : 0.0,
+            ctx->grain.error == 0 ? ctx->grain.grain_variance : 0.0, ctx->opt.quality);
 
         /* HD output naming */
         char hd_output_name[1024] = "";
@@ -1306,10 +1243,10 @@ int main(int argc, char *argv[]) {
               hd_preset->tune, hd_preset->keyint, hd_preset->ac_bias);
         ui_kv("Scale", "%d×%d  (from %d×%d 4K source)", hd_w, hd_h, ctx->info.width,
               ctx->info.height);
-        if (grain.error == 0) {
+        if (ctx->grain.error == 0) {
           int is_anim = (ctx->opt.quality == QUALITY_ANIMATION);
           const char *content_tier =
-              is_anim ? "animation" : (grain.grain_score >= 0.08 ? "grainy" : "clean");
+              is_anim ? "animation" : (ctx->grain.grain_score >= 0.08 ? "grainy" : "clean");
           ui_kv("Grain", "level %d  (%s tier)", hd_film_grain, content_tier);
         }
         if (hd_crf > 0) {
@@ -1387,8 +1324,8 @@ int main(int argc, char *argv[]) {
             .rpu_path = rpu_path[0] ? rpu_path : NULL,
             .preset = hd_preset,
             .film_grain = hd_film_grain,
-            .grain_score = grain.error == 0 ? grain.grain_score : 0.0,
-            .grain_variance = grain.error == 0 ? grain.grain_variance : 0.0,
+            .grain_score = ctx->grain.error == 0 ? ctx->grain.grain_score : 0.0,
+            .grain_variance = ctx->grain.error == 0 ? ctx->grain.grain_variance : 0.0,
             .target_bitrate = bitrate,
             .crf = hd_crf,
             .info = &ctx->info, /* source 4K dims for decoder */
