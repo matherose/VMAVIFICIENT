@@ -13,9 +13,6 @@
 #include <sys/stat.h>
 #include <time.h>
 
-/* Cache directory - file scope so helper functions can access it. */
-static char g_cache_dir[4096] = "";
-
 /* Defined by the build system (-DVMAV_VERSION=...). Fallback keeps
    non-CMake builds linkable, e.g. ad-hoc clang invocations. */
 #ifndef VMAV_VERSION
@@ -33,6 +30,7 @@ static char g_cache_dir[4096] = "";
 #include "media_info.h"
 #include "media_naming.h"
 #include "media_tracks.h"
+#include "pipeline.h"
 #include "proc.h"
 #include "rpu_extract.h"
 #include "subtitle_convert.h"
@@ -40,32 +38,6 @@ static char g_cache_dir[4096] = "";
 #include "ui.h"
 #include "utils.h"
 #include "video_encode.h"
-
-/**
- * @brief Parse a string as a base-10 int.
- *
- * Returns the parsed value, or 0 if the string is NULL, empty, contains
- * non-numeric content (besides leading/trailing whitespace and trailing
- * newlines from fgets), or overflows int. Replaces atoi() — the
- * cert-err34-c rule for the codebase.
- */
-static int parse_int_or_zero(const char *s) {
-  if (!s)
-    return 0;
-  char *endptr = NULL;
-  errno = 0;
-  long v = strtol(s, &endptr, 10);
-  if (endptr == s)
-    return 0; /* no digits parsed */
-  /* Skip trailing whitespace; reject anything else. */
-  while (*endptr == ' ' || *endptr == '\t' || *endptr == '\n' || *endptr == '\r')
-    endptr++;
-  if (*endptr != '\0')
-    return 0;
-  if (errno == ERANGE || v > INT_MAX || v < INT_MIN)
-    return 0;
-  return (int)v;
-}
 
 static void print_usage(const char *prog) {
   fprintf(stderr,
@@ -204,7 +176,7 @@ static LanguageTag ask_language_tag(const MediaTracks *tracks) {
   if (!fgets(line, sizeof(line), stdin))
     return LANG_TAG_MULTI;
 
-  switch (parse_int_or_zero(line)) {
+  switch (vmav_parse_int_or_zero(line)) {
   case 1:
     return LANG_TAG_MULTI;
   case 2:
@@ -258,7 +230,7 @@ static SourceType ask_source(void) {
   if (!fgets(line, sizeof(line), stdin))
     return SOURCE_BLURAY;
 
-  switch (parse_int_or_zero(line)) {
+  switch (vmav_parse_int_or_zero(line)) {
   case 1:
     return SOURCE_BDRIP;
   case 2:
@@ -299,7 +271,7 @@ static int ask_positive_int(const char *prompt, int *out) {
     fflush(stdout);
     if (!fgets(line, sizeof(line), stdin))
       return -1;
-    int v = parse_int_or_zero(line);
+    int v = vmav_parse_int_or_zero(line);
     if (v > 0) {
       *out = v;
       return 0;
@@ -309,239 +281,12 @@ static int ask_positive_int(const char *prompt, int *out) {
   return -1;
 }
 
-/* ---- Track display helpers ---- */
-
-static const char *codec_short(const char *codec) {
-  if (strcmp(codec, "hdmv_pgs_subtitle") == 0)
-    return "pgs";
-  if (strcmp(codec, "subrip") == 0)
-    return "srt";
-  if (strcmp(codec, "dvd_subtitle") == 0)
-    return "vob";
-  if (strcmp(codec, "ass") == 0 || strcmp(codec, "ssa") == 0)
-    return "ass";
-  return codec;
-}
-
-/**
- * @brief Build a path inside the cache directory.
- * Appends the given relative path to g_cache_dir with proper separator.
- */
-static void build_cache_path(char *buf, size_t bufsize, const char *relative_path) {
-  if (strlen(g_cache_dir) > 0 && g_cache_dir[strlen(g_cache_dir) - 1] == '/')
-    snprintf(buf, bufsize, "%s%s", g_cache_dir, relative_path);
-  else
-    snprintf(buf, bufsize, "%s/%s", g_cache_dir, relative_path);
-}
-
-/**
- * @brief Remove the entire cache directory and recreate it.
- * Used after successful encode to cleanup all intermediate files.
- *
- * Atomic behavior: first renames the cache to a temporary name,
- * then creates a new empty cache dir. If rename fails, creates
- * cache dir in place. Old cache is deleted only after successful recreate.
- */
-static void cleanup_cache_dir(void) {
-  char old_cache_path[4096];
-  pid_t pid = getpid();
-  snprintf(old_cache_path, sizeof(old_cache_path), "%s.tmp.%d", g_cache_dir, pid);
-
-  /* Try to atomically rename the cache directory */
-  if (rename(g_cache_dir, old_cache_path) == 0) {
-    /* Rename succeeded: create fresh cache dir */
-    if (mkdir(g_cache_dir, 0755) != 0 && errno != EEXIST) {
-      fprintf(stderr, "Warning: failed to recreate cache directory '%s' (errno %d)\n", g_cache_dir,
-              errno);
-      return;
-    }
-    /* Delete old cache in background (non-blocking) */
-    vmav_rmtree_async(old_cache_path);
-  } else {
-    /* Rename failed (e.g., cache doesn't exist or is in use)
-     * Try to recreate in place */
-    if (vmav_rmtree(g_cache_dir) != 0) {
-      fprintf(stderr, "Warning: failed to cleanup cache directory '%s'\n", g_cache_dir);
-    }
-    /* Recreate empty cache directory */
-    if (mkdir(g_cache_dir, 0755) != 0 && errno != EEXIST) {
-      fprintf(stderr, "Warning: failed to recreate cache directory '%s' (errno %d)\n", g_cache_dir,
-              errno);
-    }
-  }
-}
-
-/* ---- Score cache helpers ---- */
-
-static bool file_exists(const char *path) {
-  struct stat st;
-  return stat(path, &st) == 0;
-}
-
-static bool load_cached_scores(const char *cache_path, double *grain_score, double *grain_variance,
-                               int *crf) {
-  FILE *f = fopen(cache_path, "r");
-  if (!f)
-    return false;
-  char line[4096];
-  bool found_grain = false, found_var = false, found_crf = false;
-  while (fgets(line, sizeof(line), f)) {
-    char value[64];
-    if (sscanf(line, " \"grain_score\": %63[^,\"]", value) == 1)
-      *grain_score = atof(value), found_grain = true;
-    else if (sscanf(line, " \"grain_variance\": %63[^,\"]", value) == 1)
-      *grain_variance = atof(value), found_var = true;
-    else if (sscanf(line, " \"crf\": %63[^,\"]", value) == 1)
-      *crf = atoi(value), found_crf = true;
-  }
-  fclose(f);
-  return found_grain && found_var && found_crf;
-}
-
-static bool save_cached_scores(const char *cache_path, double grain_score, double grain_variance,
-                               int crf) {
-  FILE *f = fopen(cache_path, "w");
-  if (!f)
-    return false;
-  time_t now = time(NULL);
-  struct tm *tm_info = localtime(&now);
-  char timestamp[32];
-  strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", tm_info);
-  fprintf(f,
-          "{\n"
-          "  \"generated\": \"%s\",\n"
-          "  \"grain_score\": %.4f,\n"
-          "  \"grain_variance\": %.4f,\n"
-          "  \"crf\": %d\n"
-          "}\n",
-          timestamp, grain_score, grain_variance, crf);
-  fclose(f);
-  return true;
-}
-
-/* ---- Track ordering helpers ---- */
-
-static int audio_lang_priority(const char *lang) {
-  if (!lang || !lang[0])
-    return 99;
-  if (strcmp(lang, "fre") == 0 || strcmp(lang, "fra") == 0)
-    return 0;
-  if (strcmp(lang, "eng") == 0)
-    return 1;
-  return 50;
-}
-
-static int cmp_audio_order(const void *a, const void *b) {
-  const TrackInfo *ta = a;
-  const TrackInfo *tb = b;
-  return audio_lang_priority(ta->language) - audio_lang_priority(tb->language);
-}
-
-static int sub_sort_key(const char *lang, int is_forced) {
-  if (strcmp(lang, "fre") == 0 || strcmp(lang, "fra") == 0)
-    return is_forced ? 0 : 10;
-  if (strcmp(lang, "eng") == 0)
-    return 20;
-  return 50;
-}
-
-/**
- * @brief Dump every relevant encoder knob from the resolved preset.
- *
- * Called by --grain-only so the user can sanity-check what each tier
- * actually configures without committing to a multi-hour encode.
- * Focuses on the knobs that meaningfully affect grain pass-through and
- * perceived quality — preset / tune / ac-bias, the three filters
- * (TF / CDEF / restoration), variance boost, QMs, the noise vs
- * film-grain mechanism choice. Skips the rate-control plumbing
- * (already in the Plan section) and per-temporal-layer offsets.
- */
-static void print_encoder_knobs(const EncodePreset *p, int film_grain) {
-  ui_section("Encoder knobs");
-
-  ui_kv("Speed", "preset %d, keyint %d", p->preset, p->keyint);
-  ui_kv("Tune", "%d  (0=VQ, 1=PSNR, 5=Film Grain)", p->tune);
-  ui_kv("ac-bias", "%.1f", p->ac_bias);
-  ui_kv("Sharpness", "%d", p->sharpness);
-  ui_kv("Complex HVS", "%s", p->complex_hvs ? "on" : "off");
-
-  /* Grain mechanism — selected per-preset, plus the dynamic level. */
-  if (p->use_noise) {
-    char size_buf[32];
-    if (p->noise_size < 0)
-      snprintf(size_buf, sizeof(size_buf), "auto");
-    else
-      snprintf(size_buf, sizeof(size_buf), "%d", p->noise_size);
-    char chroma_buf[64];
-    if (p->noise_chroma_strength < 0)
-      snprintf(chroma_buf, sizeof(chroma_buf), "auto (~60%% of luma)");
-    else if (p->noise_chroma_strength == 0)
-      snprintf(chroma_buf, sizeof(chroma_buf), "off");
-    else
-      snprintf(chroma_buf, sizeof(chroma_buf), "%d", p->noise_chroma_strength);
-    ui_kv("Grain mech", "%s", "--noise (synthetic overlay, 4.1.0+)");
-    ui_kv("Strength", "%d", film_grain);
-    ui_kv("Noise size", "%s", size_buf);
-    ui_kv("Noise chroma", "%s", chroma_buf);
-    ui_kv("Chroma← luma", "%s", p->noise_chroma_from_luma ? "on" : "off");
-  } else {
-    ui_kv("Grain mech", "%s", "--film-grain (analyzed) + denoise=1");
-    ui_kv("Strength", "%d", film_grain);
-  }
-
-  /* Filters that affect grain pass-through. */
-  if (p->enable_tf)
-    ui_kv("Temporal flt", "on  (frame %d, keyframe %d)", p->tf_strength, p->kf_tf_strength);
-  else
-    ui_kv("Temporal flt", "off");
-  ui_kv("DLF", "%s", p->enable_dlf == 0 ? "off" : p->enable_dlf == 2 ? "accurate" : "on");
-  ui_kv("CDEF scaling", "%d", p->cdef_scaling);
-  ui_kv("Restoration", "%s",
-        p->enable_restoration == 0   ? "off"
-        : p->enable_restoration == 1 ? "on"
-                                     : "default");
-  ui_kv("Noise-adapt", "%d  (0=off, 2=tune-default, 3=CDEF-only, 4=restoration-only)",
-        p->noise_adaptive_filtering);
-
-  /* Variance boost (HDR-relevant). */
-  ui_kv("Var boost", "strength %d, octile %d, curve %d", p->variance_boost, p->variance_octile,
-        p->variance_curve);
-
-  /* Quantization matrices. */
-  if (p->enable_qm == 1) {
-    char qm_buf[32];
-    if (p->qm_min >= 0 && p->qm_max >= 0)
-      snprintf(qm_buf, sizeof(qm_buf), "luma %d-%d", p->qm_min, p->qm_max);
-    else
-      snprintf(qm_buf, sizeof(qm_buf), "default range");
-    char chroma_qm_buf[32];
-    if (p->chroma_qm_min >= 0 && p->chroma_qm_max >= 0)
-      snprintf(chroma_qm_buf, sizeof(chroma_qm_buf), "chroma %d-%d", p->chroma_qm_min,
-               p->chroma_qm_max);
-    else
-      snprintf(chroma_qm_buf, sizeof(chroma_qm_buf), "chroma default");
-    ui_kv("Quant matrix", "%s, %s", qm_buf, chroma_qm_buf);
-  } else {
-    ui_kv("Quant matrix", "off");
-  }
-
-  /* Other meaningful knobs. */
-  ui_kv("HBD MDS", "%d  (0=default, 1=full 10b, 2=hybrid)", p->hbd_mds);
-  ui_kv("Max tx size", "%d", p->max_tx_size);
-  ui_kv("QP scale comp", "%.1f", p->qp_scale_compress_strength);
-
-  /* Rate control extras the Plan block doesn't cover. */
-  if (p->look_ahead_distance >= 0)
-    ui_kv("Look-ahead", "%d frames", p->look_ahead_distance);
-  if (p->vbr_max_section_pct > 0)
-    ui_kv("VBR max-sec", "%d%%", p->vbr_max_section_pct);
-  if (p->gop_constraint_rc == 1)
-    ui_kv("GOP RC match", "on");
-}
-
 int main(int argc, char *argv[]) {
   init_logging();
   ui_init();
+  PipelineCtx *ctx = calloc(1, sizeof(*ctx));
+  if (!ctx)
+    return 1;
   time_t encode_start_time = time(NULL);
   /* Set on any audio/video/mux failure; drives the process exit code. */
   int pipeline_failed = 0;
@@ -556,10 +301,13 @@ int main(int argc, char *argv[]) {
   for (int i = 1; i < argc; i++) {
     if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
       print_usage(argv[0]);
+      free(ctx);
       return 0;
     }
-    if (strcmp(argv[i], "--config") == 0)
+    if (strcmp(argv[i], "--config") == 0) {
+      free(ctx);
       return config_interactive_setup();
+    }
     if (strcmp(argv[i], "--blind") == 0)
       blind = true;
   }
@@ -569,6 +317,7 @@ int main(int argc, char *argv[]) {
 
   if (check_dependencies() != 0) {
     fprintf(stderr, "Fatal: dependency sanity check failed.\n");
+    free(ctx);
     return 1;
   }
 
@@ -721,26 +470,29 @@ int main(int argc, char *argv[]) {
   while ((opt = getopt_long(argc, argv, "hb:s:", long_options, NULL)) != -1) {
     switch (opt) {
     case OPT_TMDB:
-      tmdb_id = parse_int_or_zero(optarg);
+      tmdb_id = vmav_parse_int_or_zero(optarg);
       break;
     case OPT_BITRATE:
-      cli_bitrate = parse_int_or_zero(optarg);
+      cli_bitrate = vmav_parse_int_or_zero(optarg);
       if (cli_bitrate <= 0) {
         fprintf(stderr, "Error: --bitrate must be a positive integer (kbps)\n");
+        free(ctx);
         return 1;
       }
       break;
     case OPT_CRF:
-      cli_crf = parse_int_or_zero(optarg);
+      cli_crf = vmav_parse_int_or_zero(optarg);
       if (cli_crf < 1 || cli_crf > 63) {
         fprintf(stderr, "Error: --crf must be in range 1–63\n");
+        free(ctx);
         return 1;
       }
       break;
     case OPT_VMAF_TARGET:
-      cli_vmaf_target = parse_int_or_zero(optarg);
+      cli_vmaf_target = vmav_parse_int_or_zero(optarg);
       if (cli_vmaf_target < 1 || cli_vmaf_target > 100) {
         fprintf(stderr, "Error: --vmaf-target must be in range 1–100\n");
+        free(ctx);
         return 1;
       }
       break;
@@ -752,6 +504,7 @@ int main(int argc, char *argv[]) {
       break;
     case OPT_HELP:
       print_usage(argv[0]);
+      free(ctx);
       return 0;
     case OPT_BLIND:
       /* Already detected in the pre-scan above; nothing more to do here. */
@@ -759,6 +512,7 @@ int main(int argc, char *argv[]) {
     case OPT_CONFIG_SETUP:
       /* Pre-scan dispatches this; reaching here means a flag came before
          it that getopt processed first. Run setup and exit anyway. */
+      free(ctx);
       return config_interactive_setup();
     case OPT_DRY_RUN:
       dry_run = true;
@@ -884,6 +638,7 @@ int main(int argc, char *argv[]) {
       snprintf(cli_cache_dir, sizeof(cli_cache_dir), "%s", optarg);
       if (strlen(cli_cache_dir) == 0) {
         fprintf(stderr, "Error: --cache-dir requires a directory path\n");
+        free(ctx);
         return 1;
       }
       break;
@@ -894,21 +649,24 @@ int main(int argc, char *argv[]) {
       tv_mode = false;
       break;
     case OPT_SEASON:
-      cli_season = parse_int_or_zero(optarg);
+      cli_season = vmav_parse_int_or_zero(optarg);
       if (cli_season <= 0) {
         fprintf(stderr, "Error: --season must be a positive integer\n");
+        free(ctx);
         return 1;
       }
       break;
     case OPT_EPISODE:
-      cli_episode = parse_int_or_zero(optarg);
+      cli_episode = vmav_parse_int_or_zero(optarg);
       if (cli_episode <= 0) {
         fprintf(stderr, "Error: --episode must be a positive integer\n");
+        free(ctx);
         return 1;
       }
       break;
     default:
       print_usage(argv[0]);
+      free(ctx);
       return 1;
     }
   }
@@ -925,10 +683,12 @@ int main(int argc, char *argv[]) {
 
   if (companion_hd && scale_to_hd) {
     fprintf(stderr, "Error: --companion-hd and --scale-to-hd are mutually exclusive\n");
+    free(ctx);
     return 1;
   }
   if (!tv_mode && (cli_season > 0 || cli_episode > 0)) {
     fprintf(stderr, "Error: --season/--episode require --tv\n");
+    free(ctx);
     return 1;
   }
   int do_hd = companion_hd || scale_to_hd;
@@ -936,16 +696,17 @@ int main(int argc, char *argv[]) {
   /* ---- Cache directory setup ---- */
   if (strlen(cli_cache_dir) > 0) {
     /* User-provided cache directory */
-    snprintf(g_cache_dir, sizeof(g_cache_dir), "%s", cli_cache_dir);
+    snprintf(ctx->cache_dir, sizeof(ctx->cache_dir), "%s", cli_cache_dir);
   } else {
     /* Default: .vmavificient-cache in project root */
-    snprintf(g_cache_dir, sizeof(g_cache_dir), "./.vmavificient-cache");
+    snprintf(ctx->cache_dir, sizeof(ctx->cache_dir), "./.vmavificient-cache");
   }
-  if (mkdir(g_cache_dir, 0755) != 0 && errno != EEXIST) {
+  if (mkdir(ctx->cache_dir, 0755) != 0 && errno != EEXIST) {
     char err[128];
-    snprintf(err, sizeof(err), "failed to create cache directory '%s' (errno %d)", g_cache_dir,
+    snprintf(err, sizeof(err), "failed to create cache directory '%s' (errno %d)", ctx->cache_dir,
              errno);
     ui_stage_fail("Cache", err);
+    free(ctx);
     return 1;
   }
 
@@ -957,7 +718,7 @@ int main(int argc, char *argv[]) {
 
   /* Cache scores file path */
   char scores_cache_path[4096];
-  snprintf(scores_cache_path, sizeof(scores_cache_path), "%s/scores.json", g_cache_dir);
+  snprintf(scores_cache_path, sizeof(scores_cache_path), "%s/scores.json", ctx->cache_dir);
 
   /* Score cache state - used for grain analysis and CRF caching */
   double cached_grain_score = 0.0;
@@ -975,6 +736,7 @@ int main(int argc, char *argv[]) {
     snprintf(err, sizeof(err), "could not probe %s (error %d)", filepath, info.error);
     ui_stage_fail("Source probe", err);
     ui_hint("verify the path and that ffmpeg can read the container");
+    free(ctx);
     return 1;
   }
   ui_section("Source");
@@ -1159,7 +921,7 @@ int main(int argc, char *argv[]) {
         ui_row(
             "%s\xe2\x94\x82 %2d \xe2\x94\x82 %-3s \xe2\x94\x82 %-3s \xe2\x94\x82 %-6s \xe2\x94\x82 %-20.20s \xe2\x94\x82",
             selection, tracks.subtitles[i].index, lang,
-            codec_short(tracks.subtitles[i].codec), type,
+            vmav_codec_short(tracks.subtitles[i].codec), type,
             tracks.subtitles[i].name);
         // clang-format on
       }
@@ -1217,25 +979,27 @@ int main(int argc, char *argv[]) {
   if (ext)
     *ext = '\0';
 
-  snprintf(video_4k_cache_path, sizeof(video_4k_cache_path), "%s/%s.video.mkv", g_cache_dir,
+  snprintf(video_4k_cache_path, sizeof(video_4k_cache_path), "%s/%s.video.mkv", ctx->cache_dir,
            base_for_cache);
   if (do_hd && !scale_to_hd) {
     snprintf(video_hd_cache_path, sizeof(video_hd_cache_path), "%s/%s-HDLight.video.mkv",
-             g_cache_dir, base_for_cache);
+             ctx->cache_dir, base_for_cache);
   } else {
-    snprintf(video_hd_cache_path, sizeof(video_hd_cache_path), "%s/%s.video.mkv", g_cache_dir,
+    snprintf(video_hd_cache_path, sizeof(video_hd_cache_path), "%s/%s.video.mkv", ctx->cache_dir,
              base_for_cache);
   }
 
-  if (file_exists(video_4k_cache_path)) {
+  if (vmav_file_exists(video_4k_cache_path)) {
     ui_section("Resume check");
     ui_stage_ok("skip", "4K video.mkv already present in cache, proceeding to mux");
+    free(ctx);
     return 0;
   }
 
-  if (file_exists(video_hd_cache_path)) {
+  if (vmav_file_exists(video_hd_cache_path)) {
     ui_section("Resume check");
     ui_stage_ok("skip", "HD video.mkv already present in cache, proceeding to mux");
+    free(ctx);
     return 0;
   }
 
@@ -1250,6 +1014,7 @@ int main(int argc, char *argv[]) {
       if (subtitle_ocr_preflight(tess_lang, NULL, 0) != 0) {
         ui_stage_fail("OCR preflight", "no usable tessdata for PGS subtitle OCR");
         ui_hint("install tessdata_best (eng+fra) and set TESSDATA_PREFIX, or drop PGS tracks");
+        free(ctx);
         return 1;
       }
     }
@@ -1260,8 +1025,8 @@ int main(int argc, char *argv[]) {
   int film_grain = 0;
 
   /* Check for cached scores (uses global cached_* variables) */
-  scores_cached = load_cached_scores(scores_cache_path, &cached_grain_score, &cached_grain_variance,
-                                     &cached_crf);
+  scores_cached = vmav_load_cached_scores(scores_cache_path, &cached_grain_score,
+                                          &cached_grain_variance, &cached_crf);
 
   if (scores_cached) {
     film_grain = get_film_grain_from_score(cached_grain_score, cached_grain_variance, cli_quality);
@@ -1272,7 +1037,8 @@ int main(int argc, char *argv[]) {
     ui_stage_ok("Grain analysis", "loaded from cache");
     /* Refresh timestamp when using cached scores */
     if (!cli_crf && !cli_bitrate) {
-      save_cached_scores(scores_cache_path, cached_grain_score, cached_grain_variance, cached_crf);
+      vmav_save_cached_scores(scores_cache_path, cached_grain_score, cached_grain_variance,
+                              cached_crf);
     }
   } else {
     ui_row("Sampling 4 windows (extends to 7 if variance is high)…");
@@ -1288,7 +1054,8 @@ int main(int argc, char *argv[]) {
       ui_kv("Synth level", "%d  (0–50)", film_grain);
       /* Save grain scores to cache */
       if (!cli_crf && !cli_bitrate) {
-        if (!save_cached_scores(scores_cache_path, grain.grain_score, grain.grain_variance, 0)) {
+        if (!vmav_save_cached_scores(scores_cache_path, grain.grain_score, grain.grain_variance,
+                                     0)) {
           fprintf(stderr, "Warning: failed to save scores to cache\n");
         } else {
           ui_stage_ok("Cache", "saved grain analysis scores");
@@ -1308,6 +1075,7 @@ int main(int argc, char *argv[]) {
   if (do_hd && info.height < 2160) {
     ui_stage_fail("Source", "--companion-hd / --scale-to-hd requires a 4K source "
                             "(height >= 2160)");
+    free(ctx);
     return 1;
   }
 
@@ -1378,11 +1146,13 @@ int main(int argc, char *argv[]) {
       if (season <= 0 &&
           ask_positive_int("\nSeason not detected from filename. Season: ", &season) != 0) {
         ui_stage_fail("Naming", "season unknown; pass --season <N>");
+        free(ctx);
         return 1;
       }
       if (episode <= 0 &&
           ask_positive_int("Episode not detected from filename. Episode: ", &episode) != 0) {
         ui_stage_fail("Naming", "episode unknown; pass --episode <N>");
+        free(ctx);
         return 1;
       }
 
@@ -1560,6 +1330,7 @@ int main(int argc, char *argv[]) {
             "output <input-stem>.mkv next to the source");
     if (tracks.error == 0)
       free_media_tracks(&tracks);
+    free(ctx);
     return 1;
   }
 
@@ -1592,6 +1363,7 @@ int main(int argc, char *argv[]) {
             ui_hint("bypass with --crf <N> or --bitrate <kbps>");
             if (tracks.error == 0)
               free_media_tracks(&tracks);
+            free(ctx);
             return 1;
           }
           char detail[96];
@@ -1631,7 +1403,7 @@ int main(int argc, char *argv[]) {
       ui_kv("Output", "%s%s", output_dir, output_name);
 
       if (grain_only)
-        print_encoder_knobs(enc_preset, film_grain);
+        vmav_print_encoder_knobs(enc_preset, film_grain);
 
       /* For companion-hd, fall through so the HD plan section also renders
          before exiting.  For solo dry-run / grain-only, exit here. */
@@ -1641,6 +1413,7 @@ int main(int argc, char *argv[]) {
                grain_only ? "--grain-only" : "--dry-run");
         if (tracks.error == 0)
           free_media_tracks(&tracks);
+        free(ctx);
         return 0;
       }
       ui_set_quiet(saved_quiet);
@@ -1654,7 +1427,7 @@ int main(int argc, char *argv[]) {
 
       /* Sort: French first, then English, then others */
       if (enc_best && enc_best_count > 1)
-        qsort(enc_best, enc_best_count, sizeof(TrackInfo), cmp_audio_order);
+        qsort(enc_best, enc_best_count, sizeof(TrackInfo), vmav_cmp_audio_order);
 
       /* Store OPUS paths, track names and languages for final mux.
          All three are written through the opus_count write-index so a
@@ -1691,7 +1464,7 @@ int main(int argc, char *argv[]) {
 
           /* Write opus to cache directory */
           char opus_cache_path[4096];
-          build_cache_path(opus_cache_path, sizeof(opus_cache_path), opus_name);
+          vmav_build_cache_path(ctx, opus_cache_path, sizeof(opus_cache_path), opus_name);
           snprintf(opus_paths[opus_count], sizeof(opus_paths[0]), "%s", opus_cache_path);
 
           /* Build display name and language for MKV track */
@@ -1776,7 +1549,7 @@ int main(int argc, char *argv[]) {
 
             /* Write SRT to cache directory */
             char srt_cache_path[4096];
-            build_cache_path(srt_cache_path, sizeof(srt_cache_path), srt_fname);
+            vmav_build_cache_path(ctx, srt_cache_path, sizeof(srt_cache_path), srt_fname);
             snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s", srt_cache_path);
 
             /* Build display name */
@@ -1862,7 +1635,7 @@ int main(int argc, char *argv[]) {
 
             /* Write SRT to cache directory */
             char srt_cache_path[4096];
-            build_cache_path(srt_cache_path, sizeof(srt_cache_path), srt_fname);
+            vmav_build_cache_path(ctx, srt_cache_path, sizeof(srt_cache_path), srt_fname);
             snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s", srt_cache_path);
 
             build_subtitle_track_name(srt_names[srt_count], sizeof(srt_names[0]), lang, 1,
@@ -1938,7 +1711,7 @@ int main(int argc, char *argv[]) {
         int order_key[64];
         for (int i = 0; i < srt_count; i++) {
           order_idx[i] = i;
-          order_key[i] = sub_sort_key(srt_langs[i], srt_is_forced[i]);
+          order_key[i] = vmav_sub_sort_key(srt_langs[i], srt_is_forced[i]);
         }
         /* Stable insertion sort */
         for (int i = 1; i < srt_count; i++) {
@@ -1980,7 +1753,7 @@ int main(int argc, char *argv[]) {
 
           /* Write RPU to cache directory */
           char rpu_cache_path[4096];
-          build_cache_path(rpu_cache_path, sizeof(rpu_cache_path), rpu_name);
+          vmav_build_cache_path(ctx, rpu_cache_path, sizeof(rpu_cache_path), rpu_name);
           snprintf(rpu_path, sizeof(rpu_path), "%s", rpu_cache_path);
 
           ui_section("Dolby Vision RPU");
@@ -2008,7 +1781,8 @@ int main(int argc, char *argv[]) {
         char av1_video_name[2048];
         snprintf(av1_video_name, sizeof(av1_video_name), "%s.video.mkv", base_name);
         char av1_video_cache_path[4096];
-        build_cache_path(av1_video_cache_path, sizeof(av1_video_cache_path), av1_video_name);
+        vmav_build_cache_path(ctx, av1_video_cache_path, sizeof(av1_video_cache_path),
+                              av1_video_name);
         char av1_video_path[4096];
         snprintf(av1_video_path, sizeof(av1_video_path), "%s", av1_video_cache_path);
         time_t video_t0 = time(NULL);
@@ -2173,7 +1947,7 @@ int main(int argc, char *argv[]) {
              * For companion-hd, defer cleanup to the HD mux pass (audio/subtitle
              * intermediates are shared between 4K and HD muxes). */
             if (mr.error == 0 && !companion_hd)
-              cleanup_cache_dir();
+              vmav_cleanup_cache_dir(ctx);
           }
 
           /* ---- Done receipt ---- */
@@ -2265,6 +2039,7 @@ int main(int argc, char *argv[]) {
             ui_hint("bypass with --crf <N> or --bitrate <kbps>");
             if (tracks.error == 0)
               free_media_tracks(&tracks);
+            free(ctx);
             return 1;
           }
           char hd_csr_detail[96];
@@ -2303,7 +2078,7 @@ int main(int argc, char *argv[]) {
         ui_kv("Output", "%s%s", output_dir, hd_output_name);
 
         if (grain_only)
-          print_encoder_knobs(hd_preset, hd_film_grain);
+          vmav_print_encoder_knobs(hd_preset, hd_film_grain);
 
         if (dry_run || grain_only) {
           ui_section(grain_only ? "Grain-only" : "Dry run");
@@ -2311,6 +2086,7 @@ int main(int argc, char *argv[]) {
                  grain_only ? "--grain-only" : "--dry-run");
           if (tracks.error == 0)
             free_media_tracks(&tracks);
+          free(ctx);
           return 0;
         }
         ui_set_quiet(hd_saved_quiet);
@@ -2323,7 +2099,7 @@ int main(int argc, char *argv[]) {
 
           /* Write RPU to cache directory */
           char hd_rpu_cache_path[4096];
-          build_cache_path(hd_rpu_cache_path, sizeof(hd_rpu_cache_path), hd_rpu_name);
+          vmav_build_cache_path(ctx, hd_rpu_cache_path, sizeof(hd_rpu_cache_path), hd_rpu_name);
           snprintf(rpu_path, sizeof(rpu_path), "%s", hd_rpu_cache_path);
 
           ui_section("Dolby Vision RPU");
@@ -2351,8 +2127,8 @@ int main(int argc, char *argv[]) {
         char hd_av1_video_name[2048];
         snprintf(hd_av1_video_name, sizeof(hd_av1_video_name), "%s.video.mkv", hd_base_name);
         char hd_av1_video_cache_path[4096];
-        build_cache_path(hd_av1_video_cache_path, sizeof(hd_av1_video_cache_path),
-                         hd_av1_video_name);
+        vmav_build_cache_path(ctx, hd_av1_video_cache_path, sizeof(hd_av1_video_cache_path),
+                              hd_av1_video_name);
         char hd_av1_video_path[4096];
         snprintf(hd_av1_video_path, sizeof(hd_av1_video_path), "%s", hd_av1_video_cache_path);
         time_t hd_video_t0 = time(NULL);
@@ -2500,7 +2276,7 @@ int main(int argc, char *argv[]) {
             }
             /* Clean up cache directory when everything succeeded */
             if (hd_mr.error == 0)
-              cleanup_cache_dir();
+              vmav_cleanup_cache_dir(ctx);
           }
 
           /* HD Done receipt */
@@ -2533,5 +2309,6 @@ int main(int argc, char *argv[]) {
   if (tracks.error == 0)
     free_media_tracks(&tracks);
 
+  free(ctx);
   return pipeline_failed ? 1 : 0;
 }
