@@ -15,7 +15,7 @@ jobs:
   format-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # Pin to a specific clang-format version. The unversioned package
       # tracks the distro default and shifts under our feet when the
       # runner image updates; pinning keeps the gate stable so a green
@@ -37,7 +37,7 @@ jobs:
     needs: format-check
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # ── Brew update + install ─────────────────────────────────────
       - name: Update Homebrew
@@ -83,6 +83,9 @@ jobs:
 
       - name: Build
         run: cmake --build build -j$(sysctl -n hw.ncpu)
+
+      - name: Run unit tests
+        run: ./build/vmav_tests
 
       - name: Verify version banner
         run: ./build/vmavificient --help | head -1
@@ -167,7 +170,7 @@ jobs:
     needs: format-check
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install dependencies
         run: brew install ninja pkg-config nasm meson ffmpeg
 
@@ -204,10 +207,27 @@ jobs:
       - name: Build (sanitizer)
         run: cmake --build build-asan -j$(sysctl -n hw.ncpu)
 
+      - name: Run unit tests (sanitizer)
+        env:
+          ASAN_OPTIONS: halt_on_error=1:detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ./build-asan/vmav_tests
+
+      - name: Cache test media
+        id: bbb-cache
+        uses: actions/cache@v4
+        with:
+          path: bbb.mp4.zip
+          key: bbb-sunflower-1080p-30fps
+
       - name: Download test media
+        if: steps.bbb-cache.outputs.cache-hit != 'true'
         run: |
           curl -L -o bbb.mp4.zip \
             "https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_30fps_normal.mp4.zip"
+
+      - name: Prepare test media
+        run: |
           unzip bbb.mp4.zip
           ffmpeg -y -ss 0 -t 5 -i bbb_sunflower_1080p_30fps_normal.mp4 \
             -c copy sample.mp4
@@ -231,7 +251,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install build tools
         run: brew install ninja pkg-config nasm meson ffmpeg
 
@@ -291,6 +311,19 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v5
+
+      # Guard against tagging a commit whose project() version disagrees
+      # with the tag — the CLI banner shipped three releases reporting
+      # v1.2.0 because nothing checked this.
+      - name: Verify tag matches project version
+        run: |
+          V=$(sed -n 's/^project(vmavificient VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          if [ "v$V" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match project VERSION $V"
+            exit 1
+          fi
+
       # Only fetch the static release binary — the vmavificient-build
       # artifact (used by encode-test) contains a bin/ subdirectory that
       # would cause `shasum -a 256 *` to fail with "Is a directory".
