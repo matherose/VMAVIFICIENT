@@ -200,250 +200,10 @@ int main(int argc, char *argv[]) {
       goto out;
     }
 
-    /* ---- Subtitle processing ---- */
-    char srt_paths[64][4096];
-    char srt_names[64][256];
-    char srt_langs[64][64];
-    int srt_is_forced[64];
-    int srt_is_sdh[64];
-    int srt_variant[64]; /* FrenchVariant per track (0 = unknown/non-French)
-                          */
-    int srt_count = 0;
-    int sub_split_fre = (ctx->resolved_lang_tag == LANG_TAG_MULTI_VF2) ? 1 : 0;
-
-    if (ctx->tracks.error == 0 && ctx->tracks.subtitle_count > 0 && !ctx->opt.dry_run &&
-        !ctx->opt.grain_only) {
-      ui_section("Subtitles");
-      int n_sub_process = 0;
-      for (int i = 0; i < ctx->tracks.subtitle_count; i++)
-        if (!ctx->tracks.subtitles[i].is_karaoke)
-          n_sub_process++;
-      ui_kv("Process", "%d source track%s", n_sub_process, n_sub_process == 1 ? "" : "s");
-
-      for (int i = 0; i < ctx->tracks.subtitle_count && srt_count < 48; i++) {
-        TrackInfo *sub = &ctx->tracks.subtitles[i];
-        if (sub->is_karaoke)
-          continue;
-        const char *lang = sub->language[0] ? sub->language : "und";
-
-        /* Per-track French variant so VF2 sources keep VFF and VFQ
-           subtitles as separate .fre.fr.srt / .fre.ca.srt files. */
-        FrenchVariant track_fv = ctx->fv;
-        FrenchAudioOrigin track_origin = ctx->fr_audio_origin;
-        int track_variant_key = 0;
-        if (sub_split_fre && (strcmp(lang, "fre") == 0 || strcmp(lang, "fra") == 0)) {
-          FrenchVariant detected = (FrenchVariant)detect_track_french_variant(sub);
-          if (detected != FRENCH_VARIANT_UNKNOWN) {
-            track_fv = detected;
-            track_variant_key = (int)detected;
-            track_origin = (detected == FRENCH_VARIANT_VFQ)   ? FRENCH_AUDIO_VFQ
-                           : (detected == FRENCH_VARIANT_VFI) ? FRENCH_AUDIO_VFI
-                                                              : FRENCH_AUDIO_VFF;
-          }
-        }
-
-        if (is_text_subtitle(sub)) {
-          /* Text subtitle: extract directly to SRT via FFmpeg CLI */
-          char srt_fname[2048];
-          build_srt_filename(srt_fname, sizeof(srt_fname), ctx->base_name, lang, track_fv,
-                             sub->is_forced, sub->is_sdh);
-
-          /* Write SRT to cache directory */
-          char srt_cache_path[4096];
-          vmav_build_cache_path(ctx, srt_cache_path, sizeof(srt_cache_path), srt_fname);
-          snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s", srt_cache_path);
-
-          /* Build display name */
-          build_subtitle_track_name(srt_names[srt_count], sizeof(srt_names[0]), lang, 1,
-                                    sub->is_forced, sub->is_sdh, track_origin);
-          snprintf(srt_langs[srt_count], sizeof(srt_langs[0]), "%s", lang);
-          srt_is_forced[srt_count] = sub->is_forced;
-          srt_is_sdh[srt_count] = sub->is_sdh;
-          srt_variant[srt_count] = track_variant_key;
-
-          /* Check if SRT already exists */
-          struct stat srt_st;
-          if (stat(srt_paths[srt_count], &srt_st) == 0 && srt_st.st_size > 0) {
-            ui_stage_skip(srt_fname, "already exists");
-            srt_count++;
-          } else {
-            /* Extract text subtitle using ffmpeg command */
-            /* If already SRT (subrip), copy stream; else convert to srt. */
-            const char *codec_arg = (strcmp(sub->codec, "subrip") == 0) ? "copy" : "srt";
-            VmavCommand c;
-            vmav_cmd_init(&c);
-            vmav_cmd_arg(&c, "ffmpeg");
-            vmav_cmd_arg(&c, "-y");
-            vmav_cmd_arg(&c, "-loglevel");
-            vmav_cmd_arg(&c, "error");
-            vmav_cmd_arg(&c, "-i");
-            vmav_cmd_arg(&c, filepath);
-            vmav_cmd_arg(&c, "-map");
-            vmav_cmd_argf(&c, "0:%d", sub->index);
-            vmav_cmd_arg(&c, "-c:s");
-            vmav_cmd_arg(&c, codec_arg);
-            vmav_cmd_arg(&c, srt_paths[srt_count]);
-
-            ui_row("Extract  #%-2d  %s  %s  →  \"%s\"", sub->index, lang, sub->codec,
-                   srt_names[srt_count]);
-
-            int exit_code = vmav_run(c.argv);
-            struct stat srt_out_st;
-            if (exit_code == 0 && stat(srt_paths[srt_count], &srt_out_st) == 0 &&
-                srt_out_st.st_size > 0) {
-              ui_stage_ok(srt_fname, NULL);
-              srt_count++;
-            } else if (exit_code == 0) {
-              /* ffmpeg succeeded but wrote no events (e.g. a forced track
-                 with nothing to force in this cut). An empty SRT is not a
-                 valid mux input, so drop it. */
-              remove(srt_paths[srt_count]);
-              ui_stage_skip(srt_fname, "no subtitle events in stream");
-            } else {
-              char err[128];
-              snprintf(err, sizeof(err), "stream #%d (%s, %s): ffmpeg rc=%d", sub->index, lang,
-                       sub->codec, exit_code);
-              ui_stage_fail("Subtitle extraction", err);
-              ui_hint("verify ffmpeg is on PATH and the stream codec is "
-                      "convertible to subrip");
-            }
-          }
-        } else if (is_pgs_subtitle(sub)) {
-          /* PGS bitmap subtitle: OCR with Tesseract */
-
-          /* Check if a text SRT already exists for this (lang, variant,
-             forced, sdh) — dedup is per variant so a VF2 source won't
-             drop a VFQ PGS when only a VFF SRT is present. */
-          bool srt_exists_for_lang = false;
-          for (int j = 0; j < srt_count; j++) {
-            if (strcmp(srt_langs[j], lang) == 0 && srt_variant[j] == track_variant_key &&
-                srt_is_forced[j] == sub->is_forced && srt_is_sdh[j] == sub->is_sdh) {
-              srt_exists_for_lang = true;
-              break;
-            }
-          }
-
-          if (srt_exists_for_lang) {
-            char skip_label[64];
-            snprintf(skip_label, sizeof(skip_label), "PGS #%d %s", sub->index, lang);
-            ui_stage_skip(skip_label, "SRT already available");
-            continue;
-          }
-
-          char srt_fname[2048];
-          build_srt_filename(srt_fname, sizeof(srt_fname), ctx->base_name, lang, track_fv,
-                             sub->is_forced, sub->is_sdh);
-
-          /* Write SRT to cache directory */
-          char srt_cache_path[4096];
-          vmav_build_cache_path(ctx, srt_cache_path, sizeof(srt_cache_path), srt_fname);
-          snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s", srt_cache_path);
-
-          build_subtitle_track_name(srt_names[srt_count], sizeof(srt_names[0]), lang, 1,
-                                    sub->is_forced, sub->is_sdh, track_origin);
-          snprintf(srt_langs[srt_count], sizeof(srt_langs[0]), "%s", lang);
-          srt_is_forced[srt_count] = sub->is_forced;
-          srt_is_sdh[srt_count] = sub->is_sdh;
-          srt_variant[srt_count] = track_variant_key;
-
-          ui_row("OCR      PGS #%-2d  %s  →  \"%s\"", sub->index, lang, srt_names[srt_count]);
-
-          SubtitleConvertResult scr = convert_pgs_to_srt(filepath, sub, srt_paths[srt_count], NULL);
-
-          if (scr.skipped) {
-            ui_stage_skip(srt_fname, "already exists");
-            srt_count++;
-          } else if (scr.error == 0 && scr.subtitle_count > 0) {
-            char detail[64];
-            snprintf(detail, sizeof(detail), "%d subtitles", scr.subtitle_count);
-            ui_stage_ok(srt_fname, detail);
-            srt_count++;
-          } else if (scr.error == 0) {
-            ui_stage_skip(srt_fname, "no subtitles extracted");
-          } else {
-            char err[128];
-            snprintf(err, sizeof(err), "PGS #%d (%s): OCR error %d", sub->index, lang, scr.error);
-            ui_stage_fail(srt_fname, err);
-            ui_hint("verify Tesseract has training data for the "
-                    "language ($TESSDATA_PREFIX/<lang>.traineddata)");
-          }
-        }
-      }
-    }
-
-    /* ---- Add user-supplied SRT files ---- */
-    for (int i = 0; i < ctx->opt.extra_srt_count && srt_count < 64; i++) {
-      snprintf(srt_paths[srt_count], sizeof(srt_paths[0]), "%s", ctx->opt.extra_srt_paths[i]);
-
-      /* Try to guess language from filename */
-      const char *srt_lang = "und";
-      if (strstr(ctx->opt.extra_srt_paths[i], ".fre.") ||
-          strstr(ctx->opt.extra_srt_paths[i], ".fra."))
-        srt_lang = "fre";
-      else if (strstr(ctx->opt.extra_srt_paths[i], ".eng."))
-        srt_lang = "eng";
-      else if (strstr(ctx->opt.extra_srt_paths[i], ".ger.") ||
-               strstr(ctx->opt.extra_srt_paths[i], ".deu."))
-        srt_lang = "ger";
-      else if (strstr(ctx->opt.extra_srt_paths[i], ".spa."))
-        srt_lang = "spa";
-      else if (strstr(ctx->opt.extra_srt_paths[i], ".ita."))
-        srt_lang = "ita";
-
-      int forced = (strstr(ctx->opt.extra_srt_paths[i], "forced") != NULL) ? 1 : 0;
-      int sdh = (strstr(ctx->opt.extra_srt_paths[i], "sdh") != NULL ||
-                 strstr(ctx->opt.extra_srt_paths[i], "SDH") != NULL)
-                    ? 1
-                    : 0;
-
-      build_subtitle_track_name(srt_names[srt_count], sizeof(srt_names[0]), srt_lang, 1, forced,
-                                sdh, ctx->fr_audio_origin);
-      snprintf(srt_langs[srt_count], sizeof(srt_langs[0]), "%s", srt_lang);
-      srt_is_forced[srt_count] = forced;
-      srt_is_sdh[srt_count] = sdh;
-      srt_variant[srt_count] = 0;
-
-      printf("  [SRT]  %s → \"%s\"\n", ctx->opt.extra_srt_paths[i], srt_names[srt_count]);
-      srt_count++;
-    }
-
-    /* ---- Sort subtitles: French Forced → French → English → Others ---- */
-    if (srt_count > 1) {
-      int order_idx[64];
-      int order_key[64];
-      for (int i = 0; i < srt_count; i++) {
-        order_idx[i] = i;
-        order_key[i] = vmav_sub_sort_key(srt_langs[i], srt_is_forced[i]);
-      }
-      /* Stable insertion sort */
-      for (int i = 1; i < srt_count; i++) {
-        int ki = order_key[i], ii = order_idx[i];
-        int j = i - 1;
-        while (j >= 0 && order_key[j] > ki) {
-          order_key[j + 1] = order_key[j];
-          order_idx[j + 1] = order_idx[j];
-          j--;
-        }
-        order_key[j + 1] = ki;
-        order_idx[j + 1] = ii;
-      }
-      /* Reorder parallel arrays */
-      char tmp_paths[64][4096], tmp_names[64][256], tmp_langs[64][64];
-      int tmp_forced[64];
-      int tmp_sdh[64];
-      memcpy(tmp_paths, srt_paths, sizeof(srt_paths));
-      memcpy(tmp_names, srt_names, sizeof(srt_names));
-      memcpy(tmp_langs, srt_langs, sizeof(srt_langs));
-      memcpy(tmp_forced, srt_is_forced, sizeof(tmp_forced));
-      memcpy(tmp_sdh, srt_is_sdh, sizeof(tmp_sdh));
-      for (int i = 0; i < srt_count; i++) {
-        int s = order_idx[i];
-        memcpy(srt_paths[i], tmp_paths[s], sizeof(srt_paths[0]));
-        memcpy(srt_names[i], tmp_names[s], sizeof(srt_names[0]));
-        memcpy(srt_langs[i], tmp_langs[s], sizeof(srt_langs[0]));
-        srt_is_forced[i] = tmp_forced[s];
-        srt_is_sdh[i] = tmp_sdh[s];
-      }
+    st = stage_subs(ctx);
+    if (st != STAGE_CONTINUE) {
+      rc = (st == STAGE_EXIT_FAIL) ? 1 : 0;
+      goto out;
     }
 
     /* ---- RPU extraction (Dolby Vision) ---- */
@@ -545,15 +305,15 @@ int main(int argc, char *argv[]) {
         /* Build mux subtitle descriptors */
         MuxSubtitleTrack mux_subs[64];
         int sub_default_set = 0;
-        for (int i = 0; i < srt_count && i < 64; i++) {
-          mux_subs[i].path = srt_paths[i];
-          mux_subs[i].language = srt_langs[i];
-          mux_subs[i].track_name = srt_names[i];
-          mux_subs[i].is_forced = srt_is_forced[i];
-          mux_subs[i].is_sdh = srt_is_sdh[i];
+        for (int i = 0; i < ctx->srt_count && i < 64; i++) {
+          mux_subs[i].path = ctx->srt_paths[i];
+          mux_subs[i].language = ctx->srt_langs[i];
+          mux_subs[i].track_name = ctx->srt_names[i];
+          mux_subs[i].is_forced = ctx->srt_is_forced[i];
+          mux_subs[i].is_sdh = ctx->srt_is_sdh[i];
           /* Only the first French forced subtitle is default */
-          if (!sub_default_set && srt_is_forced[i] &&
-              (strcmp(srt_langs[i], "fre") == 0 || strcmp(srt_langs[i], "fra") == 0)) {
+          if (!sub_default_set && ctx->srt_is_forced[i] &&
+              (strcmp(ctx->srt_langs[i], "fre") == 0 || strcmp(ctx->srt_langs[i], "fra") == 0)) {
             mux_subs[i].is_default = 1;
             sub_default_set = 1;
           } else {
@@ -567,7 +327,7 @@ int main(int argc, char *argv[]) {
             .audio = mux_audio,
             .audio_count = ctx->opus_count,
             .subs = mux_subs,
-            .sub_count = srt_count,
+            .sub_count = ctx->srt_count,
             .title = ctx->mkv_title,
             .video_title = ctx->mkv_title,
             .video_language = ctx->video_language,
@@ -575,8 +335,8 @@ int main(int argc, char *argv[]) {
         };
 
         ui_section("Final mux");
-        ui_kv("Inputs", "1 video + %d audio + %d subtitle track%s", ctx->opus_count, srt_count,
-              srt_count == 1 ? "" : "s");
+        ui_kv("Inputs", "1 video + %d audio + %d subtitle track%s", ctx->opus_count, ctx->srt_count,
+              ctx->srt_count == 1 ? "" : "s");
         time_t mux_t0 = time(NULL);
         FinalMuxResult mr = {.error = -1, .skipped = 0};
 
@@ -603,7 +363,7 @@ int main(int argc, char *argv[]) {
           } else {
             char err[128];
             snprintf(err, sizeof(err), "error %d (%d audio + %d sub inputs)", mr.error,
-                     ctx->opus_count, srt_count);
+                     ctx->opus_count, ctx->srt_count);
             ui_stage_fail(ctx->output_name, err);
             ui_hint("intermediates kept on disk; inspect them next to the "
                     "source file before re-running");
@@ -623,12 +383,12 @@ int main(int argc, char *argv[]) {
             for (int i = 0; i < ctx->opus_count; i++)
               if (remove(ctx->opus_paths[i]) == 0)
                 removed++;
-            for (int i = 0; i < srt_count; i++) {
+            for (int i = 0; i < ctx->srt_count; i++) {
               /* Skip user-supplied --srt files: they live outside ctx->output_dir
                  or weren't created by us. Only remove SRTs we wrote into
                  the output directory. */
-              if (strncmp(srt_paths[i], ctx->output_dir, strlen(ctx->output_dir)) == 0)
-                if (remove(srt_paths[i]) == 0)
+              if (strncmp(ctx->srt_paths[i], ctx->output_dir, strlen(ctx->output_dir)) == 0)
+                if (remove(ctx->srt_paths[i]) == 0)
                   removed++;
             }
           }
@@ -890,14 +650,14 @@ int main(int argc, char *argv[]) {
 
         MuxSubtitleTrack hd_mux_subs[64];
         int hd_sub_default_set = 0;
-        for (int i = 0; i < srt_count && i < 64; i++) {
-          hd_mux_subs[i].path = srt_paths[i];
-          hd_mux_subs[i].language = srt_langs[i];
-          hd_mux_subs[i].track_name = srt_names[i];
-          hd_mux_subs[i].is_forced = srt_is_forced[i];
-          hd_mux_subs[i].is_sdh = srt_is_sdh[i];
-          if (!hd_sub_default_set && srt_is_forced[i] &&
-              (strcmp(srt_langs[i], "fre") == 0 || strcmp(srt_langs[i], "fra") == 0)) {
+        for (int i = 0; i < ctx->srt_count && i < 64; i++) {
+          hd_mux_subs[i].path = ctx->srt_paths[i];
+          hd_mux_subs[i].language = ctx->srt_langs[i];
+          hd_mux_subs[i].track_name = ctx->srt_names[i];
+          hd_mux_subs[i].is_forced = ctx->srt_is_forced[i];
+          hd_mux_subs[i].is_sdh = ctx->srt_is_sdh[i];
+          if (!hd_sub_default_set && ctx->srt_is_forced[i] &&
+              (strcmp(ctx->srt_langs[i], "fre") == 0 || strcmp(ctx->srt_langs[i], "fra") == 0)) {
             hd_mux_subs[i].is_default = 1;
             hd_sub_default_set = 1;
           } else {
@@ -911,7 +671,7 @@ int main(int argc, char *argv[]) {
             .audio = hd_mux_audio,
             .audio_count = ctx->opus_count,
             .subs = hd_mux_subs,
-            .sub_count = srt_count,
+            .sub_count = ctx->srt_count,
             .title = ctx->mkv_title,
             .video_title = ctx->mkv_title,
             .video_language = ctx->video_language,
@@ -919,8 +679,8 @@ int main(int argc, char *argv[]) {
         };
 
         ui_section(ctx->opt.companion_hd ? "HD final mux" : "Final mux");
-        ui_kv("Inputs", "1 video + %d audio + %d subtitle track%s", ctx->opus_count, srt_count,
-              srt_count == 1 ? "" : "s");
+        ui_kv("Inputs", "1 video + %d audio + %d subtitle track%s", ctx->opus_count, ctx->srt_count,
+              ctx->srt_count == 1 ? "" : "s");
         time_t hd_mux_t0 = time(NULL);
         FinalMuxResult hd_mr = {.error = -1, .skipped = 0};
 
@@ -948,7 +708,7 @@ int main(int argc, char *argv[]) {
           } else {
             char hd_mux_err[128];
             snprintf(hd_mux_err, sizeof(hd_mux_err), "error %d (%d audio + %d sub inputs)",
-                     hd_mr.error, ctx->opus_count, srt_count);
+                     hd_mr.error, ctx->opus_count, ctx->srt_count);
             ui_stage_fail(hd_output_name, hd_mux_err);
             ui_hint("intermediates kept on disk; inspect them next to the "
                     "source file before re-running");
@@ -964,9 +724,9 @@ int main(int argc, char *argv[]) {
             for (int i = 0; i < ctx->opus_count; i++)
               if (remove(ctx->opus_paths[i]) == 0)
                 hd_removed++;
-            for (int i = 0; i < srt_count; i++)
-              if (strncmp(srt_paths[i], ctx->output_dir, strlen(ctx->output_dir)) == 0)
-                if (remove(srt_paths[i]) == 0)
+            for (int i = 0; i < ctx->srt_count; i++)
+              if (strncmp(ctx->srt_paths[i], ctx->output_dir, strlen(ctx->output_dir)) == 0)
+                if (remove(ctx->srt_paths[i]) == 0)
                   hd_removed++;
           }
           if (remove(hd_av1_video_path) == 0)

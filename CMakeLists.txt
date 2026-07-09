@@ -982,6 +982,7 @@ add_executable(vmavificient
     src/pipeline/stage_grain.c
     src/pipeline/stage_naming.c
     src/pipeline/stage_audio.c
+    src/pipeline/stage_subs.c
     src/rpu_extract/rpu_extract.c
     src/subtitle_convert/subtitle_convert.c
     src/tmdb/tmdb.c
