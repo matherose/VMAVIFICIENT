@@ -18,25 +18,15 @@
 #define VMAV_VERSION "dev"
 #endif
 
-#include "audio_encode.h"
 #include "config.h"
-#include "crf_search.h"
 #include "encode_preset.h"
-#include "final_mux.h"
-#include "media_analysis.h"
-#include "media_crop.h"
 #include "media_hdr.h"
 #include "media_info.h"
 #include "media_naming.h"
 #include "media_tracks.h"
 #include "pipeline.h"
-#include "proc.h"
-#include "rpu_extract.h"
-#include "subtitle_convert.h"
-#include "tmdb.h"
 #include "ui.h"
 #include "utils.h"
-#include "video_encode.h"
 
 int main(int argc, char *argv[]) {
   init_logging();
