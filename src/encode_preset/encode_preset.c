@@ -974,7 +974,7 @@ int get_vmaf_target(QualityType quality, int video_height) {
   int is_4k = (video_height >= 2160);
   switch (quality) {
   case QUALITY_ANIMATION:
-    return is_4k ? 95 : 95;
+    return 95;
   case QUALITY_SUPER35_DIGITAL:
   case QUALITY_IMAX_DIGITAL:
     return is_4k ? 92 : 93;

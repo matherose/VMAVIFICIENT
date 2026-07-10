@@ -36,7 +36,7 @@ int check_dependencies(void) {
 
   for (size_t i = 0; i < sizeof(fflibs) / sizeof(fflibs[0]); i++) {
     if (fflibs[i].version == 0) {
-      fprintf(stderr, "Error: %s did not report a valid version.\n", fflibs[i].name);
+      (void)fprintf(stderr, "Error: %s did not report a valid version.\n", fflibs[i].name);
       return -1;
     }
   }

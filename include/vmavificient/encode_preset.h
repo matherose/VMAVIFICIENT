@@ -39,7 +39,7 @@ static_assert(QUALITY_IMAX_DIGITAL == 5, "Quality type enum invariant wrong");
 static_assert(QUALITY_IMAX_DIGITAL <= 7, "Max quality types fits in 3 bits");
 
 /* Preset is always 4 per design */
-static_assert(4 >= 0 && 4 <= 12, "SVT-AV1 preset 4 is valid range");
+static_assert((4 >= 0 && 4 <= 12) != 0, "SVT-AV1 preset 4 is valid range");
 
 /* Keyframe interval - must be positive */
 static_assert(300 > 0, "4K keyint must be positive");

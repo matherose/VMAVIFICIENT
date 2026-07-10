@@ -49,7 +49,7 @@ static LanguageTag ask_language_tag(const MediaTracks *tracks) {
          "  13) TRUEFRENCH    14) VO             15) VOST\n"
          "  16) FANSUB\n"
          "Choice [1-16]: ");
-  fflush(stdout);
+  (void)fflush(stdout);
 
   char line[16];
   if (!fgets(line, sizeof(line), stdin))
@@ -103,7 +103,7 @@ static SourceType ask_source(void) {
          "   7) WEB-DL        8) WEB             9) HDTV\n"
          "  10) HDRip         11) TVRip          12) VHSRip\n"
          "Choice [1-12]: ");
-  fflush(stdout);
+  (void)fflush(stdout);
 
   char line[16];
   if (!fgets(line, sizeof(line), stdin))
@@ -147,7 +147,7 @@ static int ask_positive_int(const char *prompt, int *out) {
   char line[16];
   for (int tries = 0; tries < 3; tries++) {
     printf("%s", prompt);
-    fflush(stdout);
+    (void)fflush(stdout);
     if (!fgets(line, sizeof(line), stdin))
       return -1;
     int v = vmav_parse_int_or_zero(line);
@@ -194,7 +194,8 @@ StageStatus stage_naming(PipelineCtx *ctx) {
       ctx->video_language = ctx->tracks.audio[0].language;
 
     return STAGE_CONTINUE;
-  } else if (ctx->opt.tmdb_id > 0) {
+  }
+  if (ctx->opt.tmdb_id > 0) {
     /* Common metadata, filled from the movie or TV endpoint. */
     char meta_title[512] = "";
     int meta_year = 0;
@@ -317,7 +318,7 @@ StageStatus stage_naming(PipelineCtx *ctx) {
 
       build_output_filename(ctx->output_name, sizeof(ctx->output_name), meta_title, meta_year,
                             ctx->resolved_lang_tag, &ctx->info, &ctx->hdr, ctx->source,
-                            ctx->opt.tv_mode ? &ep : NULL);
+                            (int)ctx->opt.tv_mode ? &ep : NULL);
 
       /* Strip .mkv to get base name. */
       snprintf(ctx->base_name, sizeof(ctx->base_name), "%s", ctx->output_name);
@@ -396,13 +397,12 @@ StageStatus stage_naming(PipelineCtx *ctx) {
     /* TMDB fetch failed: today main just skips the whole encode body and
        exits 0 at the bottom — preserve that behavior. */
     return STAGE_EXIT_OK;
-  } else {
-    /* Neither --blind nor --tmdb: without this branch the pipeline body
-       below is silently skipped and the program exits 0 after grain
-       analysis, having encoded nothing. */
-    ui_stage_fail("Naming", "no naming source: pass --tmdb <id> or --blind");
-    ui_hint("--tmdb <id> names from TMDB metadata; --blind names the "
-            "output <input-stem>.mkv next to the source");
-    return STAGE_EXIT_FAIL;
   }
+  /* Neither --blind nor --tmdb: without this branch the pipeline body
+     below is silently skipped and the program exits 0 after grain
+     analysis, having encoded nothing. */
+  ui_stage_fail("Naming", "no naming source: pass --tmdb <id> or --blind");
+  ui_hint("--tmdb <id> names from TMDB metadata; --blind names the "
+          "output <input-stem>.mkv next to the source");
+  return STAGE_EXIT_FAIL;
 }

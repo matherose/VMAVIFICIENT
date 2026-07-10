@@ -80,8 +80,8 @@ StageStatus stage_rate_plan(PipelineCtx *ctx, EncodePassParams *pass) {
   }
   if (ctx->grain.error == 0) {
     int is_anim = (ctx->opt.quality == QUALITY_ANIMATION);
-    const char *content_tier =
-        is_anim ? "animation" : (ctx->grain.grain_score >= 0.08 ? "grainy" : "clean");
+    const char *content_tier_if_live = ctx->grain.grain_score >= 0.08 ? "grainy" : "clean";
+    const char *content_tier = is_anim ? "animation" : content_tier_if_live;
     ui_kv("Grain", "level %d  (%s tier)", pass->film_grain, content_tier);
   }
   if (pass->crf > 0) {
@@ -102,9 +102,9 @@ StageStatus stage_rate_plan(PipelineCtx *ctx, EncodePassParams *pass) {
   /* For companion-hd, fall through so the HD plan section also renders
      before exiting.  For solo dry-run / grain-only, exit here. */
   if ((ctx->opt.dry_run || ctx->opt.grain_only) && !pass->dry_run_falls_through) {
-    ui_section(ctx->opt.grain_only ? "Grain-only" : "Dry run");
+    ui_section((int)ctx->opt.grain_only ? "Grain-only" : "Dry run");
     ui_row("No files written. Re-run without %s to encode.",
-           ctx->opt.grain_only ? "--grain-only" : "--dry-run");
+           (int)ctx->opt.grain_only ? "--grain-only" : "--dry-run");
     return STAGE_EXIT_OK;
   }
   ui_set_quiet(saved_quiet);

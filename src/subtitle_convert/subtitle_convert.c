@@ -332,7 +332,8 @@ static void parse_pgs_packet(PgsDisplaySet *ds, const uint8_t *data, int data_si
       break;
     }
 
-    case PGS_END:
+    case PGS_END: // NOLINT(bugprone-branch-clone) -- kept distinct from default to
+                  // document PGS_END as a known, intentional no-op segment type
       /* End of Display Set — nothing to do, ds is now complete */
       break;
 
@@ -492,14 +493,14 @@ static PIX *prepare_pix_for_ocr(PIX *src) {
 
   /* Scale: target ~3x for subtitle-sized bitmaps (typically 20-50px tall),
      or 2x for larger ones.  Tesseract is most accurate at ~40-80px x-height. */
-  float scale = 1.0f;
+  float scale = 1.0F;
   int ph = pixGetHeight(padded);
   if (ph < 60)
-    scale = 3.0f;
+    scale = 3.0F;
   else if (ph < 120)
-    scale = 2.0f;
+    scale = 2.0F;
 
-  if (scale > 1.0f) {
+  if (scale > 1.0F) {
     PIX *scaled = pixScale(padded, scale, scale);
     if (scaled) {
       pixDestroy(&padded);
@@ -612,8 +613,8 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path, const TrackInfo
 
   TessBaseAPI *tess = TessBaseAPICreate();
   if (TessBaseAPIInit3(tess, tessdata_path, tess_lang) != 0) {
-    fprintf(stderr, "  OCR Error: Tesseract init failed for lang '%s'\n", tess_lang);
-    fprintf(stderr, "  Make sure tessdata is installed for this language.\n");
+    (void)fprintf(stderr, "  OCR Error: Tesseract init failed for lang '%s'\n", tess_lang);
+    (void)fprintf(stderr, "  Make sure tessdata is installed for this language.\n");
     TessBaseAPIDelete(tess);
     result.error = -1;
     return result;
@@ -630,10 +631,15 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path, const TrackInfo
   char errbuf[AV_ERROR_MAX_STRING_SIZE];
   int ret;
 
+  /* PGS display set accumulator — initialized here, before the first
+     `goto cleanup` below, since the cleanup path always resets it. */
+  PgsDisplaySet ds;
+  pgs_ds_init(&ds);
+
   ret = avformat_open_input(&ifmt_ctx, input_path, NULL, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "  OCR Error: cannot open '%s': %s\n", input_path, errbuf);
+    (void)fprintf(stderr, "  OCR Error: cannot open '%s': %s\n", input_path, errbuf);
     result.error = ret;
     goto cleanup;
   }
@@ -645,7 +651,7 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path, const TrackInfo
   }
 
   if (track->index < 0 || (unsigned)track->index >= ifmt_ctx->nb_streams) {
-    fprintf(stderr, "  OCR Error: stream index %d out of range\n", track->index);
+    (void)fprintf(stderr, "  OCR Error: stream index %d out of range\n", track->index);
     result.error = -1;
     goto cleanup;
   }
@@ -655,7 +661,7 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path, const TrackInfo
   /* Open SRT output file */
   srt_fp = fopen(output_path, "w");
   if (!srt_fp) {
-    fprintf(stderr, "  OCR Error: cannot create '%s'\n", output_path);
+    (void)fprintf(stderr, "  OCR Error: cannot create '%s'\n", output_path);
     result.error = -1;
     goto cleanup;
   }
@@ -675,10 +681,6 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path, const TrackInfo
   ui_progress_start(&progress, (long long)duration_ms);
   time_t last_progress = 0;
   int sub_index = 0;
-
-  /* PGS display set accumulator */
-  PgsDisplaySet ds;
-  pgs_ds_init(&ds);
 
   /* Previous display set for timestamps (end time = start of next) */
   int64_t prev_pts_ms = -1;
@@ -716,7 +718,7 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path, const TrackInfo
             char start_str[32], end_str[32];
             format_srt_time(start_str, sizeof(start_str), prev_pts_ms);
             format_srt_time(end_str, sizeof(end_str), end_ms);
-            fprintf(srt_fp, "%d\n%s --> %s\n%s\n\n", sub_index, start_str, end_str, text);
+            (void)fprintf(srt_fp, "%d\n%s --> %s\n%s\n\n", sub_index, start_str, end_str, text);
           }
         }
         if (text)
@@ -761,7 +763,7 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path, const TrackInfo
             char start_str[32], end_str[32];
             format_srt_time(start_str, sizeof(start_str), prev_pts_ms);
             format_srt_time(end_str, sizeof(end_str), end_ms);
-            fprintf(srt_fp, "%d\n%s --> %s\n%s\n\n", sub_index, start_str, end_str, text);
+            (void)fprintf(srt_fp, "%d\n%s --> %s\n%s\n\n", sub_index, start_str, end_str, text);
           }
         }
         if (text)
@@ -799,7 +801,7 @@ SubtitleConvertResult convert_pgs_to_srt(const char *input_path, const TrackInfo
         char start_str[32], end_str[32];
         format_srt_time(start_str, sizeof(start_str), prev_pts_ms);
         format_srt_time(end_str, sizeof(end_str), end_ms);
-        fprintf(srt_fp, "%d\n%s --> %s\n%s\n\n", sub_index, start_str, end_str, text);
+        (void)fprintf(srt_fp, "%d\n%s --> %s\n%s\n\n", sub_index, start_str, end_str, text);
       }
     }
     if (text)
@@ -821,8 +823,10 @@ cleanup:
 
   if (pkt)
     av_packet_free(&pkt);
-  if (srt_fp)
-    fclose(srt_fp);
+  if (srt_fp && fclose(srt_fp) != 0 && result.error == 0) {
+    (void)fprintf(stderr, "  Subtitle Error: failed to finalize '%s'\n", output_path);
+    result.error = -1;
+  }
   if (ifmt_ctx)
     avformat_close_input(&ifmt_ctx);
 
@@ -831,7 +835,7 @@ cleanup:
 
   /* Remove output on failure */
   if (result.error != 0 && !result.skipped)
-    remove(output_path);
+    (void)remove(output_path); /* best-effort cleanup */
 
   return result;
 }

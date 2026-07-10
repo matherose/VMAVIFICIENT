@@ -54,7 +54,7 @@ static void svt_probe_log_callback(void *ctx, SvtAv1LogLevel level, const char *
   (void)tag;
   if (!ui_is_verbose())
     return;
-  vfprintf(stderr, fmt, args);
+  (void)vfprintf(stderr, fmt, args);
 }
 
 /* ====================================================================== */
@@ -202,8 +202,8 @@ static int build_vfilter(Source *s, const char *vfilter_expr, VFilter *vf) {
                                   ? s->dec->pix_fmt
                                   : (enum AVPixelFormat)st->codecpar->format;
   if (in_fmt == AV_PIX_FMT_NONE) {
-    fprintf(stderr, "crf_search: build_vfilter: unknown source pix_fmt (dec=%d, par=%d)\n",
-            s->dec->pix_fmt, st->codecpar->format);
+    (void)fprintf(stderr, "crf_search: build_vfilter: unknown source pix_fmt (dec=%d, par=%d)\n",
+                  s->dec->pix_fmt, st->codecpar->format);
     return -1;
   }
 
@@ -215,20 +215,21 @@ static int build_vfilter(Source *s, const char *vfilter_expr, VFilter *vf) {
   const AVFilter *bsrc = avfilter_get_by_name("buffer");
   const AVFilter *bsink = avfilter_get_by_name("buffersink");
   if (!bsrc || !bsink) {
-    fprintf(stderr, "crf_search: build_vfilter: buffer/buffersink filter not found\n");
+    (void)fprintf(stderr, "crf_search: build_vfilter: buffer/buffersink filter not found\n");
     return -1;
   }
 
   int r = avfilter_graph_create_filter(&vf->src, bsrc, "in", src_args, NULL, vf->graph);
   if (r < 0) {
-    fprintf(stderr, "crf_search: build_vfilter: create buffer failed (%d) args=%s\n", r, src_args);
+    (void)fprintf(stderr, "crf_search: build_vfilter: create buffer failed (%d) args=%s\n", r,
+                  src_args);
     return -1;
   }
   /* buffersink: alloc uninitialized → set pix_fmts → init. Options can't
    * be set on an already-initialized filter. */
   vf->sink = avfilter_graph_alloc_filter(vf->graph, bsink, "out");
   if (!vf->sink) {
-    fprintf(stderr, "crf_search: build_vfilter: alloc buffersink failed\n");
+    (void)fprintf(stderr, "crf_search: build_vfilter: alloc buffersink failed\n");
     return -1;
   }
 
@@ -236,20 +237,20 @@ static int build_vfilter(Source *s, const char *vfilter_expr, VFilter *vf) {
   r = av_opt_set_array(vf->sink, "pixel_formats", AV_OPT_SEARCH_CHILDREN, 0, 1,
                        AV_OPT_TYPE_PIXEL_FMT, pixfmts);
   if (r < 0) {
-    fprintf(stderr, "crf_search: build_vfilter: set pix_fmts failed (%d)\n", r);
+    (void)fprintf(stderr, "crf_search: build_vfilter: set pix_fmts failed (%d)\n", r);
     return -1;
   }
   r = avfilter_init_str(vf->sink, NULL);
   if (r < 0) {
-    fprintf(stderr, "crf_search: build_vfilter: init buffersink failed (%d)\n", r);
+    (void)fprintf(stderr, "crf_search: build_vfilter: init buffersink failed (%d)\n", r);
     return -1;
   }
 
   if (!vfilter_expr || !*vfilter_expr) {
     r = avfilter_link(vf->src, 0, vf->sink, 0);
     if (r < 0) {
-      fprintf(stderr, "crf_search: build_vfilter: avfilter_link failed (%d, in_fmt=%d %s)\n", r,
-              in_fmt, av_get_pix_fmt_name(in_fmt));
+      (void)fprintf(stderr, "crf_search: build_vfilter: avfilter_link failed (%d, in_fmt=%d %s)\n",
+                    r, in_fmt, av_get_pix_fmt_name(in_fmt));
       return -1;
     }
   } else {
@@ -272,8 +273,8 @@ static int build_vfilter(Source *s, const char *vfilter_expr, VFilter *vf) {
     avfilter_inout_free(&outputs);
     avfilter_inout_free(&inputs);
     if (r < 0) {
-      fprintf(stderr, "crf_search: build_vfilter: graph_parse_ptr failed (%d, expr=%s)\n", r,
-              vfilter_expr);
+      (void)fprintf(stderr, "crf_search: build_vfilter: graph_parse_ptr failed (%d, expr=%s)\n", r,
+                    vfilter_expr);
       return -1;
     }
   }
@@ -282,8 +283,8 @@ static int build_vfilter(Source *s, const char *vfilter_expr, VFilter *vf) {
   if (r < 0) {
     char errbuf[256] = {0};
     av_strerror(r, errbuf, sizeof(errbuf));
-    fprintf(stderr, "crf_search: build_vfilter: graph_config failed (%d: %s) args=%s\n", r, errbuf,
-            src_args);
+    (void)fprintf(stderr, "crf_search: build_vfilter: graph_config failed (%d: %s) args=%s\n", r,
+                  errbuf, src_args);
     return -1;
   }
 
@@ -395,17 +396,17 @@ static int encode_sample(const char *input_path, int64_t start_frame, int frames
   bool svt_inited = false;
 
   if (open_source(input_path, &src) != 0) {
-    fprintf(stderr, "crf_search: encode_sample: open_source failed\n");
+    (void)fprintf(stderr, "crf_search: encode_sample: open_source failed\n");
     goto done;
   }
   if (seek_to_frame(&src, start_frame) != 0) {
-    fprintf(stderr, "crf_search: encode_sample: seek_to_frame %lld failed\n",
-            (long long)start_frame);
+    (void)fprintf(stderr, "crf_search: encode_sample: seek_to_frame %lld failed\n",
+                  (long long)start_frame);
     goto done;
   }
   if (build_vfilter(&src, vfilter_expr, &vf) != 0) {
-    fprintf(stderr, "crf_search: encode_sample: build_vfilter failed (expr=%s)\n",
-            vfilter_expr ? vfilter_expr : "(null)");
+    (void)fprintf(stderr, "crf_search: encode_sample: build_vfilter failed (expr=%s)\n",
+                  vfilter_expr ? vfilter_expr : "(null)");
     goto done;
   }
 
@@ -413,7 +414,7 @@ static int encode_sample(const char *input_path, int64_t start_frame, int frames
   memset(&cfg, 0, sizeof(cfg));
   EbErrorType svt_rc = svt_av1_enc_init_handle(&svt, &cfg);
   if (svt_rc != EB_ErrorNone) {
-    fprintf(stderr, "crf_search: svt_av1_enc_init_handle failed (%d)\n", svt_rc);
+    (void)fprintf(stderr, "crf_search: svt_av1_enc_init_handle failed (%d)\n", svt_rc);
     goto done;
   }
   svt_inited = true;
@@ -431,13 +432,13 @@ static int encode_sample(const char *input_path, int64_t start_frame, int frames
 
   svt_rc = svt_av1_enc_set_parameter(svt, &cfg);
   if (svt_rc != EB_ErrorNone) {
-    fprintf(stderr, "crf_search: svt_av1_enc_set_parameter failed (%d) — %dx%d, crf=%d\n", svt_rc,
-            vf.out_w, vf.out_h, crf);
+    (void)fprintf(stderr, "crf_search: svt_av1_enc_set_parameter failed (%d) — %dx%d, crf=%d\n",
+                  svt_rc, vf.out_w, vf.out_h, crf);
     goto done;
   }
   svt_rc = svt_av1_enc_init(svt);
   if (svt_rc != EB_ErrorNone) {
-    fprintf(stderr, "crf_search: svt_av1_enc_init failed (%d)\n", svt_rc);
+    (void)fprintf(stderr, "crf_search: svt_av1_enc_init failed (%d)\n", svt_rc);
     goto done;
   }
 
@@ -454,15 +455,17 @@ static int encode_sample(const char *input_path, int64_t start_frame, int frames
     int r = av_read_frame(src.ifmt, pkt);
     if (r == AVERROR_EOF) {
       src_eof = true;
-    } else if (r < 0)
+    } else if (r < 0) {
       goto done;
+    }
 
     if (r >= 0 && pkt->stream_index != src.video_idx) {
       av_packet_unref(pkt);
       continue;
     }
 
-    int sent = src_eof ? avcodec_send_packet(src.dec, NULL) : avcodec_send_packet(src.dec, pkt);
+    int sent =
+        (int)src_eof ? avcodec_send_packet(src.dec, NULL) : avcodec_send_packet(src.dec, pkt);
     av_packet_unref(pkt);
     if (sent < 0 && sent != AVERROR_EOF)
       goto done;
@@ -590,32 +593,32 @@ static int score_sample(const char *input_path, int64_t start_frame, int frames,
   int frames_scored = 0;
 
   if (open_source(input_path, &src) != 0) {
-    fprintf(stderr, "crf_search: score_sample: open_source failed\n");
+    (void)fprintf(stderr, "crf_search: score_sample: open_source failed\n");
     goto done;
   }
   if (seek_to_frame(&src, start_frame) != 0) {
-    fprintf(stderr, "crf_search: score_sample: seek failed\n");
+    (void)fprintf(stderr, "crf_search: score_sample: seek failed\n");
     goto done;
   }
   if (build_vfilter(&src, vfilter_expr, &vf) != 0) {
-    fprintf(stderr, "crf_search: score_sample: build_vfilter failed\n");
+    (void)fprintf(stderr, "crf_search: score_sample: build_vfilter failed\n");
     goto done;
   }
 
   const AVCodec *av1_codec = avcodec_find_decoder(AV_CODEC_ID_AV1);
   if (!av1_codec) {
-    fprintf(stderr, "crf_search: avcodec_find_decoder(AV_CODEC_ID_AV1) returned NULL\n");
+    (void)fprintf(stderr, "crf_search: avcodec_find_decoder(AV_CODEC_ID_AV1) returned NULL\n");
     goto done;
   }
   av1_dec = avcodec_alloc_context3(av1_codec);
   if (!av1_dec) {
-    fprintf(stderr, "crf_search: avcodec_alloc_context3(AV1) failed\n");
+    (void)fprintf(stderr, "crf_search: avcodec_alloc_context3(AV1) failed\n");
     goto done;
   }
   av1_dec->thread_count = 0;
   int oc = avcodec_open2(av1_dec, av1_codec, NULL);
   if (oc < 0) {
-    fprintf(stderr, "crf_search: avcodec_open2(AV1) failed (%d)\n", oc);
+    (void)fprintf(stderr, "crf_search: avcodec_open2(AV1) failed (%d)\n", oc);
     goto done;
   }
 
@@ -643,7 +646,8 @@ static int score_sample(const char *input_path, int64_t start_frame, int frames,
       continue;
     }
 
-    int sent = src_eof ? avcodec_send_packet(src.dec, NULL) : avcodec_send_packet(src.dec, pkt_src);
+    int sent =
+        (int)src_eof ? avcodec_send_packet(src.dec, NULL) : avcodec_send_packet(src.dec, pkt_src);
     av_packet_unref(pkt_src);
     if (sent < 0 && sent != AVERROR_EOF)
       goto done;
@@ -781,20 +785,20 @@ static int run_trial(const char *input_path, const EncodePreset *p, int film_gra
   };
   int vr = vmaf_init(&vmaf, cfg);
   if (vr < 0) {
-    fprintf(stderr, "crf_search: vmaf_init failed (%d)\n", vr);
+    (void)fprintf(stderr, "crf_search: vmaf_init failed (%d)\n", vr);
     return -1;
   }
 
   VmafModelConfig mcfg = {.name = "vmaf"};
   vr = vmaf_model_load(&model, &mcfg, "vmaf_v0.6.1");
   if (vr < 0) {
-    fprintf(stderr, "crf_search: vmaf_model_load(vmaf_v0.6.1) failed (%d)\n", vr);
+    (void)fprintf(stderr, "crf_search: vmaf_model_load(vmaf_v0.6.1) failed (%d)\n", vr);
     vmaf_close(vmaf);
     return -1;
   }
   vr = vmaf_use_features_from_model(vmaf, model);
   if (vr < 0) {
-    fprintf(stderr, "crf_search: vmaf_use_features_from_model failed (%d)\n", vr);
+    (void)fprintf(stderr, "crf_search: vmaf_use_features_from_model failed (%d)\n", vr);
     vmaf_model_destroy(model);
     vmaf_close(vmaf);
     return -1;
@@ -816,8 +820,9 @@ static int run_trial(const char *input_path, const EncodePreset *p, int film_gra
       break;
     }
     if (av1.num == 0) {
-      fprintf(stderr, "crf_search: encode_sample produced 0 packets at sample %d (start=%lld)\n", s,
-              (long long)sample_starts[s]);
+      (void)fprintf(stderr,
+                    "crf_search: encode_sample produced 0 packets at sample %d (start=%lld)\n", s,
+                    (long long)sample_starts[s]);
       pl_free(&av1);
       trial_rc = -1;
       break;
@@ -827,8 +832,9 @@ static int run_trial(const char *input_path, const EncodePreset *p, int film_gra
     int sr = score_sample(input_path, sample_starts[s], frames_per_sample, vfilter, &av1, vmaf,
                           total_scored, &scored);
     if (sr != 0)
-      fprintf(stderr, "crf_search: score_sample failed at sample %d (%d packets, scored %d)\n", s,
-              av1.num, scored);
+      (void)fprintf(stderr,
+                    "crf_search: score_sample failed at sample %d (%d packets, scored %d)\n", s,
+                    av1.num, scored);
     pl_free(&av1);
     if (sr != 0) {
       trial_rc = -1;
@@ -840,7 +846,7 @@ static int run_trial(const char *input_path, const EncodePreset *p, int film_gra
   if (trial_rc == 0) {
     vr = vmaf_read_pictures(vmaf, NULL, NULL, 0);
     if (vr < 0) {
-      fprintf(stderr, "crf_search: vmaf_read_pictures(flush) failed (%d)\n", vr);
+      (void)fprintf(stderr, "crf_search: vmaf_read_pictures(flush) failed (%d)\n", vr);
       trial_rc = -1;
     }
   }
@@ -850,7 +856,8 @@ static int run_trial(const char *input_path, const EncodePreset *p, int film_gra
     vr =
         vmaf_score_pooled(vmaf, model, VMAF_POOL_METHOD_HARMONIC_MEAN, &score, 0, total_scored - 1);
     if (vr < 0) {
-      fprintf(stderr, "crf_search: vmaf_score_pooled failed (%d, scored=%u)\n", vr, total_scored);
+      (void)fprintf(stderr, "crf_search: vmaf_score_pooled failed (%d, scored=%u)\n", vr,
+                    total_scored);
       trial_rc = -1;
     }
   }
@@ -860,7 +867,7 @@ static int run_trial(const char *input_path, const EncodePreset *p, int film_gra
 
   if (trial_rc != 0 || total_scored == 0) {
     if (total_scored == 0)
-      fprintf(stderr, "crf_search: no frames scored across %d sample(s)\n", nsamples);
+      (void)fprintf(stderr, "crf_search: no frames scored across %d sample(s)\n", nsamples);
     return -1;
   }
   *out_vmaf = score;

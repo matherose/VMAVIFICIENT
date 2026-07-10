@@ -1,5 +1,6 @@
 /* If nftw needs it under strict -std=c11 (CMAKE_C_EXTENSIONS is OFF), this
    must come before ALL includes: */
+// NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp,readability-identifier-naming)
 #define _XOPEN_SOURCE 700
 
 #include "proc.h"
@@ -20,7 +21,7 @@ int vmav_run(char *const argv[]) {
   pid_t pid;
   int rc = posix_spawnp(&pid, argv[0], NULL, NULL, argv, environ);
   if (rc != 0) {
-    fprintf(stderr, "  Error: cannot spawn '%s': %s\n", argv[0], strerror(rc));
+    (void)fprintf(stderr, "  Error: cannot spawn '%s': %s\n", argv[0], strerror(rc));
     return -1;
   }
   int status;

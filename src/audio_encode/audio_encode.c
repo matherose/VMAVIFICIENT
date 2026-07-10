@@ -50,13 +50,13 @@ int verify_opus_file(const char *path) {
   AVFormatContext *fmt_ctx = NULL;
   int ret = avformat_open_input(&fmt_ctx, path, NULL, NULL);
   if (ret < 0) {
-    fprintf(stderr, "  Verify: cannot open '%s'\n", path);
+    (void)fprintf(stderr, "  Verify: cannot open '%s'\n", path);
     return ret;
   }
 
   ret = avformat_find_stream_info(fmt_ctx, NULL);
   if (ret < 0) {
-    fprintf(stderr, "  Verify: cannot read stream info from '%s'\n", path);
+    (void)fprintf(stderr, "  Verify: cannot read stream info from '%s'\n", path);
     avformat_close_input(&fmt_ctx);
     return ret;
   }
@@ -72,7 +72,7 @@ int verify_opus_file(const char *path) {
   }
 
   if (!found_opus) {
-    fprintf(stderr, "  Verify: no OPUS audio stream in '%s'\n", path);
+    (void)fprintf(stderr, "  Verify: no OPUS audio stream in '%s'\n", path);
     avformat_close_input(&fmt_ctx);
     return -1;
   }
@@ -89,7 +89,7 @@ int verify_opus_file(const char *path) {
   avformat_close_input(&fmt_ctx);
 
   if (packets_read == 0) {
-    fprintf(stderr, "  Verify: no packets readable from '%s'\n", path);
+    (void)fprintf(stderr, "  Verify: no packets readable from '%s'\n", path);
     return -1;
   }
 
@@ -208,28 +208,28 @@ OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *t
   /* ── Open input ── */
   ret = avformat_open_input(&ifmt_ctx, input_path, NULL, NULL);
   if (ret < 0) {
-    fprintf(stderr, "  Error: cannot open input '%s'\n", input_path);
+    (void)fprintf(stderr, "  Error: cannot open input '%s'\n", input_path);
     result.error = ret;
     goto cleanup;
   }
 
   ret = avformat_find_stream_info(ifmt_ctx, NULL);
   if (ret < 0) {
-    fprintf(stderr, "  Error: cannot probe input streams\n");
+    (void)fprintf(stderr, "  Error: cannot probe input streams\n");
     result.error = ret;
     goto cleanup;
   }
 
   /* Find the target audio stream. */
   if (track->index < 0 || (unsigned)track->index >= ifmt_ctx->nb_streams) {
-    fprintf(stderr, "  Error: stream index %d out of range\n", track->index);
+    (void)fprintf(stderr, "  Error: stream index %d out of range\n", track->index);
     result.error = -1;
     goto cleanup;
   }
 
   AVStream *in_stream = ifmt_ctx->streams[track->index];
   if (in_stream->codecpar->codec_type != AVMEDIA_TYPE_AUDIO) {
-    fprintf(stderr, "  Error: stream %d is not audio\n", track->index);
+    (void)fprintf(stderr, "  Error: stream %d is not audio\n", track->index);
     result.error = -1;
     goto cleanup;
   }
@@ -237,8 +237,8 @@ OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *t
   /* ── Set up decoder ── */
   const AVCodec *decoder = avcodec_find_decoder(in_stream->codecpar->codec_id);
   if (!decoder) {
-    fprintf(stderr, "  Error: no decoder for codec %s\n",
-            avcodec_get_name(in_stream->codecpar->codec_id));
+    (void)fprintf(stderr, "  Error: no decoder for codec %s\n",
+                  avcodec_get_name(in_stream->codecpar->codec_id));
     result.error = -1;
     goto cleanup;
   }
@@ -265,7 +265,7 @@ OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *t
 
   ret = avcodec_open2(dec_ctx, decoder, NULL);
   if (ret < 0) {
-    fprintf(stderr, "  Error: cannot open decoder\n");
+    (void)fprintf(stderr, "  Error: cannot open decoder\n");
     result.error = ret;
     goto cleanup;
   }
@@ -273,7 +273,7 @@ OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *t
   /* ── Set up OPUS encoder ── */
   const AVCodec *encoder = avcodec_find_encoder_by_name("libopus");
   if (!encoder) {
-    fprintf(stderr, "  Error: libopus encoder not found\n");
+    (void)fprintf(stderr, "  Error: libopus encoder not found\n");
     result.error = -1;
     goto cleanup;
   }
@@ -305,7 +305,7 @@ OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *t
 
   ret = avcodec_open2(enc_ctx, encoder, NULL);
   if (ret < 0) {
-    fprintf(stderr, "  Error: cannot open OPUS encoder (error %d)\n", ret);
+    (void)fprintf(stderr, "  Error: cannot open OPUS encoder (error %d)\n", ret);
     result.error = ret;
     goto cleanup;
   }
@@ -315,14 +315,14 @@ OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *t
       swr_alloc_set_opts2(&swr, &enc_ctx->ch_layout, AV_SAMPLE_FMT_FLT, 48000, &dec_ctx->ch_layout,
                           dec_ctx->sample_fmt, dec_ctx->sample_rate, 0, NULL);
   if (ret < 0 || !swr) {
-    fprintf(stderr, "  Error: cannot allocate resampler\n");
+    (void)fprintf(stderr, "  Error: cannot allocate resampler\n");
     result.error = ret < 0 ? ret : AVERROR(ENOMEM);
     goto cleanup;
   }
 
   ret = swr_init(swr);
   if (ret < 0) {
-    fprintf(stderr, "  Error: cannot init resampler\n");
+    (void)fprintf(stderr, "  Error: cannot init resampler\n");
     result.error = ret;
     goto cleanup;
   }
@@ -338,7 +338,7 @@ OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *t
   /* ── Open output muxer ── */
   ret = avformat_alloc_output_context2(&ofmt_ctx, NULL, "opus", output_path);
   if (ret < 0 || !ofmt_ctx) {
-    fprintf(stderr, "  Error: cannot create output context\n");
+    (void)fprintf(stderr, "  Error: cannot create output context\n");
     result.error = ret < 0 ? ret : AVERROR(ENOMEM);
     goto cleanup;
   }
@@ -359,7 +359,7 @@ OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *t
   if (!(ofmt_ctx->oformat->flags & AVFMT_NOFILE)) {
     ret = avio_open(&ofmt_ctx->pb, output_path, AVIO_FLAG_WRITE);
     if (ret < 0) {
-      fprintf(stderr, "  Error: cannot open output file '%s'\n", output_path);
+      (void)fprintf(stderr, "  Error: cannot open output file '%s'\n", output_path);
       result.error = ret;
       goto cleanup;
     }
@@ -367,7 +367,7 @@ OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *t
 
   ret = avformat_write_header(ofmt_ctx, NULL);
   if (ret < 0) {
-    fprintf(stderr, "  Error: cannot write output header\n");
+    (void)fprintf(stderr, "  Error: cannot write output header\n");
     result.error = ret;
     goto cleanup;
   }
@@ -420,7 +420,7 @@ OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *t
       ret = swr_convert_frame(swr, resampled, frame);
       av_frame_unref(frame);
       if (ret < 0) {
-        fprintf(stderr, "  Error: resample failed\n");
+        (void)fprintf(stderr, "  Error: resample failed\n");
         result.error = ret;
         goto cleanup;
       }
@@ -518,7 +518,7 @@ OpusEncodeResult encode_track_to_opus(const char *input_path, const TrackInfo *t
   /* ── Verify output ── */
   ret = verify_opus_file(output_path);
   if (ret < 0) {
-    fprintf(stderr, "  Warning: output verification failed for '%s'\n", output_path);
+    (void)fprintf(stderr, "  Warning: output verification failed for '%s'\n", output_path);
     result.error = ret;
   }
 
@@ -544,7 +544,7 @@ cleanup:
 
   /* Remove output on failure so partial files don't get reused. */
   if (result.error != 0 && !result.skipped)
-    remove(output_path);
+    (void)remove(output_path); /* best-effort cleanup */
 
   return result;
 }

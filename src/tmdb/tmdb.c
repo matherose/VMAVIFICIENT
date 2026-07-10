@@ -43,9 +43,9 @@ static size_t write_callback(void *contents, size_t size, size_t nmemb, void *us
 static cJSON *tmdb_get_json(const char *path) {
   const VmavConfig *cfg = config_get();
   if (!cfg->tmdb_api_key[0]) {
-    fprintf(stderr, "Error: TMDB API key not found.\n"
-                    "Set tmdb_api_key in config.ini (cwd or "
-                    "$HOME/.config/vmavificient/config.ini).\n");
+    (void)fprintf(stderr, "Error: TMDB API key not found.\n"
+                          "Set tmdb_api_key in config.ini (cwd or "
+                          "$HOME/.config/vmavificient/config.ini).\n");
     return NULL;
   }
 
@@ -54,7 +54,7 @@ static cJSON *tmdb_get_json(const char *path) {
 
   CURL *curl = curl_easy_init();
   if (!curl) {
-    fprintf(stderr, "Error: failed to initialize libcurl.\n");
+    (void)fprintf(stderr, "Error: failed to initialize libcurl.\n");
     return NULL;
   }
 
@@ -68,7 +68,7 @@ static cJSON *tmdb_get_json(const char *path) {
 
   CURLcode res = curl_easy_perform(curl);
   if (res != CURLE_OK) {
-    fprintf(stderr, "Error: TMDB request failed: %s\n", curl_easy_strerror(res));
+    (void)fprintf(stderr, "Error: TMDB request failed: %s\n", curl_easy_strerror(res));
     curl_easy_cleanup(curl);
     free(buf.data);
     return NULL;
@@ -79,7 +79,7 @@ static cJSON *tmdb_get_json(const char *path) {
   curl_easy_cleanup(curl);
 
   if (http_code != 200) {
-    fprintf(stderr, "Error: TMDB returned HTTP %ld for %s.\n", http_code, path);
+    (void)fprintf(stderr, "Error: TMDB returned HTTP %ld for %s.\n", http_code, path);
     free(buf.data);
     return NULL;
   }
@@ -87,7 +87,7 @@ static cJSON *tmdb_get_json(const char *path) {
   cJSON *json = cJSON_Parse(buf.data);
   free(buf.data);
   if (!json)
-    fprintf(stderr, "Error: failed to parse TMDB response.\n");
+    (void)fprintf(stderr, "Error: failed to parse TMDB response.\n");
   return json;
 }
 
@@ -102,8 +102,12 @@ static void copy_json_string(const cJSON *json, const char *key, char *out, size
 static int json_date_year(const cJSON *json, const char *key) {
   const cJSON *item = cJSON_GetObjectItem(json, key);
   int year = 0;
-  if (cJSON_IsString(item))
-    sscanf(item->valuestring, "%d-", &year);
+  if (cJSON_IsString(item)) {
+    char *end = NULL;
+    long parsed = strtol(item->valuestring, &end, 10);
+    if (end != item->valuestring)
+      year = (int)parsed;
+  }
   return year;
 }
 
@@ -127,7 +131,7 @@ TmdbMovieInfo tmdb_fetch_movie(int tmdb_id) {
   if (info.original_title[0] && info.release_year > 0 && info.original_language[0])
     info.error = 0;
   else
-    fprintf(stderr, "Error: TMDB response missing required fields.\n");
+    (void)fprintf(stderr, "Error: TMDB response missing required fields.\n");
 
   return info;
 }
@@ -154,7 +158,7 @@ TmdbTvInfo tmdb_fetch_tv(int tmdb_id) {
   if (info.original_name[0] && info.original_language[0])
     info.error = 0;
   else
-    fprintf(stderr, "Error: TMDB response missing required fields.\n");
+    (void)fprintf(stderr, "Error: TMDB response missing required fields.\n");
 
   return info;
 }

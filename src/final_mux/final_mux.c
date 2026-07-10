@@ -164,15 +164,15 @@ FinalMuxResult final_mux(const FinalMuxConfig *config) {
   vmav_cmd_arg(&c, config->output_path);
 
   if (c.overflow) {
-    fprintf(stderr, "  Mux Error: command buffer overflow\n");
+    (void)fprintf(stderr, "  Mux Error: command buffer overflow\n");
     result.error = -1;
     return result;
   }
 
   int exit_code = vmav_run(c.argv);
   if (exit_code != 0) {
-    fprintf(stderr, "  Mux Error: ffmpeg returned %d\n", exit_code);
-    remove(config->output_path);
+    (void)fprintf(stderr, "  Mux Error: ffmpeg returned %d\n", exit_code);
+    (void)remove(config->output_path); /* best-effort cleanup */
     result.error = exit_code;
     return result;
   }

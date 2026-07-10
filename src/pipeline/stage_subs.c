@@ -45,9 +45,12 @@ StageStatus stage_subs(PipelineCtx *ctx) {
         if (detected != FRENCH_VARIANT_UNKNOWN) {
           track_fv = detected;
           track_variant_key = (int)detected;
-          track_origin = (detected == FRENCH_VARIANT_VFQ)   ? FRENCH_AUDIO_VFQ
-                         : (detected == FRENCH_VARIANT_VFI) ? FRENCH_AUDIO_VFI
-                                                            : FRENCH_AUDIO_VFF;
+          if (detected == FRENCH_VARIANT_VFQ)
+            track_origin = FRENCH_AUDIO_VFQ;
+          else if (detected == FRENCH_VARIANT_VFI)
+            track_origin = FRENCH_AUDIO_VFI;
+          else
+            track_origin = FRENCH_AUDIO_VFF;
         }
       }
 
@@ -106,7 +109,7 @@ StageStatus stage_subs(PipelineCtx *ctx) {
             /* ffmpeg succeeded but wrote no events (e.g. a forced track
                with nothing to force in this cut). An empty SRT is not a
                valid mux input, so drop it. */
-            remove(ctx->srt_paths[ctx->srt_count]);
+            (void)remove(ctx->srt_paths[ctx->srt_count]); /* best-effort cleanup */
             ui_stage_skip(srt_fname, "no subtitle events in stream");
           } else {
             char err[128];

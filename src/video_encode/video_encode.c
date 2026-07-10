@@ -72,12 +72,12 @@ static void svt_log_callback(void *context, SvtAv1LogLevel level, const char *ta
   default:
     break;
   }
-  fprintf(stderr, "[svt-av1 %s%s%s] ", level_str, tag ? " " : "", tag ? tag : "");
-  vfprintf(stderr, fmt, args);
+  (void)fprintf(stderr, "[svt-av1 %s%s%s] ", level_str, tag ? " " : "", tag ? tag : "");
+  (void)vfprintf(stderr, fmt, args);
   /* SVT messages may or may not end with \n; don't double up. */
   size_t fmtlen = fmt ? strlen(fmt) : 0;
   if (fmtlen == 0 || fmt[fmtlen - 1] != '\n')
-    fputc('\n', stderr);
+    (void)fputc('\n', stderr);
 }
 
 /* ====================================================================== */
@@ -101,7 +101,7 @@ static RpuReader rpu_reader_open(const char *path) {
 
 static void rpu_reader_close(RpuReader *r) {
   if (r->fp) {
-    fclose(r->fp);
+    (void)fclose(r->fp); /* read-only stream */
     r->fp = NULL;
   }
 }
@@ -215,7 +215,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   int padded_h = (dst_h + 63) & ~63;
 
   if (dst_w < 64 || dst_h < 64) {
-    fprintf(stderr, "  Video Error: output dimensions %dx%d too small\n", dst_w, dst_h);
+    (void)fprintf(stderr, "  Video Error: output dimensions %dx%d too small\n", dst_w, dst_h);
     result.error = -1;
     return result;
   }
@@ -224,7 +224,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   ret = avformat_open_input(&ifmt_ctx, config->input_path, NULL, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "  Video Error: cannot open '%s': %s\n", config->input_path, errbuf);
+    (void)fprintf(stderr, "  Video Error: cannot open '%s': %s\n", config->input_path, errbuf);
     result.error = ret;
     return result;
   }
@@ -232,7 +232,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   ret = avformat_find_stream_info(ifmt_ctx, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "  Video Error: cannot read streams: %s\n", errbuf);
+    (void)fprintf(stderr, "  Video Error: cannot read streams: %s\n", errbuf);
     result.error = ret;
     goto cleanup;
   }
@@ -241,7 +241,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   const AVCodec *decoder = NULL;
   video_idx = av_find_best_stream(ifmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
   if (video_idx < 0) {
-    fprintf(stderr, "  Video Error: no video stream found\n");
+    (void)fprintf(stderr, "  Video Error: no video stream found\n");
     result.error = -1;
     goto cleanup;
   }
@@ -260,7 +260,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   ret = avcodec_open2(dec_ctx, decoder, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "  Video Error: cannot open decoder: %s\n", errbuf);
+    (void)fprintf(stderr, "  Video Error: cannot open decoder: %s\n", errbuf);
     result.error = ret;
     goto cleanup;
   }
@@ -279,7 +279,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   sws_ctx = sws_getContext(out_w, out_h, dec_ctx->pix_fmt, dst_w, dst_h, target_pix_fmt,
                            SWS_LANCZOS, NULL, NULL, NULL);
   if (!sws_ctx) {
-    fprintf(stderr, "  Video Error: cannot create swscale context\n");
+    (void)fprintf(stderr, "  Video Error: cannot create swscale context\n");
     result.error = -1;
     goto cleanup;
   }
@@ -289,7 +289,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   svt_av1_set_log_callback(svt_log_callback, NULL);
   ret = svt_av1_enc_init_handle(&svt_handle, &svt_config);
   if (ret != EB_ErrorNone) {
-    fprintf(stderr, "  Video Error: svt_av1_enc_init_handle failed (%d)\n", ret);
+    (void)fprintf(stderr, "  Video Error: svt_av1_enc_init_handle failed (%d)\n", ret);
     result.error = -1;
     goto cleanup;
   }
@@ -424,14 +424,14 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
 
   ret = svt_av1_enc_set_parameter(svt_handle, &svt_config);
   if (ret != EB_ErrorNone) {
-    fprintf(stderr, "  Video Error: svt_av1_enc_set_parameter failed (%d)\n", ret);
+    (void)fprintf(stderr, "  Video Error: svt_av1_enc_set_parameter failed (%d)\n", ret);
     result.error = -1;
     goto cleanup;
   }
 
   ret = svt_av1_enc_init(svt_handle);
   if (ret != EB_ErrorNone) {
-    fprintf(stderr, "  Video Error: svt_av1_enc_init failed (%d)\n", ret);
+    (void)fprintf(stderr, "  Video Error: svt_av1_enc_init failed (%d)\n", ret);
     result.error = -1;
     goto cleanup;
   }
@@ -439,7 +439,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
   /* ---- Set up output MKV muxer ---- */
   ret = avformat_alloc_output_context2(&ofmt_ctx, NULL, "matroska", config->output_path);
   if (ret < 0 || !ofmt_ctx) {
-    fprintf(stderr, "  Video Error: cannot create output context\n");
+    (void)fprintf(stderr, "  Video Error: cannot create output context\n");
     result.error = -1;
     goto cleanup;
   }
@@ -468,7 +468,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
     ret = avio_open(&ofmt_ctx->pb, config->output_path, AVIO_FLAG_WRITE);
     if (ret < 0) {
       av_make_error_string(errbuf, sizeof(errbuf), ret);
-      fprintf(stderr, "  Video Error: cannot open output '%s': %s\n", config->output_path, errbuf);
+      (void)fprintf(stderr, "  Video Error: cannot open output '%s': %s\n", config->output_path,
+                    errbuf);
       result.error = ret;
       goto cleanup;
     }
@@ -614,7 +615,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
       /* SVT-AV1 takes ownership of metadata via send_picture — do not free */
 
       if (ret != EB_ErrorNone) {
-        fprintf(stderr, "  Video Error: send_picture failed (%d)\n", ret);
+        (void)fprintf(stderr, "  Video Error: send_picture failed (%d)\n", ret);
         av_frame_unref(frame);
         result.error = -1;
         goto flush_encoder;
@@ -642,7 +643,7 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
             ret = avformat_write_header(ofmt_ctx, NULL);
             if (ret < 0) {
               av_make_error_string(errbuf, sizeof(errbuf), ret);
-              fprintf(stderr, "  Video Error: cannot write output header: %s\n", errbuf);
+              (void)fprintf(stderr, "  Video Error: cannot write output header: %s\n", errbuf);
               svt_av1_enc_release_out_buffer(&out_pkt);
               result.error = ret;
               goto cleanup;
@@ -878,7 +879,7 @@ cleanup:
 
   /* Remove output on failure */
   if (result.error != 0)
-    remove(config->output_path);
+    (void)remove(config->output_path); /* best-effort cleanup */
 
   return result;
 }

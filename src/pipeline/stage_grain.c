@@ -50,7 +50,7 @@ StageStatus stage_grain(PipelineCtx *ctx) {
       if (!ctx->opt.crf && !ctx->opt.bitrate) {
         if (!vmav_save_cached_scores(ctx->scores_cache_path, ctx->grain.grain_score,
                                      ctx->grain.grain_variance, 0)) {
-          fprintf(stderr, "Warning: failed to save scores to cache\n");
+          (void)fprintf(stderr, "Warning: failed to save scores to cache\n");
         } else {
           ui_stage_ok("Cache", "saved grain analysis scores");
         }

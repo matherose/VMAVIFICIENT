@@ -160,7 +160,7 @@ RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
   ret = avformat_open_input(&fmt_ctx, input_path, NULL, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "  RPU Error: cannot open '%s': %s\n", input_path, errbuf);
+    (void)fprintf(stderr, "  RPU Error: cannot open '%s': %s\n", input_path, errbuf);
     result.error = ret;
     return result;
   }
@@ -168,7 +168,7 @@ RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
   ret = avformat_find_stream_info(fmt_ctx, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "  RPU Error: cannot read streams: %s\n", errbuf);
+    (void)fprintf(stderr, "  RPU Error: cannot read streams: %s\n", errbuf);
     result.error = ret;
     goto cleanup;
   }
@@ -176,7 +176,7 @@ RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
   /* Find the video stream. */
   int video_idx = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
   if (video_idx < 0) {
-    fprintf(stderr, "  RPU Error: no video stream found\n");
+    (void)fprintf(stderr, "  RPU Error: no video stream found\n");
     result.error = -1;
     goto cleanup;
   }
@@ -185,8 +185,8 @@ RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
 
   /* Verify codec is HEVC. */
   if (video_stream->codecpar->codec_id != AV_CODEC_ID_HEVC) {
-    fprintf(stderr, "  RPU Error: video stream is not HEVC (codec: %s)\n",
-            avcodec_get_name(video_stream->codecpar->codec_id));
+    (void)fprintf(stderr, "  RPU Error: video stream is not HEVC (codec: %s)\n",
+                  avcodec_get_name(video_stream->codecpar->codec_id));
     result.error = -1;
     goto cleanup;
   }
@@ -194,7 +194,7 @@ RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
   /* Open output file. */
   out_fp = fopen(output_path, "wb");
   if (!out_fp) {
-    fprintf(stderr, "  RPU Error: cannot create '%s'\n", output_path);
+    (void)fprintf(stderr, "  RPU Error: cannot create '%s'\n", output_path);
     result.error = -1;
     goto cleanup;
   }
@@ -234,7 +234,7 @@ RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
         if (err) {
           /* Log but continue -- some RPUs may be recoverable. */
           if (result.rpu_count == 0)
-            fprintf(stderr, "  RPU Warning: parse error on first RPU: %s\n", err);
+            (void)fprintf(stderr, "  RPU Warning: parse error on first RPU: %s\n", err);
         } else {
           /* Write the raw RPU bytes. */
           const DoviData *data = dovi_write_rpu(rpu);
@@ -247,8 +247,16 @@ RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
             len_be[2] = (len32 >> 8) & 0xFF;
             len_be[3] = len32 & 0xFF;
 
-            fwrite(len_be, 1, 4, out_fp);
-            fwrite(data->data, 1, data->len, out_fp);
+            size_t wrote_hdr = fwrite(len_be, 1, 4, out_fp);
+            size_t wrote_data = fwrite(data->data, 1, data->len, out_fp);
+            if (wrote_hdr != 4 || wrote_data != data->len) {
+              (void)fprintf(stderr, "  RPU Error: failed to write RPU data to '%s'\n", output_path);
+              result.error = -1;
+              dovi_data_free(data);
+              dovi_rpu_free(rpu);
+              av_packet_unref(pkt);
+              break;
+            }
             result.rpu_count++;
 
             dovi_data_free(data);
@@ -280,16 +288,19 @@ RpuExtractResult extract_rpu(const char *input_path, const char *output_path) {
   }
 
   if (result.rpu_count == 0) {
-    fprintf(stderr, "  RPU Warning: no UNSPEC62 NAL units found\n");
+    (void)fprintf(stderr, "  RPU Warning: no UNSPEC62 NAL units found\n");
     result.error = -1;
   }
 
 cleanup:
   if (out_fp) {
-    fclose(out_fp);
+    if (fclose(out_fp) != 0 && result.error == 0) {
+      (void)fprintf(stderr, "  RPU Error: failed to finalize '%s'\n", output_path);
+      result.error = -1;
+    }
     /* Remove output on failure or if empty. */
     if (result.error != 0 || result.rpu_count == 0)
-      remove(output_path);
+      (void)remove(output_path); /* best-effort cleanup */
   }
   av_packet_free(&pkt);
   if (fmt_ctx)

@@ -22,7 +22,7 @@ MediaInfo get_media_info(const char *path) {
   ret = avformat_open_input(&fmt_ctx, path, NULL, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "Error: cannot open '%s': %s\n", path, errbuf);
+    (void)fprintf(stderr, "Error: cannot open '%s': %s\n", path, errbuf);
     info.error = ret;
     return info;
   }
@@ -30,7 +30,7 @@ MediaInfo get_media_info(const char *path) {
   ret = avformat_find_stream_info(fmt_ctx, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "Error: cannot read stream info from '%s': %s\n", path, errbuf);
+    (void)fprintf(stderr, "Error: cannot read stream info from '%s': %s\n", path, errbuf);
     info.error = ret;
     avformat_close_input(&fmt_ctx);
     return info;
@@ -39,7 +39,7 @@ MediaInfo get_media_info(const char *path) {
   ret = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "Error: no video stream found in '%s': %s\n", path, errbuf);
+    (void)fprintf(stderr, "Error: no video stream found in '%s': %s\n", path, errbuf);
     info.error = ret;
     avformat_close_input(&fmt_ctx);
     return info;

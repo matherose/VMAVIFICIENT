@@ -88,7 +88,7 @@ StageStatus stage_probe(PipelineCtx *ctx) {
       // clang-format off
       ui_row(
           "%s\xe2\x94\x82 %2d \xe2\x94\x82 %-3s \xe2\x94\x82 %-7.7s \xe2\x94\x82 %-3s \xe2\x94\x82 %s \xe2\x94\x82 %-20.20s \xe2\x94\x82",
-          sel ? "\xe2\x86\x92 " : "  ", ctx->tracks.audio[i].index,
+          (int)sel ? "\xe2\x86\x92 " : "  ", ctx->tracks.audio[i].index,
           ctx->tracks.audio[i].language, ctx->tracks.audio[i].codec, ch_buf, rate_buf,
           ctx->tracks.audio[i].name);
       // clang-format on
@@ -126,7 +126,7 @@ StageStatus stage_probe(PipelineCtx *ctx) {
 
     // Pre-compute which PGS subtitles will be skipped (already have text SRT)
     // Two-pass: first collect all SRT tracks, then mark PGS as skipped
-    bool pgs_skipped[256] = {0}; // max 256 subtitle tracks
+    bool pgs_skipped[256] = {false}; // max 256 subtitle tracks
     int pgs_skipped_count = 0;
 
     // Track SRTs we've seen: (lang, variant, forced, sdh) for skip detection
@@ -182,9 +182,8 @@ StageStatus stage_probe(PipelineCtx *ctx) {
       ui_row("  \xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\xa4");
       // clang-format on
       for (int i = 0; i < ctx->tracks.subtitle_count; i++) {
-        const char *type = ctx->tracks.subtitles[i].is_forced ? "forced"
-                           : ctx->tracks.subtitles[i].is_sdh  ? "sdh"
-                                                              : "full";
+        const char *type_if_not_forced = ctx->tracks.subtitles[i].is_sdh ? "sdh" : "full";
+        const char *type = ctx->tracks.subtitles[i].is_forced ? "forced" : type_if_not_forced;
         const char *lang =
             ctx->tracks.subtitles[i].language[0] ? ctx->tracks.subtitles[i].language : "und";
         const char *selection = "  ";
@@ -245,10 +244,8 @@ StageStatus stage_probe(PipelineCtx *ctx) {
           if (n > 0 && (size_t)n < sizeof(detail) - pos)
             pos += (size_t)n;
           if (pgs_skipped_count > 0) {
-            n = snprintf(detail + pos, sizeof(detail) - pos, " (%d already available)",
-                         pgs_skipped_count);
-            if (n > 0 && (size_t)n < sizeof(detail) - pos)
-              pos += (size_t)n;
+            (void)snprintf(detail + pos, sizeof(detail) - pos, " (%d already available)",
+                           pgs_skipped_count);
           }
         }
         ui_kv("Processing", "%s", detail);

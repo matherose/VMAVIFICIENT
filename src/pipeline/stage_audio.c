@@ -43,9 +43,12 @@ StageStatus stage_audio(PipelineCtx *ctx) {
         FrenchVariant detected = (FrenchVariant)detect_track_french_variant(&enc_best[i]);
         if (detected != FRENCH_VARIANT_UNKNOWN) {
           track_fv = detected;
-          track_origin = (detected == FRENCH_VARIANT_VFQ)   ? FRENCH_AUDIO_VFQ
-                         : (detected == FRENCH_VARIANT_VFI) ? FRENCH_AUDIO_VFI
-                                                            : FRENCH_AUDIO_VFF;
+          if (detected == FRENCH_VARIANT_VFQ)
+            track_origin = FRENCH_AUDIO_VFQ;
+          else if (detected == FRENCH_VARIANT_VFI)
+            track_origin = FRENCH_AUDIO_VFI;
+          else
+            track_origin = FRENCH_AUDIO_VFF;
         }
       }
 

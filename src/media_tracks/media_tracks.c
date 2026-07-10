@@ -136,8 +136,9 @@ static bool title_indicates_forced(const char *title) {
 static bool title_indicates_sdh(const char *title) {
   if (!title || !title[0])
     return false;
-  return str_contains_ci(title, "sdh") || str_contains_ci(title, "closed caption") ||
-         str_contains_ci(title, "hearing impaired") || str_contains_ci(title, "malentendant");
+  return (str_contains_ci(title, "sdh") || str_contains_ci(title, "closed caption") ||
+          str_contains_ci(title, "hearing impaired") || str_contains_ci(title, "malentendant")) !=
+         0;
 }
 
 /**
@@ -146,8 +147,8 @@ static bool title_indicates_sdh(const char *title) {
 static bool title_indicates_karaoke(const char *title) {
   if (!title || !title[0])
     return false;
-  return str_contains_ci(title, "karao") || str_contains_ci(title, "karaok") ||
-         str_contains_ci(title, "chanson") || str_contains_ci(title, "karaoké");
+  return (str_contains_ci(title, "karao") || str_contains_ci(title, "karaok") ||
+          str_contains_ci(title, "chanson") || str_contains_ci(title, "karaoké")) != 0;
 }
 
 /**
@@ -187,12 +188,12 @@ static void fill_track(TrackInfo *t, AVStream *stream) {
   /* Forced: check disposition flag first, then title keywords. */
   t->is_forced = (stream->disposition & AV_DISPOSITION_FORCED) ? 1 : 0;
   if (!t->is_forced && stream->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE)
-    t->is_forced = title_indicates_forced(t->name) ? 1 : 0;
+    t->is_forced = (int)title_indicates_forced(t->name) ? 1 : 0;
 
   /* SDH: check disposition and title keywords. */
   t->is_sdh = (stream->disposition & AV_DISPOSITION_HEARING_IMPAIRED) ? 1 : 0;
   if (!t->is_sdh && stream->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE)
-    t->is_sdh = title_indicates_sdh(t->name) ? 1 : 0;
+    t->is_sdh = (int)title_indicates_sdh(t->name) ? 1 : 0;
 
   /* Karaoke: title keyword only. */
   // clang-format off
@@ -213,7 +214,7 @@ MediaTracks get_media_tracks(const char *path) {
   ret = avformat_open_input(&fmt_ctx, path, NULL, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "Error: cannot open '%s': %s\n", path, errbuf);
+    (void)fprintf(stderr, "Error: cannot open '%s': %s\n", path, errbuf);
     result.error = ret;
     return result;
   }
@@ -221,7 +222,7 @@ MediaTracks get_media_tracks(const char *path) {
   ret = avformat_find_stream_info(fmt_ctx, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "Error: cannot read stream info from '%s': %s\n", path, errbuf);
+    (void)fprintf(stderr, "Error: cannot read stream info from '%s': %s\n", path, errbuf);
     result.error = ret;
     avformat_close_input(&fmt_ctx);
     return result;

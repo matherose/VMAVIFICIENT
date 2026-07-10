@@ -82,11 +82,11 @@ static int parse_file(const char *path, VmavConfig *cfg) {
 
   /* Check for read error (not EOF) */
   if (ferror(f)) {
-    fclose(f);
+    (void)fclose(f); /* read-only stream */
     return -1;
   }
 
-  fclose(f);
+  (void)fclose(f); /* read-only stream */
   return 0;
 }
 
@@ -106,15 +106,15 @@ static const RequiredKey REQUIRED_KEYS[] = {
 };
 
 static void die_config(const char *msg, const char *path_tried) {
-  fprintf(stderr,
-          "Error: %s\n"
-          "  Config search order:\n"
-          "    1. $HOME/.config/vmavificient/config.ini\n"
-          "    2. ./config.ini  (legacy dev fallback)\n"
-          "  Run `vmavificient --config` to create the file interactively.\n",
-          msg);
+  (void)fprintf(stderr,
+                "Error: %s\n"
+                "  Config search order:\n"
+                "    1. $HOME/.config/vmavificient/config.ini\n"
+                "    2. ./config.ini  (legacy dev fallback)\n"
+                "  Run `vmavificient --config` to create the file interactively.\n",
+                msg);
   if (path_tried)
-    fprintf(stderr, "  Last tried: %s\n", path_tried);
+    (void)fprintf(stderr, "  Last tried: %s\n", path_tried);
   exit(1);
 }
 
@@ -172,7 +172,7 @@ const VmavConfig *config_get(void) {
  */
 static int prompt_line(const char *label, char *buf, size_t bufsize, int required) {
   printf("%s", label);
-  fflush(stdout);
+  (void)fflush(stdout);
   if (!fgets(buf, (int)bufsize, stdin))
     return -1;
   size_t n = strlen(buf);
@@ -208,7 +208,7 @@ static int mkdir_p_for_file(const char *file_path) {
 int config_interactive_setup(void) {
   const char *home = getenv("HOME");
   if (!home || !home[0]) {
-    fprintf(stderr, "Error: $HOME is not set; cannot locate config dir.\n");
+    (void)fprintf(stderr, "Error: $HOME is not set; cannot locate config dir.\n");
     return 1;
   }
 
@@ -234,35 +234,38 @@ int config_interactive_setup(void) {
 
   char tmdb_api_key[128];
   if (prompt_line("TMDB API key: ", tmdb_api_key, sizeof(tmdb_api_key), 1) != 0) {
-    fprintf(stderr, "Error: TMDB API key cannot be empty.\n");
+    (void)fprintf(stderr, "Error: TMDB API key cannot be empty.\n");
     return 1;
   }
 
   char release_group[64];
   if (prompt_line("Release group: ", release_group, sizeof(release_group), 1) != 0) {
-    fprintf(stderr, "Error: release group cannot be empty.\n");
+    (void)fprintf(stderr, "Error: release group cannot be empty.\n");
     return 1;
   }
 
   if (mkdir_p_for_file(config_path) != 0) {
-    fprintf(stderr, "Error: cannot create config directory: %s\n", strerror(errno));
+    (void)fprintf(stderr, "Error: cannot create config directory: %s\n", strerror(errno));
     return 1;
   }
 
   FILE *f = fopen(config_path, "w");
   if (!f) {
-    fprintf(stderr, "Error: cannot open %s for writing: %s\n", config_path, strerror(errno));
+    (void)fprintf(stderr, "Error: cannot open %s for writing: %s\n", config_path, strerror(errno));
     return 1;
   }
-  fprintf(f, "# vmavificient config — written by `vmavificient --config`.\n");
-  fprintf(f, "tmdb_api_key = %s\n", tmdb_api_key);
-  fprintf(f, "release_group = %s\n", release_group);
-  fclose(f);
+  (void)fprintf(f, "# vmavificient config — written by `vmavificient --config`.\n");
+  (void)fprintf(f, "tmdb_api_key = %s\n", tmdb_api_key);
+  (void)fprintf(f, "release_group = %s\n", release_group);
+  if (fclose(f) != 0) {
+    (void)fprintf(stderr, "Error: failed to write %s: %s\n", config_path, strerror(errno));
+    return 1;
+  }
 
   /* The TMDB key is sensitive; chmod 600 so it isn't world-readable. */
   if (chmod(config_path, S_IRUSR | S_IWUSR) != 0) {
-    fprintf(stderr, "Warning: could not set 0600 permissions on %s: %s\n", config_path,
-            strerror(errno));
+    (void)fprintf(stderr, "Warning: could not set 0600 permissions on %s: %s\n", config_path,
+                  strerror(errno));
   }
 
   printf("\nWrote %s\n", config_path);

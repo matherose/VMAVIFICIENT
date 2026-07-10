@@ -153,6 +153,8 @@ static void out_close(OutCtx *o) {
 
 /** Encode one filtered frame to one output. */
 static int write_frame(OutCtx *o, AVFrame *f) {
+  if (!o->enc || !o->stream || !o->fmt)
+    return AVERROR(EINVAL);
   int ret = avcodec_send_frame(o->enc, f);
   if (ret < 0)
     return ret;
@@ -493,7 +495,7 @@ static void parse_plane_scalings(const char *line, const char *prefix, double *s
     return;
   p = end;
   for (long i = 0; i < pt_count; i++) {
-    strtol(p, &end, 10); /* value */
+    (void)strtol(p, &end, 10); /* value */
     if (end == p)
       break;
     p = end;
@@ -551,7 +553,7 @@ static GrainTableScores parse_grain_table(const char *path) {
   }
 
   free(line);
-  fclose(f);
+  (void)fclose(f); /* read-only stream */
 
   scores.y = normalize_plane_score(sum_y, count_y);
   scores.cb = normalize_plane_score(sum_cb, count_cb);
@@ -599,7 +601,8 @@ static int sample_grain_window(const char *path, const char *label, int window_i
     unlink(denoised_tmp);
     unlink(table_tmp);
   } else {
-    fprintf(stderr, "[grain] window %d (pos %.2f): kept %s\n", window_idx, position, table_tmp);
+    (void)fprintf(stderr, "[grain] window %d (pos %.2f): kept %s\n", window_idx, position,
+                  table_tmp);
   }
 
   /* Per-window status — gives the user something to watch during the long

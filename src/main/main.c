@@ -46,7 +46,7 @@ int main(int argc, char *argv[]) {
   if (!ctx->opt.blind)
     config_init();
   if (check_dependencies() != 0) {
-    fprintf(stderr, "Fatal: dependency sanity check failed.\n");
+    (void)fprintf(stderr, "Fatal: dependency sanity check failed.\n");
     free(ctx);
     return 1;
   }
@@ -167,7 +167,7 @@ int main(int argc, char *argv[]) {
       if (ctx->saved_tmdb_title[0]) {
         build_output_filename(hd_output_name, sizeof(hd_output_name), ctx->saved_tmdb_title,
                               ctx->saved_tmdb_year, ctx->resolved_lang_tag, &hd_info, &hd_hdr,
-                              ctx->source, ctx->saved_is_tv ? &ctx->saved_episode : NULL);
+                              ctx->source, (int)ctx->saved_is_tv ? &ctx->saved_episode : NULL);
         snprintf(hd_base_name, sizeof(hd_base_name), "%s", hd_output_name);
         char *hd_ext = strrchr(hd_base_name, '.');
         if (hd_ext && strcmp(hd_ext, ".mkv") == 0)

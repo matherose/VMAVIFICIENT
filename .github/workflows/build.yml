@@ -27,6 +27,76 @@ jobs:
           clang-format-18 --dry-run -Werror \
             $(find src include -name "*.c" -o -name "*.h")
 
+  # ── Lint: clang-tidy full-tree gate ───────────────────────────────
+  # Zero-findings policy (.clang-tidy, WarningsAsErrors) enforced over
+  # the whole tree — pre-commit only checks changed files. Needs a full
+  # build first: SVT-AV1-HDR / libhdr10plus headers are produced by
+  # ExternalProject, so includes don't resolve after configure alone.
+  # Shares the ExternalProject cache with build-macos-system (same
+  # build/deps path, same configure inputs).
+  clang-tidy:
+    runs-on: macos-14
+    timeout-minutes: 60
+    needs: format-check
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Update Homebrew
+        run: brew update
+
+      - name: Install build + runtime deps
+        run: |
+          brew install \
+            ninja pkg-config nasm meson llvm \
+            ffmpeg opus dovi_tool tesseract leptonica libvmaf \
+            jpeg-turbo libpng libtiff cjson openssl@3
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-macos-arm64-${{ hashFiles('rust/**/Cargo.lock', 'rust/**/Cargo.toml') }}
+          restore-keys: cargo-macos-arm64-
+
+      - name: Cache ExternalProject builds
+        uses: actions/cache@v4
+        with:
+          path: build/deps
+          key: cmake-deps-macos-arm64-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: cmake-deps-macos-arm64-
+
+      - name: Install cargo-c
+        run: cargo install cargo-c
+
+      - name: Configure (system deps, compile commands)
+        run: |
+          cmake -G Ninja -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CROSSCOMPILING=ON \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
+            -DVMAV_GRAV1SYNTH_BIN_RUNTIME=grav1synth
+
+      - name: Build
+        run: cmake --build build -j$(sysctl -n hw.ncpu)
+
+      # run-clang-tidy resolves the clang-tidy binary via $PATH, not
+      # relative to itself, and brew keeps llvm/bin off PATH — pass it
+      # explicitly or the wrapper dies with "failed to find clang-tidy".
+      - name: Run clang-tidy
+        run: |
+          LLVM="$(brew --prefix llvm)"
+          "$LLVM/bin/run-clang-tidy" \
+            -clang-tidy-binary "$LLVM/bin/clang-tidy" \
+            -p build -quiet \
+            $(find src -name '*.c')
+
   # ── Build: macOS + Homebrew system deps ──────────────────────────
   # Verifies the recommended build path (VMAV_USE_SYSTEM_DEPS=ON, the
   # default since v1.1.0). Fast: only SVT-AV1-HDR, libhdr10plus, and
@@ -304,7 +374,7 @@ jobs:
 
   # ── Release (on tag push) ─────────────────────────────────────────
   release:
-    needs: [build-macos-system, encode-test, sanitizer, build-static]
+    needs: [clang-tidy, build-macos-system, encode-test, sanitizer, build-static]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

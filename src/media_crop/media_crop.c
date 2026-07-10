@@ -42,16 +42,16 @@ static int read_crop_metadata(AVFrame *filt_frame, int frame_w, int frame_h, int
 
   e = av_dict_get(filt_frame->metadata, "lavfi.cropdetect.w", NULL, 0);
   if (e)
-    cw = atoi(e->value);
+    cw = (int)strtol(e->value, NULL, 10);
   e = av_dict_get(filt_frame->metadata, "lavfi.cropdetect.h", NULL, 0);
   if (e)
-    ch = atoi(e->value);
+    ch = (int)strtol(e->value, NULL, 10);
   e = av_dict_get(filt_frame->metadata, "lavfi.cropdetect.x", NULL, 0);
   if (e)
-    cx = atoi(e->value);
+    cx = (int)strtol(e->value, NULL, 10);
   e = av_dict_get(filt_frame->metadata, "lavfi.cropdetect.y", NULL, 0);
   if (e)
-    cy = atoi(e->value);
+    cy = (int)strtol(e->value, NULL, 10);
 
   if (cw <= 0 || ch <= 0)
     return 0;
@@ -134,7 +134,7 @@ CropInfo get_crop_info(const char *path) {
   ret = avformat_open_input(&fmt_ctx, path, NULL, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "Error: cannot open '%s': %s\n", path, errbuf);
+    (void)fprintf(stderr, "Error: cannot open '%s': %s\n", path, errbuf);
     info.error = ret;
     return info;
   }
@@ -142,7 +142,7 @@ CropInfo get_crop_info(const char *path) {
   ret = avformat_find_stream_info(fmt_ctx, NULL);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "Error: cannot read stream info from '%s': %s\n", path, errbuf);
+    (void)fprintf(stderr, "Error: cannot read stream info from '%s': %s\n", path, errbuf);
     info.error = ret;
     goto cleanup;
   }
@@ -150,7 +150,7 @@ CropInfo get_crop_info(const char *path) {
   ret = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
   if (ret < 0) {
     av_make_error_string(errbuf, sizeof(errbuf), ret);
-    fprintf(stderr, "Error: no video stream found in '%s': %s\n", path, errbuf);
+    (void)fprintf(stderr, "Error: no video stream found in '%s': %s\n", path, errbuf);
     info.error = ret;
     goto cleanup;
   }
@@ -160,7 +160,7 @@ CropInfo get_crop_info(const char *path) {
 
   const AVCodec *decoder = avcodec_find_decoder(stream->codecpar->codec_id);
   if (!decoder) {
-    fprintf(stderr, "Error: unsupported video codec in '%s'.\n", path);
+    (void)fprintf(stderr, "Error: unsupported video codec in '%s'.\n", path);
     info.error = AVERROR_DECODER_NOT_FOUND;
     goto cleanup;
   }

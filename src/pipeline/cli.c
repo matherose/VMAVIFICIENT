@@ -16,98 +16,98 @@
 #include "utils.h"
 
 void vmav_print_usage(const char *prog) {
-  fprintf(stderr,
-          "Usage: %s [options] <input_file>\n"
-          "\n"
-          "Options:\n"
-          "  --tmdb <id>      TMDB movie ID for naming (requires TMDB_API_KEY)\n"
-          "  --tv             TV mode: --tmdb <id> is a TMDB series ID\n"
-          "                   (themoviedb.org/tv/<id>). Output is named\n"
-          "                   Show.SxxEyy.Episode.Title.<...> — no year.\n"
-          "  --mv             Movie mode (the default; explicit form)\n"
-          "  --season <N>     Season number (with --tv; overrides filename\n"
-          "                   parsing, prompts if still unknown)\n"
-          "  --episode <N>    Episode number (with --tv; same resolution\n"
-          "                   order as --season)\n"
-          "  --blind          Skip TMDB lookup; name output as <input-stem>.mkv\n"
-          "                   (no config required)\n"
-          "  --config         Run interactive setup once; writes\n"
-          "                   $HOME/.config/vmavificient/config.ini with the TMDB\n"
-          "                   API key and release group. Subsequent runs read it\n"
-          "                   automatically.\n"
-          "  --crf <N>        Skip CRF search; encode at this CRF directly\n"
-          "                   (1–63, lower = higher quality)\n"
-          "  --vmaf-target <N> Override the VMAF target for CRF search\n"
-          "                   (default: per-preset, 90–96)\n"
-          "  --bitrate <kbps> Skip CRF search; encode VBR at this bitrate\n"
-          "  --srt <path>     Additional SRT subtitle file (can be repeated)\n"
-          "  --dry-run        Run analysis + CRF search + naming, print the\n"
-          "                   encoding plan, then exit. No files written.\n"
-          "  --quiet          Compact output: hide informational sections, keep\n"
-          "                   only stage status lines + the Plan / Done blocks.\n"
-          "  --verbose        Forward SVT-AV1 encoder log messages to stderr\n"
-          "                   (rate control, GOP layout, warnings). Composes\n"
-          "                   with --quiet.\n"
-          "  --grain-only     Like --dry-run, plus dump every encoder knob the\n"
-          "                   resolved preset configures (grain mech, tune,\n"
-          "                   ac-bias, filters, QMs). For sanity-checking what\n"
-          "                   each tier actually does without a full encode.\n"
-          "  --companion-hd   After the 4K encode, produce a second 1080p HDLight\n"
-          "                   release from the same REMUX source. Requires a 4K\n"
-          "                   source. Audio and subtitles are shared between both\n"
-          "                   outputs. Dolby Vision is stripped from the HD "
-          "output.\n"
-          "  --scale-to-hd    Produce only a 1080p HDLight release (no 4K "
-          "output).\n"
-          "                   Requires a 4K source. Full independent pipeline.\n"
-          "                   Mutually exclusive with --companion-hd.\n"
-          "  --cache-dir <path>\n"
-          "                   Use specified directory for intermediate files\n"
-          "                   (grain analysis, CRF search results, extracted\n"
-          "                   audio/subtitles). Cache is deleted after successful\n"
-          "                   encode. Defaults to a hidden .vmavificient-cache folder\n"
-          "                   in the project root.\n"
-          "  --help           Show this help\n"
-          "\n"
-          "Language flags (override auto-detection):\n"
-          "  --multi          MULTi\n"
-          "  --multivfi       MULTi.VFI\n"
-          "  --multivff       MULTi.VFF\n"
-          "  --multivfq       MULTi.VFQ\n"
-          "  --multivf2       MULTi.VF2\n"
-          "  --multivof       MULTi.VOF\n"
-          "  --dual_vfi       DUAL.VFI\n"
-          "  --dual_vff       DUAL.VFF\n"
-          "  --dual_vfq       DUAL.VFQ\n"
-          "  --french         FRENCH\n"
-          "  --vff            VFF\n"
-          "  --vof            VOF\n"
-          "  --truefrench     TRUEFRENCH\n"
-          "  --vo             VO\n"
-          "  --vost           VOST\n"
-          "  --fansub         FANSUB\n"
-          "\n"
-          "Source flags (override auto-detection):\n"
-          "  --bdrip          BDRip\n"
-          "  --bluray         BluRay\n"
-          "  --remux          REMUX\n"
-          "  --dvdrip         DVDRip\n"
-          "  --dvdremux       DVDRemux\n"
-          "  --webrip         WEBRip\n"
-          "  --webdl          WEB-DL\n"
-          "  --web            WEB\n"
-          "  --hdtv           HDTV\n"
-          "  --hdrip          HDRip\n"
-          "  --tvrip          TVRip\n"
-          "  --vhsrip         VHSRip\n"
-          "\n"
-          "Quality presets (default: live-action):\n"
-          "  --animation       Animation content\n"
-          "  --super35_analog  Super 35mm analog film\n"
-          "  --super35_digital Super 35mm digital\n"
-          "  --imax_analog     IMAX analog film\n"
-          "  --imax_digital    IMAX digital\n",
-          prog);
+  (void)fprintf(stderr,
+                "Usage: %s [options] <input_file>\n"
+                "\n"
+                "Options:\n"
+                "  --tmdb <id>      TMDB movie ID for naming (requires TMDB_API_KEY)\n"
+                "  --tv             TV mode: --tmdb <id> is a TMDB series ID\n"
+                "                   (themoviedb.org/tv/<id>). Output is named\n"
+                "                   Show.SxxEyy.Episode.Title.<...> — no year.\n"
+                "  --mv             Movie mode (the default; explicit form)\n"
+                "  --season <N>     Season number (with --tv; overrides filename\n"
+                "                   parsing, prompts if still unknown)\n"
+                "  --episode <N>    Episode number (with --tv; same resolution\n"
+                "                   order as --season)\n"
+                "  --blind          Skip TMDB lookup; name output as <input-stem>.mkv\n"
+                "                   (no config required)\n"
+                "  --config         Run interactive setup once; writes\n"
+                "                   $HOME/.config/vmavificient/config.ini with the TMDB\n"
+                "                   API key and release group. Subsequent runs read it\n"
+                "                   automatically.\n"
+                "  --crf <N>        Skip CRF search; encode at this CRF directly\n"
+                "                   (1–63, lower = higher quality)\n"
+                "  --vmaf-target <N> Override the VMAF target for CRF search\n"
+                "                   (default: per-preset, 90–96)\n"
+                "  --bitrate <kbps> Skip CRF search; encode VBR at this bitrate\n"
+                "  --srt <path>     Additional SRT subtitle file (can be repeated)\n"
+                "  --dry-run        Run analysis + CRF search + naming, print the\n"
+                "                   encoding plan, then exit. No files written.\n"
+                "  --quiet          Compact output: hide informational sections, keep\n"
+                "                   only stage status lines + the Plan / Done blocks.\n"
+                "  --verbose        Forward SVT-AV1 encoder log messages to stderr\n"
+                "                   (rate control, GOP layout, warnings). Composes\n"
+                "                   with --quiet.\n"
+                "  --grain-only     Like --dry-run, plus dump every encoder knob the\n"
+                "                   resolved preset configures (grain mech, tune,\n"
+                "                   ac-bias, filters, QMs). For sanity-checking what\n"
+                "                   each tier actually does without a full encode.\n"
+                "  --companion-hd   After the 4K encode, produce a second 1080p HDLight\n"
+                "                   release from the same REMUX source. Requires a 4K\n"
+                "                   source. Audio and subtitles are shared between both\n"
+                "                   outputs. Dolby Vision is stripped from the HD "
+                "output.\n"
+                "  --scale-to-hd    Produce only a 1080p HDLight release (no 4K "
+                "output).\n"
+                "                   Requires a 4K source. Full independent pipeline.\n"
+                "                   Mutually exclusive with --companion-hd.\n"
+                "  --cache-dir <path>\n"
+                "                   Use specified directory for intermediate files\n"
+                "                   (grain analysis, CRF search results, extracted\n"
+                "                   audio/subtitles). Cache is deleted after successful\n"
+                "                   encode. Defaults to a hidden .vmavificient-cache folder\n"
+                "                   in the project root.\n"
+                "  --help           Show this help\n"
+                "\n"
+                "Language flags (override auto-detection):\n"
+                "  --multi          MULTi\n"
+                "  --multivfi       MULTi.VFI\n"
+                "  --multivff       MULTi.VFF\n"
+                "  --multivfq       MULTi.VFQ\n"
+                "  --multivf2       MULTi.VF2\n"
+                "  --multivof       MULTi.VOF\n"
+                "  --dual_vfi       DUAL.VFI\n"
+                "  --dual_vff       DUAL.VFF\n"
+                "  --dual_vfq       DUAL.VFQ\n"
+                "  --french         FRENCH\n"
+                "  --vff            VFF\n"
+                "  --vof            VOF\n"
+                "  --truefrench     TRUEFRENCH\n"
+                "  --vo             VO\n"
+                "  --vost           VOST\n"
+                "  --fansub         FANSUB\n"
+                "\n"
+                "Source flags (override auto-detection):\n"
+                "  --bdrip          BDRip\n"
+                "  --bluray         BluRay\n"
+                "  --remux          REMUX\n"
+                "  --dvdrip         DVDRip\n"
+                "  --dvdremux       DVDRemux\n"
+                "  --webrip         WEBRip\n"
+                "  --webdl          WEB-DL\n"
+                "  --web            WEB\n"
+                "  --hdtv           HDTV\n"
+                "  --hdrip          HDRip\n"
+                "  --tvrip          TVRip\n"
+                "  --vhsrip         VHSRip\n"
+                "\n"
+                "Quality presets (default: live-action):\n"
+                "  --animation       Animation content\n"
+                "  --super35_analog  Super 35mm analog film\n"
+                "  --super35_digital Super 35mm digital\n"
+                "  --imax_analog     IMAX analog film\n"
+                "  --imax_digital    IMAX digital\n",
+                prog);
 }
 
 int vmav_cli_prescan(int argc, char *argv[], VmavOptions *opt) {
@@ -138,61 +138,61 @@ int vmav_cli_parse(int argc, char *argv[], VmavOptions *opt) {
     /* Language flags (start at 256 to avoid ASCII collision). */
     OPT_BLIND = 255,
     OPT_MULTI = 256,
-    OPT_MULTIVFI,
-    OPT_MULTIVFF,
-    OPT_MULTIVFQ,
-    OPT_MULTIVF2,
-    OPT_MULTIVOF,
-    OPT_DUAL_VFI,
-    OPT_DUAL_VFF,
-    OPT_DUAL_VFQ,
-    OPT_FRENCH,
-    OPT_VFF,
-    OPT_VOF,
-    OPT_TRUEFRENCH,
-    OPT_VO,
-    OPT_VOST,
-    OPT_FANSUB,
+    OPT_MULTIVFI = 257,
+    OPT_MULTIVFF = 258,
+    OPT_MULTIVFQ = 259,
+    OPT_MULTIVF2 = 260,
+    OPT_MULTIVOF = 261,
+    OPT_DUAL_VFI = 262,
+    OPT_DUAL_VFF = 263,
+    OPT_DUAL_VFQ = 264,
+    OPT_FRENCH = 265,
+    OPT_VFF = 266,
+    OPT_VOF = 267,
+    OPT_TRUEFRENCH = 268,
+    OPT_VO = 269,
+    OPT_VOST = 270,
+    OPT_FANSUB = 271,
     /* Source flags. */
-    OPT_BDRIP,
-    OPT_BLURAY,
-    OPT_REMUX,
-    OPT_DVDRIP,
-    OPT_DVDREMUX,
-    OPT_WEBRIP,
-    OPT_WEBDL,
-    OPT_WEB,
-    OPT_HDTV,
-    OPT_HDRIP,
-    OPT_TVRIP,
-    OPT_VHSRIP,
+    OPT_BDRIP = 272,
+    OPT_BLURAY = 273,
+    OPT_REMUX = 274,
+    OPT_DVDRIP = 275,
+    OPT_DVDREMUX = 276,
+    OPT_WEBRIP = 277,
+    OPT_WEBDL = 278,
+    OPT_WEB = 279,
+    OPT_HDTV = 280,
+    OPT_HDRIP = 281,
+    OPT_TVRIP = 282,
+    OPT_VHSRIP = 283,
     /* Quality preset flags. */
-    OPT_ANIMATION,
-    OPT_SUPER35_ANALOG,
-    OPT_SUPER35_DIGITAL,
-    OPT_IMAX_ANALOG,
-    OPT_IMAX_DIGITAL,
+    OPT_ANIMATION = 284,
+    OPT_SUPER35_ANALOG = 285,
+    OPT_SUPER35_DIGITAL = 286,
+    OPT_IMAX_ANALOG = 287,
+    OPT_IMAX_DIGITAL = 288,
     /* Auxiliary flags appended at the end so they get the next free
        sequential value without colliding with the explicit OPT_MULTI=256
        anchor above. */
-    OPT_DRY_RUN,
-    OPT_QUIET,
-    OPT_VERBOSE,
-    OPT_GRAIN_ONLY,
+    OPT_DRY_RUN = 289,
+    OPT_QUIET = 290,
+    OPT_VERBOSE = 291,
+    OPT_GRAIN_ONLY = 292,
     /* --config is pre-scanned and dispatched before getopt_long runs;
        it's still registered with getopt so the parser doesn't reject it
        when it shows up alongside other flags. Placed at the end so its
        auto-incremented value can't collide with OPT_MULTI = 256 anchor. */
-    OPT_CONFIG_SETUP,
-    OPT_CRF,
-    OPT_VMAF_TARGET,
-    OPT_COMPANION_HD,
-    OPT_SCALE_TO_HD,
-    OPT_CACHE_DIR,
-    OPT_TV,
-    OPT_MV,
-    OPT_SEASON,
-    OPT_EPISODE,
+    OPT_CONFIG_SETUP = 293,
+    OPT_CRF = 294,
+    OPT_VMAF_TARGET = 295,
+    OPT_COMPANION_HD = 296,
+    OPT_SCALE_TO_HD = 297,
+    OPT_CACHE_DIR = 298,
+    OPT_TV = 299,
+    OPT_MV = 300,
+    OPT_SEASON = 301,
+    OPT_EPISODE = 302,
   };
 
   static struct option long_options[] = {
@@ -263,21 +263,21 @@ int vmav_cli_parse(int argc, char *argv[], VmavOptions *opt) {
     case OPT_BITRATE:
       opt->bitrate = vmav_parse_int_or_zero(optarg);
       if (opt->bitrate <= 0) {
-        fprintf(stderr, "Error: --bitrate must be a positive integer (kbps)\n");
+        (void)fprintf(stderr, "Error: --bitrate must be a positive integer (kbps)\n");
         return 1;
       }
       break;
     case OPT_CRF:
       opt->crf = vmav_parse_int_or_zero(optarg);
       if (opt->crf < 1 || opt->crf > 63) {
-        fprintf(stderr, "Error: --crf must be in range 1–63\n");
+        (void)fprintf(stderr, "Error: --crf must be in range 1–63\n");
         return 1;
       }
       break;
     case OPT_VMAF_TARGET:
       opt->vmaf_target = vmav_parse_int_or_zero(optarg);
       if (opt->vmaf_target < 1 || opt->vmaf_target > 100) {
-        fprintf(stderr, "Error: --vmaf-target must be in range 1–100\n");
+        (void)fprintf(stderr, "Error: --vmaf-target must be in range 1–100\n");
         return 1;
       }
       break;
@@ -285,7 +285,7 @@ int vmav_cli_parse(int argc, char *argv[], VmavOptions *opt) {
       if (opt->extra_srt_count < 16)
         opt->extra_srt_paths[opt->extra_srt_count++] = optarg;
       else
-        fprintf(stderr, "Warning: too many --srt files, ignoring '%s'\n", optarg);
+        (void)fprintf(stderr, "Warning: too many --srt files, ignoring '%s'\n", optarg);
       break;
     case OPT_HELP:
       vmav_print_usage(argv[0]);
@@ -420,7 +420,7 @@ int vmav_cli_parse(int argc, char *argv[], VmavOptions *opt) {
     case OPT_CACHE_DIR:
       snprintf(opt->cache_dir, sizeof(opt->cache_dir), "%s", optarg);
       if (strlen(opt->cache_dir) == 0) {
-        fprintf(stderr, "Error: --cache-dir requires a directory path\n");
+        (void)fprintf(stderr, "Error: --cache-dir requires a directory path\n");
         return 1;
       }
       break;
@@ -433,14 +433,14 @@ int vmav_cli_parse(int argc, char *argv[], VmavOptions *opt) {
     case OPT_SEASON:
       opt->season = vmav_parse_int_or_zero(optarg);
       if (opt->season <= 0) {
-        fprintf(stderr, "Error: --season must be a positive integer\n");
+        (void)fprintf(stderr, "Error: --season must be a positive integer\n");
         return 1;
       }
       break;
     case OPT_EPISODE:
       opt->episode = vmav_parse_int_or_zero(optarg);
       if (opt->episode <= 0) {
-        fprintf(stderr, "Error: --episode must be a positive integer\n");
+        (void)fprintf(stderr, "Error: --episode must be a positive integer\n");
         return 1;
       }
       break;
@@ -461,11 +461,11 @@ int vmav_cli_parse(int argc, char *argv[], VmavOptions *opt) {
     ui_set_verbose(1);
 
   if (opt->companion_hd && opt->scale_to_hd) {
-    fprintf(stderr, "Error: --companion-hd and --scale-to-hd are mutually exclusive\n");
+    (void)fprintf(stderr, "Error: --companion-hd and --scale-to-hd are mutually exclusive\n");
     return 1;
   }
   if (!opt->tv_mode && (opt->season > 0 || opt->episode > 0)) {
-    fprintf(stderr, "Error: --season/--episode require --tv\n");
+    (void)fprintf(stderr, "Error: --season/--episode require --tv\n");
     return 1;
   }
 

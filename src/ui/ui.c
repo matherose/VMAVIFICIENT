@@ -73,7 +73,7 @@ void ui_section(const char *title) {
 
   printf("\n─── %s%s%s ", c(ANSI_BOLD), title, c(ANSI_RESET));
   for (size_t i = 0; i < fill; i++)
-    fputs("─", stdout);
+    (void)fputs("─", stdout);
   printf("\n\n");
 }
 
@@ -123,19 +123,19 @@ void ui_stage_skip(const char *name, const char *reason) {
 
 void ui_stage_fail(const char *name, const char *reason) {
   if (reason && reason[0])
-    fprintf(stderr, "  %s[FAIL]%s %s  %s%s%s\n", c(ANSI_RED), c(ANSI_RESET), name, c(ANSI_DIM),
-            reason, c(ANSI_RESET));
+    (void)fprintf(stderr, "  %s[FAIL]%s %s  %s%s%s\n", c(ANSI_RED), c(ANSI_RESET), name,
+                  c(ANSI_DIM), reason, c(ANSI_RESET));
   else
-    fprintf(stderr, "  %s[FAIL]%s %s\n", c(ANSI_RED), c(ANSI_RESET), name);
+    (void)fprintf(stderr, "  %s[FAIL]%s %s\n", c(ANSI_RED), c(ANSI_RESET), name);
 }
 
 void ui_hint(const char *fmt, ...) {
-  fprintf(stderr, "  %s[hint]%s ", c(ANSI_DIM), c(ANSI_RESET));
+  (void)fprintf(stderr, "  %s[hint]%s ", c(ANSI_DIM), c(ANSI_RESET));
   va_list ap;
   va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
+  (void)vfprintf(stderr, fmt, ap);
   va_end(ap);
-  fputc('\n', stderr);
+  (void)fputc('\n', stderr);
 }
 
 /* ---- Progress bar ----------------------------------------------------- */
@@ -204,8 +204,9 @@ void ui_progress_update(UiProgress *p, long long current, const char *middle) {
   int has_middle = (middle && middle[0]);
   const char *mid_text = has_middle ? middle : "";
   const char *mid_sep = has_middle ? "  " : "";
-  fprintf(stderr, "\r  [%s] %3d%%  %s%s%s   ", bar, (int)(pct * 100), mid_text, mid_sep, eta_str);
-  fflush(stderr);
+  (void)fprintf(stderr, "\r  [%s] %3d%%  %s%s%s   ", bar, (int)(pct * 100), mid_text, mid_sep,
+                eta_str);
+  (void)fflush(stderr);
 }
 
 void ui_progress_done(UiProgress *p, long long final_count, const char *middle) {
@@ -225,9 +226,9 @@ void ui_progress_done(UiProgress *p, long long final_count, const char *middle) 
   int has_middle = (middle && middle[0]);
   const char *mid_text = has_middle ? middle : "";
   const char *mid_sep = has_middle ? "  " : "";
-  fprintf(stderr, "\r  [%s] 100%%  %s%sDone in %02d:%02d          \n", bar, mid_text, mid_sep, min,
-          sec);
-  fflush(stderr);
+  (void)fprintf(stderr, "\r  [%s] 100%%  %s%sDone in %02d:%02d          \n", bar, mid_text, mid_sep,
+                min, sec);
+  (void)fflush(stderr);
 }
 
 /* ---- Formatting helpers (rotating static buffers) --------------------- */

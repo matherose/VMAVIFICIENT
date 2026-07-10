@@ -92,8 +92,8 @@ void vmav_cleanup_cache_dir(const PipelineCtx *ctx) {
   if (rename(ctx->cache_dir, old_cache_path) == 0) {
     /* Rename succeeded: create fresh cache dir */
     if (mkdir(ctx->cache_dir, 0755) != 0 && errno != EEXIST) {
-      fprintf(stderr, "Warning: failed to recreate cache directory '%s' (errno %d)\n",
-              ctx->cache_dir, errno);
+      (void)fprintf(stderr, "Warning: failed to recreate cache directory '%s' (errno %d)\n",
+                    ctx->cache_dir, errno);
       return;
     }
     /* Delete old cache in background (non-blocking) */
@@ -102,12 +102,12 @@ void vmav_cleanup_cache_dir(const PipelineCtx *ctx) {
     /* Rename failed (e.g., cache doesn't exist or is in use)
      * Try to recreate in place */
     if (vmav_rmtree(ctx->cache_dir) != 0) {
-      fprintf(stderr, "Warning: failed to cleanup cache directory '%s'\n", ctx->cache_dir);
+      (void)fprintf(stderr, "Warning: failed to cleanup cache directory '%s'\n", ctx->cache_dir);
     }
     /* Recreate empty cache directory */
     if (mkdir(ctx->cache_dir, 0755) != 0 && errno != EEXIST) {
-      fprintf(stderr, "Warning: failed to recreate cache directory '%s' (errno %d)\n",
-              ctx->cache_dir, errno);
+      (void)fprintf(stderr, "Warning: failed to recreate cache directory '%s' (errno %d)\n",
+                    ctx->cache_dir, errno);
     }
   }
 }
@@ -122,14 +122,14 @@ bool vmav_load_cached_scores(const char *cache_path, double *grain_score, double
   while (fgets(line, sizeof(line), f)) {
     char value[64];
     if (sscanf(line, " \"grain_score\": %63[^,\"]", value) == 1)
-      *grain_score = atof(value), found_grain = true;
+      *grain_score = strtod(value, NULL), found_grain = true;
     else if (sscanf(line, " \"grain_variance\": %63[^,\"]", value) == 1)
-      *grain_variance = atof(value), found_var = true;
+      *grain_variance = strtod(value, NULL), found_var = true;
     else if (sscanf(line, " \"crf\": %63[^,\"]", value) == 1)
-      *crf = atoi(value), found_crf = true;
+      *crf = (int)strtol(value, NULL, 10), found_crf = true;
   }
-  fclose(f);
-  return found_grain && found_var && found_crf;
+  (void)fclose(f); /* read-only stream */
+  return (found_grain && found_var && found_crf) != 0;
 }
 
 bool vmav_save_cached_scores(const char *cache_path, double grain_score, double grain_variance,
@@ -140,16 +140,18 @@ bool vmav_save_cached_scores(const char *cache_path, double grain_score, double 
   time_t now = time(NULL);
   struct tm *tm_info = localtime(&now);
   char timestamp[32];
-  strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", tm_info);
-  fprintf(f,
-          "{\n"
-          "  \"generated\": \"%s\",\n"
-          "  \"grain_score\": %.4f,\n"
-          "  \"grain_variance\": %.4f,\n"
-          "  \"crf\": %d\n"
-          "}\n",
-          timestamp, grain_score, grain_variance, crf);
-  fclose(f);
+  (void)strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ",
+                 tm_info); /* fixed format always fits buffer */
+  (void)fprintf(f,
+                "{\n"
+                "  \"generated\": \"%s\",\n"
+                "  \"grain_score\": %.4f,\n"
+                "  \"grain_variance\": %.4f,\n"
+                "  \"crf\": %d\n"
+                "}\n",
+                timestamp, grain_score, grain_variance, crf);
+  if (fclose(f) != 0)
+    return false;
   return true;
 }
 
@@ -228,12 +230,11 @@ void vmav_print_encoder_knobs(const EncodePreset *p, int film_grain) {
     ui_kv("Temporal flt", "on  (frame %d, keyframe %d)", p->tf_strength, p->kf_tf_strength);
   else
     ui_kv("Temporal flt", "off");
-  ui_kv("DLF", "%s", p->enable_dlf == 0 ? "off" : p->enable_dlf == 2 ? "accurate" : "on");
+  const char *dlf_if_nonzero = p->enable_dlf == 2 ? "accurate" : "on";
+  ui_kv("DLF", "%s", p->enable_dlf == 0 ? "off" : dlf_if_nonzero);
   ui_kv("CDEF scaling", "%d", p->cdef_scaling);
-  ui_kv("Restoration", "%s",
-        p->enable_restoration == 0   ? "off"
-        : p->enable_restoration == 1 ? "on"
-                                     : "default");
+  const char *restoration_if_nonzero = p->enable_restoration == 1 ? "on" : "default";
+  ui_kv("Restoration", "%s", p->enable_restoration == 0 ? "off" : restoration_if_nonzero);
   ui_kv("Noise-adapt", "%d  (0=off, 2=tune-default, 3=CDEF-only, 4=restoration-only)",
         p->noise_adaptive_filtering);
 

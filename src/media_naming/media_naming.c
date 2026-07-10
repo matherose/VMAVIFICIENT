@@ -39,7 +39,7 @@ const char *iso639_1_to_2b(const char *iso1) {
  * @brief Check if a 3-letter language code is French (639-2/B or 639-2/T).
  */
 static bool is_french_code(const char *code) {
-  return strcmp(code, "fre") == 0 || strcmp(code, "fra") == 0;
+  return (strcmp(code, "fre") == 0 || strcmp(code, "fra") == 0) != 0;
 }
 
 /* ── Language tag determination ────────────────────────────────── */
@@ -50,7 +50,7 @@ LanguageTag determine_language_tag(const MediaTracks *tracks, const char *origin
     return LANG_TAG_VO;
 
   const char *orig_3 = iso639_1_to_2b(original_lang_iso1);
-  bool orig_is_french = original_lang_iso1 && strcmp(original_lang_iso1, "fr") == 0;
+  bool orig_is_french = (original_lang_iso1 && strcmp(original_lang_iso1, "fr") == 0) != 0;
 
   bool has_original = false;
   bool has_french = false;
