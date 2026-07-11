@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # Dispatch = dry-run validator: the whole release path runs, only the
+  # publish step is tag-gated. No throwaway tag needed.
+  workflow_dispatch:
+
+# Never cancel a release mid-publish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: macos-14
+    timeout-minutes: 150
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      # Guard against tagging a commit whose project() version disagrees
+      # with the tag — the CLI banner shipped three releases reporting
+      # v1.2.0 because nothing checked this. Runs FIRST so a mismatched
+      # tag fails in seconds, not after a two-hour vendored build.
+      - name: Verify tag matches project version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          V=$(sed -n 's/^project(vmavificient VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          if [ "v$V" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match project VERSION $V"
+            exit 1
+          fi
+
+      - uses: ./.github/actions/setup-build
+        with:
+          mode: vendored
+          deps-path: build/deps
+          deps-cache-key: cmake-deps-static-macos-arm64-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Configure (vendored static)
+        run: |
+          cmake -G Ninja -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVMAV_USE_SYSTEM_DEPS=OFF
+
+      - name: Build
+        run: cmake --build build -j$(sysctl -n hw.ncpu)
+
+      # Tags land on commits already validated by ci.yml on main, but the
+      # release binary is a different build (static, vendored) — sanity-
+      # check it directly.
+      - name: Run unit tests
+        run: ./build/vmav_tests
+
+      - name: Verify version banner
+        run: ./build/vmavificient --help | head -1
+
+      # SHA256SUMS lives next to the binary in the GitHub release so
+      # downloaders can verify integrity with a single `shasum -c`.
+      - name: Package binary + checksums
+        run: |
+          mkdir -p dist
+          cp build/vmavificient dist/vmavificient-macos-arm64
+          chmod +x dist/vmavificient-macos-arm64
+          cd dist
+          shasum -a 256 vmavificient-macos-arm64 > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: dist/*
+          generate_release_notes: true
