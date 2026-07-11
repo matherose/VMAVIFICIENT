@@ -13,7 +13,6 @@
 #include "config.h"
 #include "pipeline.h"
 #include "ui.h"
-#include "utils.h"
 
 void vmav_print_usage(const char *prog) {
   (void)fprintf(stderr,
@@ -469,9 +468,11 @@ int vmav_cli_parse(int argc, char *argv[], VmavOptions *opt) {
     return 1;
   }
 
-  if (optind < argc)
+  if (optind < argc) {
     opt->filepath = argv[optind];
-  else
-    opt->filepath = DEFAULT_TEST_FILE;
+  } else {
+    vmav_print_usage(argv[0]);
+    return 1;
+  }
   return -1;
 }

@@ -11,9 +11,6 @@
 #include <stddef.h>
 #include <string.h>
 
-/** @brief Default test media file used when no argument is provided. */
-#define DEFAULT_TEST_FILE "bbb_sunflower_1080p_30fps_normal.mp4"
-
 /**
  * @brief Set FFmpeg log level to errors-only (suppress verbose warnings).
  */

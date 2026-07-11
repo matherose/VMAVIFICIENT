@@ -49,7 +49,7 @@ typedef struct {
   QualityType quality;
   const char *extra_srt_paths[16];
   int extra_srt_count;
-  const char *filepath; /* positional input (or DEFAULT_TEST_FILE) */
+  const char *filepath; /* positional input (required) */
 } VmavOptions;
 
 /* Per-pass knobs for the unified rate-control/plan + encode/mux pass.
