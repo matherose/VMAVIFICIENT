@@ -112,7 +112,7 @@ jobs:
 
       - name: Verify output
         run: |
-          OUTPUT=$(ls -1 *.mkv 2>/dev/null | head -1)
+          OUTPUT=$(find . -maxdepth 1 -name '*.mkv' -print -quit)
           [ -n "$OUTPUT" ] || { echo "::error::no MKV produced"; exit 1; }
           echo "Output: $OUTPUT ($(du -h "$OUTPUT" | cut -f1))"
 
