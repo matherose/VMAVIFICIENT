@@ -1,0 +1,99 @@
+name: Setup build environment
+description: >
+  Shared macOS toolchain setup: Homebrew packages, Rust + cargo-c,
+  dependency caches, and (optionally) the Big Buck Bunny test media.
+  Single source of truth for the brew lists — they drifted when this
+  preamble was copy-pasted across four jobs.
+
+inputs:
+  mode:
+    description: >
+      "system" = Homebrew shared deps (+ llvm for clang-tidy);
+      "vendored" = minimal brew, deps built by ExternalProject.
+    required: true
+  deps-path:
+    description: Path of the ExternalProject deps tree to cache (e.g. build/deps)
+    required: true
+  deps-cache-key:
+    description: Exact cache key for the deps tree
+    required: true
+  test-media:
+    description: Also fetch Big Buck Bunny and cut sample.mp4
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Update Homebrew
+      shell: bash
+      run: brew update
+
+    - name: Install brew packages (system mode)
+      if: inputs.mode == 'system'
+      shell: bash
+      run: |
+        brew install \
+          ninja pkg-config nasm meson llvm \
+          ffmpeg opus dovi_tool tesseract leptonica libvmaf \
+          jpeg-turbo libpng libtiff cjson openssl@3
+
+    - name: Install brew packages (vendored mode)
+      if: inputs.mode == 'vendored'
+      shell: bash
+      run: brew install ninja pkg-config nasm meson ffmpeg
+
+    # Pinned to a commit on the "stable" branch; the toolchain input
+    # replaces what the mutable @stable ref used to select.
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable branch, 2026-07-11
+      with:
+        toolchain: stable
+
+    # Keyed on CMakeLists.txt (it holds the grav1synth rev) so the
+    # registry snapshot refreshes on dep bumps; the old static key could
+    # never refresh because actions/cache entries are immutable.
+    - name: Cache cargo registry & git
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: cargo-macos-arm64-${{ hashFiles('CMakeLists.txt') }}
+        restore-keys: cargo-macos-arm64-
+
+    # Exact-key only (no restore-keys): restoring a stale deps tree makes
+    # ExternalProject run git update in place, which can fail to unstash
+    # local changes when a pinned ref moves.
+    - name: Cache ExternalProject builds
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ inputs.deps-path }}
+        key: ${{ inputs.deps-cache-key }}
+
+    - name: Install cargo-c
+      shell: bash
+      run: cargo install cargo-c
+
+    - name: Cache test media
+      if: inputs.test-media == 'true'
+      id: bbb-cache
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: bbb.mp4.zip
+        key: bbb-sunflower-1080p-30fps
+
+    - name: Download test media
+      if: inputs.test-media == 'true' && steps.bbb-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        curl -L -o bbb.mp4.zip \
+          "https://download.blender.org/demo/movies/BBB/bbb_sunflower_1080p_30fps_normal.mp4.zip"
+
+    - name: Prepare test media
+      if: inputs.test-media == 'true'
+      shell: bash
+      run: |
+        unzip -o bbb.mp4.zip
+        ffmpeg -y -ss 0 -t 5 -i bbb_sunflower_1080p_30fps_normal.mp4 \
+          -c copy sample.mp4
