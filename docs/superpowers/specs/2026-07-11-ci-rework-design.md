@@ -1,7 +1,7 @@
 # CI Rework Design
 
 **Date:** 2026-07-11
-**Status:** Approved by Joel (design review in session)
+**Status:** Approved by Joel (design review in session); implementation started 2026-07-11 (workflows live as of fee64ed)
 **Replaces:** `.github/workflows/build.yml` (single-file CI, 419 lines, 7 jobs)
 
 ## Context and goals
