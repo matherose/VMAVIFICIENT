@@ -69,7 +69,6 @@ jobs:
         with:
           path: build/deps
           key: cmake-deps-macos-arm64-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: cmake-deps-macos-arm64-
 
       - name: Install cargo-c
         run: cargo install cargo-c
@@ -137,7 +136,6 @@ jobs:
         with:
           path: build/deps
           key: cmake-deps-macos-arm64-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: cmake-deps-macos-arm64-
 
       - name: Install cargo-c
         run: cargo install cargo-c
@@ -261,7 +259,6 @@ jobs:
         with:
           path: build-asan/deps
           key: cmake-deps-asan-macos-arm64-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: cmake-deps-asan-macos-arm64-
 
       - name: Install cargo-c
         run: cargo install cargo-c
@@ -340,12 +337,14 @@ jobs:
       # The big win: cache build/deps so FFmpeg, SVT-AV1, Tesseract et al.
       # don't get rebuilt from scratch on every release run. Keyed on
       # CMakeLists.txt so a dep version bump invalidates automatically.
+      # Exact-key only (no restore-keys): restoring a stale deps tree makes
+      # ExternalProject run git update in place, which can fail to unstash
+      # local changes when a pinned tag moves.
       - name: Cache ExternalProject builds
         uses: actions/cache@v4
         with:
           path: build/deps
           key: cmake-deps-static-macos-arm64-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: cmake-deps-static-macos-arm64-
 
       - name: Install cargo-c
         run: cargo install cargo-c
