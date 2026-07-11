@@ -92,7 +92,7 @@ Differences:
                  GOP layout, warnings). Composes with --quiet.
 --grain-only     Like --dry-run, plus dump every encoder knob the resolved
                  preset configures (grain mech, tune, ac-bias, filters, QMs).
-                 For sanity-checking what each tier actually does without a
+                 For sanity-checking what each preset actually does without a
                  full encode.
 --companion-hd   After the 4K encode, produce a second 1080p HDLight release
                  from the same REMUX source. Requires a 4K source. Audio and

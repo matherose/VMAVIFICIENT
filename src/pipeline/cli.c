@@ -50,7 +50,7 @@ void vmav_print_usage(const char *prog) {
                 "  --grain-only     Like --dry-run, plus dump every encoder knob the\n"
                 "                   resolved preset configures (grain mech, tune,\n"
                 "                   ac-bias, filters, QMs). For sanity-checking what\n"
-                "                   each tier actually does without a full encode.\n"
+                "                   each preset actually does without a full encode.\n"
                 "  --companion-hd   After the 4K encode, produce a second 1080p HDLight\n"
                 "                   release from the same REMUX source. Requires a 4K\n"
                 "                   source. Audio and subtitles are shared between both\n"
