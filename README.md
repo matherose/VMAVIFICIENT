@@ -7,7 +7,7 @@ Built for the scene-release workflow: automated naming, language tagging, crop d
 ## Features
 
 - **SVT-AV1-HDR encoding** — Uses the [svt-av1-hdr](https://github.com/juliobbv-p/svt-av1-hdr) fork (v4.1.0 "Chromedome") with full Dolby Vision RPU passthrough and HDR10+ dynamic metadata
-- **Flat tier-based bitrate** — No perceptual search; bitrates are pinned by tier × resolution × content type (see table below). Predictable wall-time, predictable output sizes.
+- **In-process CRF search** — Binary-searches CRF to hit a per-preset VMAF target (roughly 90–96 depending on preset) instead of pinning a flat bitrate; `--bitrate` can skip the search for a flat VBR encode, `--crf` can pin the CRF directly
 - **Dual grain mechanism** — `--noise` (synthetic overlay, zero overhead) for digital sources + animation; `--film-grain` (analyzed + denoised) for analog film sources where source grain has structure worth preserving
 - **Dolby Vision & HDR10+** — RPU extraction via [libdovi](https://github.com/quietvoid/dovi_tool), HDR10+ metadata via [libhdr10plus](https://github.com/quietvoid/hdr10plus_tool), full passthrough to AV1
 - **Opus audio** — Full VBR at 56 kbps/channel, compression level 10, multichannel mapping for 5.1 / 7.1
@@ -15,18 +15,19 @@ Built for the scene-release workflow: automated naming, language tagging, crop d
 - **OCR subtitle extraction** — PGS bitmap subtitles to SRT via Tesseract
 - **Scene-release naming** — TMDB lookup, language tagging (MULTi, VFF, VFQ, etc.), source detection, automated output naming
 
-## Bitrate tiers
+## Rate control
 
-| Resolution | Content | Bitrate (kbps) |
-|---|---|---|
-| **4K** (≥ 2160p) | Live-action grainy | 4000 |
-| | Live-action clean | 3500 |
-| | Animation | 3000 |
-| **HD** (< 2160p) | Live-action grainy | 2500 |
-| | Live-action clean | 2000 |
-| | Animation | 1500 |
+By default, vmavificient runs an in-process CRF search that binary-searches
+CRF until the encode's measured VMAF hits the per-preset target (roughly
+90–96 depending on preset). This replaces perceptual guesswork with a direct
+quality target, at the cost of a probe encode or two before the final pass.
 
-The "grainy" branch fires when the measured `grain_score >= 0.08`. Animation always uses the clean tier minus 500 kbps (no real grain to budget for). Override with `--bitrate <kbps>` if you want a specific value.
+- `--bitrate <kbps>` skips the CRF search entirely and encodes VBR at a flat
+  bitrate you choose.
+- `--crf <N>` skips the search and pins the CRF directly (1–63, lower =
+  higher quality).
+- `--vmaf-target <N>` overrides the per-preset VMAF target used by the CRF
+  search (1–100).
 
 ## Grain handling
 
@@ -65,27 +66,59 @@ Differences:
 
 ```
 --tmdb <id>      TMDB movie ID for naming (requires TMDB_API_KEY)
---tv             TV mode: --tmdb <id> is a TMDB series ID (tmdb.org/tv/<id>)
---season <N>     Season number (with --tv; else parsed from filename, then prompted)
---episode <N>    Episode number (with --tv; else parsed from filename, then prompted)
---blind          Skip TMDB; name output as <input-stem>.mkv
---bitrate <kbps> Override target video bitrate (skips tier table)
+--tv             TV mode: --tmdb <id> is a TMDB series ID (themoviedb.org/tv/<id>).
+                 Output is named Show.SxxEyy.Episode.Title.<...> — no year.
+--mv             Movie mode (the default; explicit form)
+--season <N>     Season number (with --tv; overrides filename parsing,
+                 prompts if still unknown)
+--episode <N>    Episode number (with --tv; same resolution order as --season)
+--blind          Skip TMDB lookup; name output as <input-stem>.mkv
+                 (no config required)
+--config         Run interactive setup once; writes
+                 $HOME/.config/vmavificient/config.ini with the TMDB API key
+                 and release group. Subsequent runs read it automatically.
+--crf <N>        Skip CRF search; encode at this CRF directly
+                 (1–63, lower = higher quality)
+--vmaf-target <N> Override the VMAF target for CRF search
+                 (default: per-preset, 90–96)
+--bitrate <kbps> Skip CRF search; encode VBR at this bitrate
 --srt <path>     Additional SRT subtitle file (can be repeated)
 
---dry-run        Run analysis + naming, print encoding plan, exit. No files written.
---grain-only     Like --dry-run, plus dump every encoder knob the resolved
-                 preset configures (grain mech, tune, ac-bias, filters, QMs).
-                 For sanity-checking what each tier actually does.
---quiet          Compact output — only stage status lines + Plan + Done blocks
+--dry-run        Run analysis + CRF search + naming, print the encoding plan,
+                 then exit. No files written.
+--quiet          Compact output: hide informational sections, keep only
+                 stage status lines + the Plan / Done blocks.
 --verbose        Forward SVT-AV1 encoder log messages to stderr (rate control,
                  GOP layout, warnings). Composes with --quiet.
+--grain-only     Like --dry-run, plus dump every encoder knob the resolved
+                 preset configures (grain mech, tune, ac-bias, filters, QMs).
+                 For sanity-checking what each tier actually does without a
+                 full encode.
+--companion-hd   After the 4K encode, produce a second 1080p HDLight release
+                 from the same REMUX source. Requires a 4K source. Audio and
+                 subtitles are shared between both outputs. Dolby Vision is
+                 stripped from the HD output.
+--scale-to-hd    Produce only a 1080p HDLight release (no 4K output).
+                 Requires a 4K source. Full independent pipeline. Mutually
+                 exclusive with --companion-hd.
+--cache-dir <path>
+                 Use specified directory for intermediate files (grain
+                 analysis, CRF search results, extracted audio/subtitles).
+                 Cache is deleted after successful encode. Defaults to a
+                 hidden .vmavificient-cache folder in the project root.
 
 --help           Show the full flag list (incl. all language + source tags)
 ```
 
+Running with no input file (and no `--help`/`--config`) prints this usage text and exits 1.
+
 Honors `NO_COLOR=1` to disable ANSI colors. Honors `VMAV_KEEP_GRAIN_TMP=1` to retain per-window grain analysis scratch files for inspection.
 
 ## Architecture
+
+The `pipeline` module drives the stages below in order, with resumable state
+persisted to `<cache-dir>/state.json` so an interrupted run can pick back up
+without redoing finished stages.
 
 ```
 Source MKV/REMUX
@@ -93,27 +126,37 @@ Source MKV/REMUX
        v
   [media_info]     Validate, extract resolution/fps/duration
   [media_hdr]      Detect DV profile, HDR10+, PQ transfer
-  [media_crop]     Cropdetect via FFmpeg filter
-  [media_analysis] Grain score analysis (per-window via grav1synth diff)
        |
        v
+  [media_crop]     Crop detect — cropdetect via FFmpeg filter
+       |
+       v
+  [media_analysis] Grain analysis — per-window grain score via grav1synth diff
   [encode_preset]  Resolve preset by quality type + resolution
-                   Compute target bitrate from tier × grain_score × content
                    Compute grain synth level from grain_score
        |
        v
-  [video_encode]   SVT-AV1-HDR 4.1.0 encode (VBR, preset 4, 10-bit)
-       |            + DV RPU injection per-frame
-       |            + grain mechanism (--noise or --film-grain)
+  [crf_search]     CRF search — binary-search CRF against the per-preset
+                   VMAF target (skipped by --bitrate or --crf)
+       |
        v
-  [audio_encode]   Opus encode per audio track
-  [subtitle_conv]  PGS -> SRT via Tesseract OCR
+  [audio_encode]   Audio encode — Opus per audio track
+       |
+       v
+  [subtitle_conv]  Subtitles — PGS -> SRT via Tesseract OCR
   [rpu_extract]    DV RPU extraction for AV1 injection
        |
        v
-  [final_mux]      FFmpeg remux to final MKV
+  [video_encode]   Video encode — SVT-AV1-HDR 4.1.0 (preset 4, 10-bit)
+       |            + DV RPU injection per-frame
+       |            + grain mechanism (--noise or --film-grain)
+       v
+  [final_mux]      Mux — FFmpeg remux to final MKV
   [media_naming]   TMDB + scene naming conventions
 ```
+
+`tmdb` (naming/lookup) and `pipeline` (stage orchestration, state.json
+resume) sit alongside these stages rather than in the linear flow above.
 
 ## Dependencies
 
@@ -193,10 +236,13 @@ Adds `-fsanitize=address,undefined` for catching memory / UB bugs locally. Used 
 # Same, but also dump every encoder knob the preset configures
 ./build/vmavificient --blind --grain-only input.mkv
 
-# Override bitrate
+# Skip the CRF search, encode VBR at a flat bitrate
 ./build/vmavificient --blind --bitrate 5000 input.mkv
 
-# Animation content (uses 1500/3000 kbps tier)
+# Skip the CRF search, pin CRF directly
+./build/vmavificient --blind --crf 24 input.mkv
+
+# Animation content
 ./build/vmavificient --animation --blind input.mkv
 
 # 35mm film source (uses tune 5 + --film-grain)
