@@ -1,0 +1,7 @@
+paths:
+  .github/workflows/**/*.yml:
+    ignore:
+      # SC2046 (unquoted $(...)) — the word splitting is intentional in
+      # every occurrence here: file lists fed to clang-format/clang-tidy
+      # and -j$(sysctl -n hw.ncpu).
+      - 'shellcheck reported issue in this script: SC2046:.*'

@@ -1,0 +1,164 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['docs/**', '**.md']
+  pull_request:
+    branches: [main]
+    paths-ignore: ['docs/**', '**.md']
+
+# Superseded runs on the same ref are wasted macOS minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Lint: format + workflow files ─────────────────────────────────
+  # Cheap, runs on a tiny ubuntu image; fails fast on style drift so we
+  # don't waste 30 minutes of macOS time before noticing.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      # Pin to a specific clang-format version. The unversioned package
+      # tracks the distro default and shifts under our feet when the
+      # runner image updates; pinning keeps the gate stable so a green
+      # local run stays green in CI.
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format-18
+
+      - name: Check formatting
+        run: |
+          clang-format-18 --dry-run -Werror \
+            $(find src include -name "*.c" -o -name "*.h")
+
+      # Download script referenced by commit (not tag) and version passed
+      # explicitly, so neither can move underneath us.
+      - name: Install actionlint
+        run: |
+          bash <(curl -sSfL "https://raw.githubusercontent.com/rhysd/actionlint/a443f344ff32813837fa49f7aa6cbc478d770e62/scripts/download-actionlint.bash") 1.7.9
+
+      - name: Lint workflows
+        run: ./actionlint -color
+
+  # ── Build + test (system deps) ─────────────────────────────────────
+  # Verifies the recommended build path (VMAV_USE_SYSTEM_DEPS=ON, the
+  # default since v1.1.0). Absorbs the old clang-tidy job (reuses this
+  # build's compile_commands.json instead of building twice) and the old
+  # encode-test job (runs the installed binary in-place instead of
+  # round-tripping an artifact).
+  build-test:
+    runs-on: macos-14
+    timeout-minutes: 90
+    needs: lint
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: ./.github/actions/setup-build
+        with:
+          mode: system
+          deps-path: build/deps
+          deps-cache-key: cmake-deps-macos-arm64-${{ hashFiles('CMakeLists.txt') }}
+          test-media: 'true'
+
+      - name: Configure (system deps, compile commands)
+        run: |
+          cmake -G Ninja -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
+            -DVMAV_GRAV1SYNTH_BIN_RUNTIME=grav1synth
+
+      - name: Build
+        run: cmake --build build -j$(sysctl -n hw.ncpu)
+
+      - name: Run unit tests
+        run: ./build/vmav_tests
+
+      - name: Verify version banner
+        run: ./build/vmavificient --help | head -1
+
+      # Zero-findings policy (.clang-tidy, WarningsAsErrors) enforced over
+      # the whole tree — pre-commit only checks changed files.
+      # run-clang-tidy resolves the clang-tidy binary via $PATH, not
+      # relative to itself, and brew keeps llvm/bin off PATH — pass it
+      # explicitly or the wrapper dies with "failed to find clang-tidy".
+      - name: Run clang-tidy
+        run: |
+          LLVM="$(brew --prefix llvm)"
+          "$LLVM/bin/run-clang-tidy" \
+            -clang-tidy-binary "$LLVM/bin/clang-tidy" \
+            -p build -quiet \
+            $(find src -name '*.c')
+
+      # Install to a prefix and run from there: verifies the packaging
+      # path works — binary + grav1synth side-by-side in bin/.
+      - name: Install (packaging check)
+        run: |
+          cmake --install build --prefix "$GITHUB_WORKSPACE/dist"
+          chmod +x "$GITHUB_WORKSPACE/dist/bin/vmavificient"
+
+      # Still a smoke test, not a quality gate.
+      - name: Smoke encode (installed binary)
+        timeout-minutes: 15
+        run: |
+          PATH="$GITHUB_WORKSPACE/dist/bin:$PATH" \
+            dist/bin/vmavificient --blind --bitrate 2000 sample.mp4
+
+      - name: Verify output
+        run: |
+          OUTPUT=$(ls -1 *.mkv 2>/dev/null | head -1)
+          [ -n "$OUTPUT" ] || { echo "::error::no MKV produced"; exit 1; }
+          echo "Output: $OUTPUT ($(du -h "$OUTPUT" | cut -f1))"
+
+  # ── Sanitizer build (ASAN/UBSAN, vendored) ─────────────────────────
+  sanitizer:
+    runs-on: macos-14
+    timeout-minutes: 120
+    needs: lint
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - uses: ./.github/actions/setup-build
+        with:
+          mode: vendored
+          deps-path: build-asan/deps
+          deps-cache-key: cmake-deps-asan-macos-arm64-${{ hashFiles('CMakeLists.txt') }}
+          test-media: 'true'
+
+      - name: Configure (sanitizer + vendored)
+        run: |
+          cmake -G Ninja -B build-asan \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DVMAV_USE_SYSTEM_DEPS=OFF \
+            -DVMAV_SANITIZE=ON
+
+      - name: Build (sanitizer)
+        run: cmake --build build-asan -j$(sysctl -n hw.ncpu)
+
+      - name: Run unit tests (sanitizer)
+        env:
+          ASAN_OPTIONS: halt_on_error=1:detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ./build-asan/vmav_tests
+
+      # ASAN_OPTIONS=halt_on_error=1 so a single bad access fails CI loud.
+      # detect_leaks=0 because libdovi/libhdr10plus's Rust runtime hangs
+      # on tiny static allocations the loader doesn't reclaim — false
+      # positives, not real leaks.
+      - name: Test encode (sanitizer)
+        env:
+          ASAN_OPTIONS: halt_on_error=1:detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ./build-asan/vmavificient --blind --bitrate 2000 sample.mp4
+        timeout-minutes: 30
+
+# Linux CI is deferred until the dep surface is in a stable distro most
+# users actually run (libdovi-dev only landed in Debian trixie / Ubuntu
+# 25.04+). When we revisit, mirror build-test on ubuntu-latest with
+# apt-installed -dev packages.
