@@ -112,8 +112,11 @@ tag-gated, so no artifact hand-off between jobs is needed):
 3. **Tag↔version guard** (kept verbatim): tag name must match
    `project(... VERSION ...)` in CMakeLists.txt — this guard exists because
    the CLI banner once shipped three releases reporting v1.2.0.
-4. Package `vmavificient-macos-arm64`, generate SHA256SUMS.
-5. Publish via `softprops/action-gh-release` (SHA-pinned) — this step only,
+4. Unit tests + banner check on the static binary — tags land on commits
+   already validated by ci.yml, but the release binary is a different
+   build (static, vendored), so it gets its own sanity pass.
+5. Package `vmavificient-macos-arm64`, generate SHA256SUMS.
+6. Publish via `softprops/action-gh-release` (SHA-pinned) — this step only,
    gated on `if: startsWith(github.ref, 'refs/tags/')`.
 
 ## Composite action: setup-build
