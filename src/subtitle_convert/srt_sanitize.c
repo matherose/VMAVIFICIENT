@@ -56,12 +56,18 @@ int srt_strip_font_tags_file(const char *path) {
     return -1;
   }
   long size = ftell(fp);
-  if (size < 0 || fseek(fp, 0, SEEK_SET) != 0) {
+  /* Cap at 64 MiB: an SRT track is a few hundred KB at most, and the bound
+     keeps the untrusted size from overflowing the +1 in the allocation
+     below (and the buf[size] terminator index with it). */
+  if (size < 0 || size > 64L * 1024 * 1024 || fseek(fp, 0, SEEK_SET) != 0) {
     (void)fclose(fp);
     return -1;
   }
 
-  char *buf = malloc((size_t)size + 1);
+  /* calloc: the zero-fill doubles as the NUL terminator after the fread
+     bytes, avoiding an indexed store with the file-derived size (which the
+     clang static analyzer treats as a tainted index). */
+  char *buf = calloc((size_t)size + 1, 1);
   if (!buf) {
     (void)fclose(fp);
     return -1;
@@ -72,7 +78,6 @@ int srt_strip_font_tags_file(const char *path) {
     free(buf);
     return -1;
   }
-  buf[size] = '\0';
 
   size_t new_len = srt_strip_font_tags(buf);
   if (new_len == (size_t)size) {
