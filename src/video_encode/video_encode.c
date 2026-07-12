@@ -156,6 +156,30 @@ static void fmt_video_middle(char *out, size_t cap, int64_t frames_done, time_t 
   snprintf(out, cap, "%lld frames  %.1f fps", (long long)frames_done, fps);
 }
 
+/**
+ * @brief Offset plane pointers so sws_scale reads the crop window.
+ *
+ * Byte offsets must use the SOURCE format's per-plane sample step
+ * (desc->comp[].step: 1 for 8-bit planar, 2 for 10-bit planar, and already
+ * including UV interleaving on semi-planar layouts) — the encode target is
+ * always 10-bit, so using the target's bytes-per-sample here doubles the
+ * horizontal offset on 8-bit sources and shifts the picture.
+ */
+static void apply_crop_offset(const AVFrame *frame, enum AVPixelFormat pix_fmt, int crop_top,
+                              int crop_left, const uint8_t *src_data[4]) {
+  const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(pix_fmt);
+  int h_shift = desc->log2_chroma_w;
+  int v_shift = desc->log2_chroma_h;
+
+  src_data[0] = frame->data[0] + crop_top * frame->linesize[0] + crop_left * desc->comp[0].step;
+  if (frame->data[1])
+    src_data[1] = frame->data[1] + (crop_top >> v_shift) * frame->linesize[1] +
+                  (crop_left >> h_shift) * desc->comp[1].step;
+  if (frame->data[2])
+    src_data[2] = frame->data[2] + (crop_top >> v_shift) * frame->linesize[2] +
+                  (crop_left >> h_shift) * desc->comp[2].step;
+}
+
 /* ====================================================================== */
 /*  Main encode function                                                  */
 /* ====================================================================== */
@@ -537,29 +561,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
           src_linesize[p] = frame->linesize[p];
         }
 
-        if (need_crop && (crop_top || crop_left)) {
-          const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(dec_ctx->pix_fmt);
-          int h_shift = desc->log2_chroma_w;
-          int v_shift = desc->log2_chroma_h;
-          int is_semiplanar =
-              (desc->nb_components >= 2 && desc->comp[1].plane == desc->comp[2].plane);
-
-          src_data[0] =
-              frame->data[0] + crop_top * frame->linesize[0] + crop_left * bytes_per_sample;
-
-          if (is_semiplanar) {
-            if (frame->data[1])
-              src_data[1] = frame->data[1] + (crop_top >> v_shift) * frame->linesize[1] +
-                            (crop_left >> h_shift) * 2 * bytes_per_sample;
-          } else {
-            if (frame->data[1])
-              src_data[1] = frame->data[1] + (crop_top >> v_shift) * frame->linesize[1] +
-                            (crop_left >> h_shift) * bytes_per_sample;
-            if (frame->data[2])
-              src_data[2] = frame->data[2] + (crop_top >> v_shift) * frame->linesize[2] +
-                            (crop_left >> h_shift) * bytes_per_sample;
-          }
-        }
+        if (need_crop && (crop_top || crop_left))
+          apply_crop_offset(frame, dec_ctx->pix_fmt, crop_top, crop_left, src_data);
 
         sws_scale(sws_ctx, src_data, src_linesize, 0, out_h, cropped_frame->data,
                   cropped_frame->linesize);
@@ -704,27 +707,8 @@ VideoEncodeResult encode_video(const VideoEncodeConfig *config) {
         src_data[p] = frame->data[p];
         src_linesize[p] = frame->linesize[p];
       }
-      if (need_crop && (crop_top || crop_left)) {
-        const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(dec_ctx->pix_fmt);
-        int h_shift = desc->log2_chroma_w;
-        int v_shift = desc->log2_chroma_h;
-        int is_semiplanar =
-            (desc->nb_components >= 2 && desc->comp[1].plane == desc->comp[2].plane);
-
-        src_data[0] = frame->data[0] + crop_top * frame->linesize[0] + crop_left * bytes_per_sample;
-        if (is_semiplanar) {
-          if (frame->data[1])
-            src_data[1] = frame->data[1] + (crop_top >> v_shift) * frame->linesize[1] +
-                          (crop_left >> h_shift) * 2 * bytes_per_sample;
-        } else {
-          if (frame->data[1])
-            src_data[1] = frame->data[1] + (crop_top >> v_shift) * frame->linesize[1] +
-                          (crop_left >> h_shift) * bytes_per_sample;
-          if (frame->data[2])
-            src_data[2] = frame->data[2] + (crop_top >> v_shift) * frame->linesize[2] +
-                          (crop_left >> h_shift) * bytes_per_sample;
-        }
-      }
+      if (need_crop && (crop_top || crop_left))
+        apply_crop_offset(frame, dec_ctx->pix_fmt, crop_top, crop_left, src_data);
       sws_scale(sws_ctx, src_data, src_linesize, 0, out_h, cropped_frame->data,
                 cropped_frame->linesize);
     }
