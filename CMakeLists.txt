@@ -985,6 +985,7 @@ add_executable(vmavificient
     src/pipeline/stage_subs.c
     src/pipeline/encode_pass.c
     src/rpu_extract/rpu_extract.c
+    src/subtitle_convert/srt_sanitize.c
     src/subtitle_convert/subtitle_convert.c
     src/tmdb/tmdb.c
     src/ui/ui.c
@@ -1138,7 +1139,9 @@ endif()
 # ---------------------------------------------------------------------------
 add_executable(vmav_tests
     tests/test_media_naming.c
+    tests/test_srt_sanitize.c
     src/media_naming/media_naming.c
+    src/subtitle_convert/srt_sanitize.c
 )
 target_include_directories(vmav_tests PRIVATE
     "${CMAKE_SOURCE_DIR}/include/vmavificient"

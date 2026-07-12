@@ -11,6 +11,7 @@
 #include "media_tracks.h"
 #include "pipeline.h"
 #include "proc.h"
+#include "srt_sanitize.h"
 #include "subtitle_convert.h"
 #include "ui.h"
 
@@ -103,6 +104,13 @@ StageStatus stage_subs(PipelineCtx *ctx) {
           struct stat srt_out_st;
           if (exit_code == 0 && stat(ctx->srt_paths[ctx->srt_count], &srt_out_st) == 0 &&
               srt_out_st.st_size > 0) {
+            /* ffmpeg's ASS→SRT conversion keeps font face/size overrides as
+               <font> tags sized in ASS script pixels; SRT renderers read
+               size= as points and draw giant text. Source SRT tracks
+               (codec_arg "copy") are left as authored. */
+            if (strcmp(codec_arg, "srt") == 0 &&
+                srt_strip_font_tags_file(ctx->srt_paths[ctx->srt_count]) != 0)
+              ui_hint("could not strip <font> tags from converted SRT");
             ui_stage_ok(srt_fname, NULL);
             ctx->srt_count++;
           } else if (exit_code == 0) {

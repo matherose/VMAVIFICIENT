@@ -8,6 +8,7 @@
 
 #include "config.h"
 #include "media_naming.h"
+#include "test_suites.h"
 
 /* Stub: media_naming.c calls config_get() for the release group; the real
    implementation reads config.ini, which tests must not depend on. */
@@ -20,21 +21,21 @@ const VmavConfig *config_get(void) {
 
 static int failures = 0;
 
-#define CHECK(cond)                                                                                \
-  do {                                                                                             \
-    if (!(cond)) {                                                                                 \
-      fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                              \
-      failures++;                                                                                  \
-    }                                                                                              \
+#define CHECK(cond)                                                   \
+  do {                                                                \
+    if (!(cond)) {                                                    \
+      fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+      failures++;                                                     \
+    }                                                                 \
   } while (0)
 
-#define CHECK_STR(actual, expected)                                                                \
-  do {                                                                                             \
-    if (strcmp((actual), (expected)) != 0) {                                                       \
-      fprintf(stderr, "FAIL %s:%d:\n  got:  \"%s\"\n  want: \"%s\"\n", __FILE__, __LINE__,         \
-              (actual), (expected));                                                               \
-      failures++;                                                                                  \
-    }                                                                                              \
+#define CHECK_STR(actual, expected)                                                        \
+  do {                                                                                     \
+    if (strcmp((actual), (expected)) != 0) {                                               \
+      fprintf(stderr, "FAIL %s:%d:\n  got:  \"%s\"\n  want: \"%s\"\n", __FILE__, __LINE__, \
+              (actual), (expected));                                                       \
+      failures++;                                                                          \
+    }                                                                                      \
   } while (0)
 
 static void test_parse_season_episode(void) {
@@ -114,6 +115,7 @@ int main(void) {
   test_parse_season_episode();
   test_build_output_filename_movie();
   test_build_output_filename_tv();
+  failures += test_srt_sanitize_suite();
   if (failures) {
     fprintf(stderr, "%d failure(s)\n", failures);
     return 1;
